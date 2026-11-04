@@ -4,7 +4,7 @@
     "net10.0-windows7.0": {
       "Groundwork.Core": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.20261104215832.1, )",
+        "requested": "[0.1.0-dev.20261104215832.1, 0.1.0-dev.20261104215832.1]",
         "resolved": "0.1.0-dev.20261104215832.1",
         "contentHash": "f8Ge65VyxWIES/v9eVKxW/ORsCBY/IfNhfCZee1uu2lU+AB4faHgjmWtQmL6SHIEFZoCCxdo6shuRZtSFskj3Q=="
       }
