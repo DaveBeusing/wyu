@@ -72,6 +72,11 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Fresh-cache locked WYU restore failed.' }
         & dotnet build 'WorldsYetUnseen.slnx' -c Release --no-restore
         if ($LASTEXITCODE -ne 0) { throw 'WYU Release build failed.' }
+        # Exercise the B00-owned bootstrap verifier against this verified, isolated feed.
+        # This checks the solution graph, exact pin, committed lockfile, tracked artifacts,
+        # and repeats the Windows locked restore and Release build.
+        & ./scripts/Verify-Bootstrap.ps1
+        if ($LASTEXITCODE -ne 0) { throw 'WYU bootstrap verification failed.' }
         Write-Host "PASS: WYU consumed verified Groundwork.Core $ExpectedVersion from isolated CI artifact."
         $global:LASTEXITCODE = 0
     } finally { Pop-Location }
