@@ -23,19 +23,24 @@ lock against the **exact** candidate version. After these checks, it copies
 only Groundwork.Core into a temporary external feed, clears the NuGet cache,
 runs locked restore and a Windows Release build.
 
-## Expected current result: blocked until pin migration
+## Verified CI package pin and reproducibility
 
-As of this draft, WYU **intentionally still pins**
-0.1.0-dev.20261104215832.1 with a lock generated from a separately built local
-package. This is different from the candidate CI artifact and **must not**
-silently succeed. The workflow should fail closed at the version check.
+The repository owner approved pin migration to
+`0.1.0-dev.41920122570.1`. The actual NuGet lock file was regenerated on
+a Windows runner from the downloaded, SHA-256-checked package bytes and then
+committed. The temporary lock-generation CI step was removed; subsequent runs
+only verify the committed immutable pin and lock.
 
-An owner must select and approve the desired Groundwork package, preserve
-its reproducible artifact before the 90-day CI-artifact retention expiry, and
-regenerate/commit the genuine SDK-generated packages.lock.json from the
-chosen verified bytes on Windows. Never hand-edit NuGet contentHash values.
-A green workflow is not an implicit release approval. PR build provenance is
-still not the same as a protected release attestation.
+[WYU Windows CI run #41922561240](https://github.com/DaveBeusing/wyu/actions/runs/41922561240)
+completed successfully after download, manifest verification and clean-cache
+locked restore/build. Its success proves CI consumption of this particular
+candidate, not runtime/game functionality.
+
+The Groundwork package is still held in an ordinary CI artifact with requested
+90-day retention, not a durable release archive. Before expiry, promote this
+exact package and its reviewed manifest to approved durable storage or deliberately
+move WYU to a newly verified and retained package. Never rewrite NuGet contentHash
+values. A PR-build workflow run is not a protected signed release attestation.
 
 The current check does not establish actual Windows engine lifecycle behavior,
 nor does it complete WYU L6 runtime composition. Recheck GitHub repository
