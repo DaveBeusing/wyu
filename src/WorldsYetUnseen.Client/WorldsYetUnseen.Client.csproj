@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>WorldsYetUnseen.Client</AssemblyName>
+    <RootNamespace>WorldsYetUnseen.Client</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="WorkPackage" Value="WP01-L6" />
+  </ItemGroup>
+</Project>
