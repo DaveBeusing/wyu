@@ -33,18 +33,17 @@ or implicit package source fallback. Package source mapping ensures
 Groundwork.* names select only the validated local feed; nuget.org is
 restricted to approved other packages. No GitHub Packages feed is assumed.
 
-At bootstrap there is no trusted, built Groundwork nupkg or signed-off
-version/manifest, so the host intentionally declares NO Groundwork package
-references yet. Do not invent an approved prerelease coordinate or a
-NuGet contentHash. After Groundwork B00 produces a real package and L4
-supplies independently trusted source/manifest SHA-256 verification, WYU
-L6 must:
-1. Choose and record an exact package ID/version approved for consumption.
-2. Verify and stage package bytes to GROUNDWORK_NUGET_FEED outside the worktree.
-3. Add explicit version-pinned Groundwork PackageReference dependencies.
-4. Run a fresh-cache restore and commit SDK-generated packages.lock.json.
-5. Require dotnet restore --locked-mode in CI and negative-test missing,
-   modified or wrong-version packages and stale locks.
+The owner approved Groundwork.Core `0.1.0-dev.41920122570.1`, an immutable
+candidate produced by successful Groundwork CI run `41920122570`.
+WYU pins this full version in its PackageReference and commits the actual
+NuGet-generated `packages.lock.json` from the verified CI package bytes.
+Use `dotnet restore --locked-mode` and a fresh cache; do not invent NuGet
+content hashes. `scripts/Verify-Bootstrap.ps1` checks this exact pin and lock
+against the configured external feed but does not authenticate that feed.
+The independent provenance-and-download gate is implemented separately in
+WYU L6 PR #3; the original Actions artifact must be durably preserved before
+its ordinary retention expires. A clean checkout without that package will
+fail closed, not silently switch to another version.
 
 Root source SemVer is independently 0.1.0; packaging uses unique
 0.1.0-dev.<run-id>.<attempt> prereleases without per-commit source bumps.
@@ -54,8 +53,9 @@ L4 and release work own actual retention/publishing automation.
 
 No software license is implied by a public repository. Third-party
 licenses and vulnerabilities need review before dependency adoption.
-This draft does not claim that trust verification, a package pin, lock,
-CI workflow, Windows smoke test, or playable host has been delivered.
+This bootstrap includes a real pinned package and NuGet lock, while the separate
+L6 PR handles independent CI artifact verification. No playable host or runtime
+startup/shutdown test has been delivered.
 
 ## Ownership
 
