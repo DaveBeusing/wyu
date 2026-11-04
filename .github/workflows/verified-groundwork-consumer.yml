@@ -53,6 +53,36 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Groundwork package artifact is unavailable or expired.' }
           "GROUNDWORK_ARTIFACT_DIR=$artifactDir" >> $env:GITHUB_ENV
 
+      - name: Bootstrap NuGet-generated lockfile evidence (temporary)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Join-Path $env:GROUNDWORK_ARTIFACT_DIR 'manifest.json'
+          if ((Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash -ine $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256) { throw 'Manifest digest mismatch.' }
+          $record = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+          $ids = @('Groundwork.Core','Groundwork.Platform.Windows','Groundwork.Simulation','Groundwork.Ecs','Groundwork.Jobs','Groundwork.Diagnostics')
+          $entries = @($record.packages)
+          if ($entries.Count -ne 6) { throw 'Invalid manifest package count.' }
+          foreach ($id in $ids) {
+            $entry = @($entries | Where-Object { $_.packageId -ceq $id })
+            if ($entry.Count -ne 1 -or $entry[0].packageVersion -cne $env:GROUNDWORK_EXPECTED_VERSION) { throw 'Package identity/version mismatch.' }
+            $name = "$id.$env:GROUNDWORK_EXPECTED_VERSION.nupkg"
+            if ($entry[0].filename -cne $name) { throw 'Wrong filename.' }
+            $file = Join-Path $env:GROUNDWORK_ARTIFACT_DIR $name
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw 'Missing package.' }
+            if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ine $entry[0].sha256) { throw 'Package SHA256 mismatch.' }
+            if ((Get-Item -LiteralPath $file).Length -ne $entry[0].sizeBytes) { throw 'Package size mismatch.' }
+          }
+          $feed = Join-Path $env:RUNNER_TEMP 'groundwork-lock-feed'
+          $cache = Join-Path $env:RUNNER_TEMP 'groundwork-lock-cache'
+          New-Item -ItemType Directory -Force -Path $feed,$cache | Out-Null
+          Copy-Item -LiteralPath (Join-Path $env:GROUNDWORK_ARTIFACT_DIR "Groundwork.Core.$env:GROUNDWORK_EXPECTED_VERSION.nupkg") -Destination $feed
+          $env:GROUNDWORK_NUGET_FEED = $feed
+          $env:NUGET_PACKAGES = $cache
+          dotnet restore WorldsYetUnseen.slnx --configfile NuGet.Config --force-evaluate -p:RestoreLockedMode=false
+          if ($LASTEXITCODE -ne 0) { throw 'Lock generation restore failed.' }
+          $file = 'src/WorldsYetUnseen.Client/packages.lock.json'
+          $raw = [System.IO.File]::ReadAllBytes((Resolve-Path $file).Path)
+          Write-Host ('LOCKFILE_BASE64:' + [Convert]::ToBase64String($raw))
       - name: Validate manifest and locked WYU consumer
         run: |
           $ErrorActionPreference = 'Stop'
