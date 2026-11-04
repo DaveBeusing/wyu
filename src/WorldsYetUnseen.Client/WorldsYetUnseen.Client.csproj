@@ -8,7 +8,7 @@
     <AssemblyMetadata Include="WorkPackage" Value="WP01-L6" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Groundwork.Core" Version="[0.1.0-dev.20261104215832.1]" />
+    <PackageReference Include="Groundwork.Core" Version="[0.1.0-dev.41920122570.1]" />
   </ItemGroup>
 </Project>
 
