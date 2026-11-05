@@ -1,0 +1,108 @@
+name: WYU verified Groundwork consumer
+
+on:
+  pull_request:
+    branches:
+      - master
+      - build/wp01-b00-bootstrap
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verified-groundwork-consumer:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GROUNDWORK_RUN_ID: '41920122570'
+      GROUNDWORK_RUN_ATTEMPT: '1'
+      GROUNDWORK_EXPECTED_HEAD_SHA: '6930d66d383fb26427cf927115efe5cf9fc9b74b'
+      GROUNDWORK_EXPECTED_MANIFEST_SHA256: 'E07D23C78F922E8EBB193E03E5B7F5C2A8FDD4EF50C081B914B183D4017296F9'
+      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.41920122570.1'
+      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.41920122570.1-immutable'
+      GROUNDWORK_ARCHIVE_RECORD_SHA256: '8D6F79929EA159A146DB537B2344C561A1A1FAF0CD07376F291B8AAB121CB92E'
+      GROUNDWORK_LICENSE_SHA256: 'B1D2870F1A00E4D7F56576E5F0870CBA109E041F8AF66866CF5B499478E654E7'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout WYU only
+        uses: actions/checkout@v4
+
+      - name: Set up Windows .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Validate Groundwork CI run identity
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $run = gh api "repos/DaveBeusing/Groundwork/actions/runs/$env:GROUNDWORK_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $null -eq $run) { throw 'Groundwork run unavailable.' }
+          if ([string]$run.id -ne $env:GROUNDWORK_RUN_ID -or [string]$run.run_attempt -ne $env:GROUNDWORK_RUN_ATTEMPT) { throw 'Run attempt mismatch.' }
+          if ($run.status -ne 'completed' -or $run.conclusion -ne 'success') { throw 'Producer CI did not pass.' }
+          if ($run.head_sha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $run.head_branch -ne 'build/wp01-l4-package-integrity') { throw 'Producer head is not approved.' }
+          if ($run.name -ne 'Groundwork Windows CI' -or $run.event -ne 'pull_request') { throw 'Unapproved producing workflow.' }
+          Write-Host 'PASS: independently pinned Groundwork CI run identity.'
+
+      - name: Verify durable Groundwork release metadata
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = gh api "repos/DaveBeusing/Groundwork/releases/tags/$env:GROUNDWORK_RELEASE_TAG" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $null -eq $release) { throw 'Pinned Groundwork release archive is unavailable.' }
+          if ($release.draft -or (-not $release.prerelease) -or $release.tag_name -cne $env:GROUNDWORK_RELEASE_TAG) { throw 'Unexpected release identity.' }
+          if ([string]$release.target_commitish -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA) { throw 'Unexpected archived commit.' }
+          $assets = @($release.assets)
+          $names = @('manifest.json','archive-record.json','LICENSE')
+          $modules = @('Core','Diagnostics','Ecs','Jobs','Platform.Windows','Simulation')
+          $names += @($modules | ForEach-Object { "Groundwork.$_.$env:GROUNDWORK_EXPECTED_VERSION.nupkg" })
+          if ($assets.Count -ne 9) { throw 'Unexpected archived asset count.' }
+          foreach ($name in $names) {
+            if (@($assets | Where-Object { $_.name -ceq $name -and $_.state -eq 'uploaded' }).Count -ne 1) { throw "Missing or duplicate release asset: $name" }
+          }
+          foreach ($pair in @(
+            @{name='manifest.json';hash=$env:GROUNDWORK_EXPECTED_MANIFEST_SHA256},
+            @{name='archive-record.json';hash=$env:GROUNDWORK_ARCHIVE_RECORD_SHA256},
+            @{name='LICENSE';hash=$env:GROUNDWORK_LICENSE_SHA256}
+          )) {
+            $asset = @($assets | Where-Object { $_.name -ceq $pair.name })[0]
+            if ([string]$asset.digest -ine "sha256:$($pair.hash)") { throw "Unapproved release asset digest: $($pair.name)" }
+          }
+          if (-not $release.immutable) { throw 'Pinned release must be immutable.' }
+          Write-Host 'PASS: durable release identity and independently pinned archive metadata.'
+
+      - name: Download durable Groundwork release archive
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactDir = Join-Path $env:RUNNER_TEMP 'groundwork-release-archive'
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+          & gh release download $env:GROUNDWORK_RELEASE_TAG --repo DaveBeusing/Groundwork --dir $artifactDir
+          if ($LASTEXITCODE -ne 0) { throw 'Groundwork release archive cannot be downloaded.' }
+          "GROUNDWORK_ARTIFACT_DIR=$artifactDir" >> $env:GITHUB_ENV
+
+      - name: Validate manifest and locked WYU consumer
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Join-Path $env:GROUNDWORK_ARTIFACT_DIR 'manifest.json'
+          if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw 'Missing producer manifest.' }
+          $sha256 = (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash
+          if ($sha256 -ine $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256) { throw 'Untrusted manifest digest.' }
+          foreach ($pair in @(
+            @{name='archive-record.json';hash=$env:GROUNDWORK_ARCHIVE_RECORD_SHA256},
+            @{name='LICENSE';hash=$env:GROUNDWORK_LICENSE_SHA256}
+          )) {
+            $path = Join-Path $env:GROUNDWORK_ARTIFACT_DIR $pair.name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing archive record or license: $($pair.name)" }
+            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine $pair.hash) { throw "Modified release archive asset: $($pair.name)" }
+          }
+          $archive = Get-Content (Join-Path $env:GROUNDWORK_ARTIFACT_DIR 'archive-record.json') -Raw | ConvertFrom-Json
+          if ($archive.producerRunId -ne $env:GROUNDWORK_RUN_ID -or [string]$archive.producerRunAttempt -ne $env:GROUNDWORK_RUN_ATTEMPT -or $archive.producerHeadSha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $archive.packageVersion -cne $env:GROUNDWORK_EXPECTED_VERSION -or $archive.manifestSha256 -ine $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256) { throw 'Archive provenance record does not match pinned producer.' }
+          $record = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+          $commit = gh api "repos/DaveBeusing/Groundwork/commits/$($record.sourceCommit)" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $null -eq $commit) { throw 'Manifest source commit unavailable.' }
+          $parents = @($commit.parents | ForEach-Object { $_.sha })
+          if ($record.sourceCommit -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -and $parents -notcontains $env:GROUNDWORK_EXPECTED_HEAD_SHA) { throw 'Manifest source unrelated to approved run head.' }
+          & ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $env:GROUNDWORK_ARTIFACT_DIR -ExpectedManifestSha256 $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256 -ExpectedSourceCommit $record.sourceCommit -ExpectedVersion $env:GROUNDWORK_EXPECTED_VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'Verified consumer gate failed.' }
