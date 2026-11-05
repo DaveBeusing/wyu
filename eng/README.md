@@ -36,25 +36,30 @@ completed successfully after download, manifest verification and clean-cache
 locked restore/build. Its success proves CI consumption of this particular
 candidate, not runtime/game functionality.
 
-The exact package is now archived as GitHub prerelease
-[archive-groundwork-0.1.0-dev.41920122570.1](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.41920122570.1).
-Nine uploaded assets include six original immutable-version nupkg byte streams,
-the producer `manifest.json`, `archive-record.json` and Apache-2.0 `LICENSE`.
-The cross-repository CI workflow consumes these **release assets** instead of
-depending on the expiring original GitHub Actions artifact. It checks the
-selected release identity, all nine asset names, independently pinned SHA-256
-values for the manifest, archive record and license, source provenance, and
-every package SHA-256 against the trusted manifest before a fresh-cache locked
-restore and Windows build. A missing or altered asset fails closed.
+The exact package is now preserved in the public **immutable** GitHub prerelease
+[archive-groundwork-0.1.0-dev.41920122570.1-immutable](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.41920122570.1-immutable).
+The new archive has nine assets: the original six unmodified nupkg files,
+the original producer `manifest.json`, an archive-specific `archive-record.json`,
+and the Apache-2.0 `LICENSE`. The original mutable archive is retained for
+historical provenance, but is no longer WYU's CI dependency.
 
-**Remaining hardening:** The GitHub release API currently reports
-`immutable: false`. Enabling GitHub Release immutability/administrative
-protections is still required for full preservation controls. Until then,
-the pinned independent hashes detect changed package bytes but do not prevent
-an administrator from deleting or replacing assets. This is a public
-prerelease archive, not a signed protected production supply-chain attestation.
-The original CI-produced nupkg bytes predate the `PackageLicenseExpression`
-setting added after the build; the archive provides LICENSE separately.
+GitHub release metadata was independently checked and reports `immutable: true`.
+WYU CI **requires** that field and rejects a mutable replacement release.
+The workflow also verifies pinned release identity, nine asset names,
+the manifest SHA-256, the new archive-record SHA-256
+(`8D6F79929EA159A146DB537B2344C561A1A1FAF0CD07376F291B8AAB121CB92E`),
+the LICENSE digest, producer run and source provenance, and all six package
+hashes. Only after successful verification does it restore from an external,
+isolated package feed with a fresh cache, `--locked-mode`, and Release build.
+
+The Groundwork `PackageReference` remains exactly
+`[0.1.0-dev.41920122570.1]`, and the NuGet-generated `packages.lock.json`
+remains unchanged. Release immutability protects the published archive assets
+against normal modification or replacement within GitHub's supported controls;
+it is not an external signed software supply-chain attestation.
+The archived nupkg bytes were produced before the later
+`PackageLicenseExpression=Apache-2.0` setting; the archive includes LICENSE
+separately.
 
 The current check does not establish actual Windows engine lifecycle behavior,
 nor does it complete WYU L6 runtime composition. Recheck GitHub repository
