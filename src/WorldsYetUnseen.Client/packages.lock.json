@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0-windows7.0": {
+      "Groundwork.Core": {
+        "type": "Direct",
+        "requested": "[0.1.0-dev.41920122570.1, 0.1.0-dev.41920122570.1]",
+        "resolved": "0.1.0-dev.41920122570.1",
+        "contentHash": "c4vUlp9qYn0MELVMQHh9EyR6ykPzR9L6j255ZxUy2StNgJsorc7KQ+LJiXPdeYr9auJU7i5KOe5/p25W/k5Hug=="
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>WorldsYetUnseen.Client</AssemblyName>
+    <RootNamespace>WorldsYetUnseen.Client</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="WorkPackage" Value="WP01-L6" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Groundwork.Core" Version="[0.1.0-dev.41920122570.1]" />
+  </ItemGroup>
+</Project>
+
