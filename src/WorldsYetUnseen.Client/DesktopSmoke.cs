@@ -8,13 +8,13 @@ internal static class DesktopSmoke
 {
     internal static string WindowTitle { get; } = $"Worlds Yet Unseen D3D12 Smoke ({Environment.ProcessId})";
 
-    internal static void RequestNativeClose(in RendererSnapshot presented, bool terrain)
+    internal static void RequestNativeClose(in RendererSnapshot presented, string scene)
     {
         using var process = Process.GetCurrentProcess();
         if (!string.Equals(process.MainWindowTitle, WindowTitle, StringComparison.Ordinal) || !process.CloseMainWindow())
             throw new InvalidOperationException("Could not send native close to the WYU smoke window.");
 
-        Console.WriteLine($"D3D12 presented {(terrain ? "terrain" : "cube")} frame {presented.LastPresentedSequence} at " +
+        Console.WriteLine($"D3D12 presented {scene} frame {presented.LastPresentedSequence} at " +
             $"{presented.AppliedWidth}x{presented.AppliedHeight}; native close requested.");
     }
 
@@ -32,7 +32,7 @@ internal static class DesktopSmoke
             $"driver {adapter.DriverVersion ?? "unavailable"}; software={adapter.IsSoftware}.");
         Console.WriteLine($"D3D12 debug layer={diagnostics.DebugLayerEnabled}; DRED={diagnostics.DredEnabled}.");
         if (requireDebugLayer && (!diagnostics.DebugLayerEnabled || !diagnostics.DredEnabled))
-            throw new InvalidOperationException("The terrain smoke requires an active D3D12 debug layer and DRED.");
+            throw new InvalidOperationException("The selected smoke requires an active D3D12 debug layer and DRED.");
 
         if (diagnostics.DebugLayerEnabled)
         {

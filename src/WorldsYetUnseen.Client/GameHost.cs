@@ -9,7 +9,7 @@ using System.Runtime.ExceptionServices;
 
 namespace WorldsYetUnseen.Client;
 
-internal enum HostMode { Interactive, D3D12, D3D12Smoke, Terrain, TerrainSmoke, WindowSmoke, HeadlessSmoke, FaultSmoke }
+internal enum HostMode { Interactive, D3D12, D3D12Smoke, Terrain, TerrainSmoke, Walkable, WalkableSmoke, WindowSmoke, HeadlessSmoke, FaultSmoke }
 
 internal static class GameHost
 {
@@ -22,9 +22,11 @@ internal static class GameHost
         Diagnostics = RuntimeQuota.Diagnostics with { EmergencyRecords = 21, EmergencyBytes = 61440 },
     };
 
-    private static bool IsDesktopSmoke(HostMode mode) => mode is HostMode.D3D12Smoke or HostMode.TerrainSmoke;
+    private static bool IsDesktopSmoke(HostMode mode) => mode is HostMode.D3D12Smoke or HostMode.TerrainSmoke or HostMode.WalkableSmoke;
 
     private static bool IsTerrain(HostMode mode) => mode is HostMode.Terrain or HostMode.TerrainSmoke;
+
+    private static bool IsInteractive(HostMode mode) => mode is HostMode.Interactive or HostMode.D3D12 or HostMode.Terrain or HostMode.Walkable;
 
     internal static async Task RunAsync(HostMode mode, CancellationToken cancellationToken)
     {
@@ -41,6 +43,9 @@ internal static class GameHost
         WindowsHostModule? window = null;
         D3D12Renderer? renderer = null;
         TerrainScene? terrain = IsTerrain(mode) ? new TerrainScene() : null;
+        WalkableScene? walkable = mode is HostMode.Walkable or HostMode.WalkableSmoke
+            ? new WalkableScene(runtime.RuntimeOwnership)
+            : null;
         var stopReason = HostStopReason.StartupFault;
         Exception? failure = null;
         string? success = null;
@@ -61,26 +66,37 @@ internal static class GameHost
                 if ((mode == HostMode.WindowSmoke || IsDesktopSmoke(mode)) &&
                     window.Read() is not { Phase: HostWindowPhase.Open, ClientWidth: > 0, ClientHeight: > 0 })
                     throw new InvalidOperationException("The Windows host did not open a usable window.");
-                if (mode == HostMode.D3D12 || IsDesktopSmoke(mode) || terrain is not null)
+                if (mode == HostMode.D3D12 || IsDesktopSmoke(mode) || terrain is not null || walkable is not null)
                 {
                     var diagnostics = IsDesktopSmoke(mode)
                         ? new D3D12DiagnosticsOptions(EnableDebugLayer: true, EnableDred: true)
                         : default;
-                    renderer = terrain is not null
-                        ? D3D12Renderer.CreateWithMeshReplacement(window, runtime.RuntimeOwnership, terrain.CreateMeshes(), diagnostics)
-                        : new D3D12Renderer(diagnostics, window, runtime.RuntimeOwnership);
+                    if (walkable is not null)
+                    {
+                        var initial = await walkable.StartAsync(cancellationToken).ConfigureAwait(false);
+                        renderer = D3D12Renderer.CreateWithMeshRegionReplacement(window, runtime.RuntimeOwnership, initial, diagnostics);
+                    }
+                    else
+                    {
+                        renderer = terrain is not null
+                            ? D3D12Renderer.CreateWithMeshReplacement(window, runtime.RuntimeOwnership, terrain.CreateMeshes(), diagnostics)
+                            : new D3D12Renderer(diagnostics, window, runtime.RuntimeOwnership);
+                    }
                     await renderer.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
                     await renderer.StartAsync(cancellationToken).ConfigureAwait(false);
+                    if (walkable is not null)
+                        walkable.Attach(renderer.MeshRegionReplacement
+                            ?? throw new InvalidOperationException("The renderer did not expose its region port."));
                 }
             }
 
             stopReason = HostStopReason.RuntimeFault;
             IInputSource input = window is not null ? window : new SmokeInput();
-            success = await DriveAsync(mode, context, runtime, world, input, renderer, terrain, smokeClock, cancellationToken)
+            success = await DriveAsync(mode, context, runtime, world, input, renderer, terrain, walkable, smokeClock, cancellationToken)
                 .ConfigureAwait(false);
             stopReason = mode == HostMode.FaultSmoke ? HostStopReason.RuntimeFault : HostStopReason.ExternalCancellation;
         }
-        catch (OperationCanceledException) when ((mode is HostMode.Interactive or HostMode.D3D12 or HostMode.Terrain) &&
+        catch (OperationCanceledException) when (IsInteractive(mode) &&
             (cancellationToken.IsCancellationRequested || runtime.State.Read().Conditions == SafetyCondition.TerminalStop) &&
             runtime.Diagnostics.ReadEmergency().Primary is null)
         {
@@ -93,7 +109,7 @@ internal static class GameHost
 
         try
         {
-            await StopAsync(runtime, clock, renderer, window, world, storage, stopReason).ConfigureAwait(false);
+            await StopAsync(runtime, clock, renderer, window, world, storage, walkable, stopReason).ConfigureAwait(false);
         }
         catch (Exception cleanup) when (failure is not null)
         {
@@ -103,19 +119,23 @@ internal static class GameHost
         if (failure is not null)
             ExceptionDispatchInfo.Throw(failure);
         if (IsDesktopSmoke(mode))
-            DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: IsTerrain(mode));
+            DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: IsTerrain(mode) || mode == HostMode.WalkableSmoke);
         if (success is not null)
             Console.WriteLine(success);
     }
 
     private static async Task<string?> DriveAsync(HostMode mode, EngineModuleContext context, RuntimeSafetyAuthority runtime,
         EcsWorld world, IInputSource input, D3D12Renderer? renderer, TerrainScene? terrain,
-        SmokeClock? smokeClock, CancellationToken cancellationToken)
+        WalkableScene? walkable, SmokeClock? smokeClock, CancellationToken cancellationToken)
     {
         var injectedFault = mode == HostMode.FaultSmoke ? new InvalidOperationException("Controlled tick failure.") : null;
-        var pipeline = new WorldTickPipeline(world, injectedFault, terrain is not null);
+        var route = mode == HostMode.WalkableSmoke ? new WalkableRouteSmoke() : null;
+        var yaw = 0f;
+        ulong routeCompletionTick = 0;
+        var pipeline = new WorldTickPipeline(world, injectedFault, terrain is not null, walkable is null ? null : AdvanceWalkable);
         var simulation = new FixedStepSimulation(context, input, pipeline, world.Safety.State, runtime.SimulationWake);
-        var scene = renderer is null ? null : new SceneSubmission(renderer, terrain is not null);
+        var scene = renderer is null ? null : new SceneSubmission(renderer, terrain is not null,
+            walkable is null ? null : () => walkable.GetScene(route?.CameraYaw ?? yaw));
         var terrainSmoke = mode == HostMode.TerrainSmoke ? new TerrainEditSmoke() : null;
         var meshPort = renderer?.MeshReplacement;
         var edits = terrain is null ? null : new TerrainEdits(terrain,
@@ -144,12 +164,17 @@ internal static class GameHost
                         edits.Advance();
                     }
                     scene.Submit(context.Clock, iteration, pipeline.PublishedTick);
+                    var rendered = renderer!.Read();
+                    if (route is not null)
+                        route.ObservePresentation(rendered, renderer.MeshRegionReplacement!.ReadMeshReplacement());
+
                     if (IsDesktopSmoke(mode) && pipeline.PublishedTick >= 3 &&
-                        renderer!.Read() is { LastPresentedSequence: > 0, Surface: RenderSurfaceState.Drawable } presented &&
-                        (terrainSmoke is null || terrainSmoke.Advance(meshPort!, edits!)))
+                        rendered is { LastPresentedSequence: > 0, Surface: RenderSurfaceState.Drawable } &&
+                        (terrainSmoke is null || terrainSmoke.Advance(meshPort!, edits!)) &&
+                        (route is null || routeCompletionTick > 0 && rendered.LastPresentedSequence >= routeCompletionTick))
                     {
                         VerifySmokePublication(world, pipeline, simulation);
-                        DesktopSmoke.RequestNativeClose(presented, IsTerrain(mode));
+                        DesktopSmoke.RequestNativeClose(rendered, route is not null ? "walkable region" : IsTerrain(mode) ? "terrain" : "cube");
                         nativeCloseSent = true;
                     }
                 }
@@ -183,7 +208,7 @@ internal static class GameHost
         if ((worldConditions & SafetyCondition.RequiredEvidenceLost) != 0 ||
             worldConditions.HasFlag(SafetyCondition.TerminalStop) && !runtimeConditions.HasFlag(SafetyCondition.TerminalStop))
             throw new InvalidOperationException($"Groundwork stopped the world unexpectedly ({worldConditions}).");
-        if (mode is HostMode.Interactive or HostMode.D3D12 or HostMode.Terrain)
+        if (IsInteractive(mode))
             return null;
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -191,15 +216,45 @@ internal static class GameHost
         {
             if (!nativeCloseSent || !runtimeConditions.HasFlag(SafetyCondition.TerminalStop))
                 throw new InvalidOperationException("The D3D12 smoke did not present and observe native close.");
-            return IsTerrain(mode)
-                ? "PASS: WYU D3D12 terrain presentation and native shutdown."
-                : "PASS: WYU D3D12 Windows startup and shutdown.";
+            return mode switch
+            {
+                HostMode.TerrainSmoke => "PASS: WYU D3D12 terrain presentation and native shutdown.",
+                HostMode.WalkableSmoke => "PASS: WYU walkable route and native shutdown.",
+                _ => "PASS: WYU D3D12 Windows startup and shutdown.",
+            };
         }
 
         if (mode == HostMode.HeadlessSmoke && (pipeline.PublishedTick != 3 || !pipeline.CloseRequested) || mode == HostMode.FaultSmoke)
             throw new InvalidOperationException("The WYU smoke did not complete the expected input sequence.");
         VerifySmokePublication(world, pipeline, simulation);
         return mode == HostMode.WindowSmoke ? "PASS: WYU Windows startup and shutdown." : "PASS: WYU headless startup and shutdown.";
+
+        void AdvanceWalkable(TickContext tick)
+        {
+            var drawable = renderer!.Read().Surface == RenderSurfaceState.Drawable;
+            var (x, z) = route is null && drawable ? ReadWalkableInput(tick.Input, ref yaw) : default;
+            walkable!.Advance(x, z, tick.Tick, route, drawable);
+            if (route is { Completed: true } && routeCompletionTick == 0)
+                routeCompletionTick = tick.Tick;
+        }
+    }
+
+    private static (int X, int Z) ReadWalkableInput(InputSnapshot input, ref float yaw)
+    {
+        if (input.TransitionLoss)
+            return default;
+
+        var held = input.HeldControls;
+        var turn = Direction(held.Contains(InputControl.Right), held.Contains(InputControl.Left));
+        yaw = MathF.IEEERemainder(yaw + turn * (MathF.PI / 90), MathF.Tau);
+        var forward = Direction(held.Contains(InputControl.W), held.Contains(InputControl.S));
+        var strafe = Direction(held.Contains(InputControl.D), held.Contains(InputControl.A));
+        var speed = forward != 0 && strafe != 0 ? 128 / MathF.Sqrt(2) : 128;
+        var (sin, cos) = MathF.SinCos(yaw);
+        return ((int)MathF.Round(speed * (forward * cos - strafe * sin)),
+            (int)MathF.Round(speed * (forward * sin + strafe * cos)));
+
+        static int Direction(bool positive, bool negative) => (positive ? 1 : 0) - (negative ? 1 : 0);
     }
 
     private static void VerifySmokePublication(EcsWorld world, WorldTickPipeline pipeline, FixedStepSimulation simulation)
@@ -232,8 +287,9 @@ internal static class GameHost
     }
 
     private static async Task StopAsync(RuntimeSafetyAuthority runtime, TimeProvider clock, D3D12Renderer? renderer, WindowsHostModule? window,
-        EcsWorld? world, EcsStorageBudget storage, HostStopReason reason)
+        EcsWorld? world, EcsStorageBudget storage, WalkableScene? walkable, HostStopReason reason)
     {
+        walkable?.Stop();
         var deadline = runtime.StopControl.RequestStop(reason);
         var failures = new List<Exception>();
         try
@@ -259,6 +315,19 @@ internal static class GameHost
                 await window.DisposeAsync().ConfigureAwait(false);
                 if (window.Read().Phase != HostWindowPhase.Closed)
                     throw new InvalidOperationException("The Windows host did not release its window.");
+            }
+        }
+        catch (Exception error)
+        {
+            failures.Add(error);
+        }
+
+        try
+        {
+            if (walkable is not null)
+            {
+                using var workerDeadline = new CancellationTokenSource(deadline.GetRemainingForSettlement(clock));
+                await walkable.SettleAsync(workerDeadline.Token).ConfigureAwait(false);
             }
         }
         catch (Exception error)

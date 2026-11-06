@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [switch]$WindowSmoke,
     [switch]$D3D12Smoke,
-    [switch]$TerrainSmoke
+    [switch]$TerrainSmoke,
+    [switch]$WalkableSmoke
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -55,7 +56,7 @@ function Assert-ArchiveRejected([string]$Directory, [string]$Version, [string]$E
     throw "Invalid archive accepted. Expected rejection: $ExpectedMessage"
 }
 
-function Invoke-HostSmoke([string]$Assembly, [string]$Mode, [string]$PassLine) {
+function Invoke-HostSmoke([string]$Assembly, [string]$Mode, [string]$PassLine, [int]$TimeoutSeconds = 30) {
     $start = [System.Diagnostics.ProcessStartInfo]::new('dotnet')
     $start.ArgumentList.Add($Assembly)
     $start.ArgumentList.Add($Mode)
@@ -67,9 +68,9 @@ function Invoke-HostSmoke([string]$Assembly, [string]$Mode, [string]$PassLine) {
     try {
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit(30000)) {
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             $process.Kill($true)
-            throw "WYU $Mode exceeded 30 seconds."
+            throw "WYU $Mode exceeded $TimeoutSeconds seconds."
         }
         $output = $stdout.GetAwaiter().GetResult()
         $errors = $stderr.GetAwaiter().GetResult()
@@ -140,6 +141,7 @@ try {
         if ($WindowSmoke) { Invoke-HostSmoke $assembly '--window-smoke' 'PASS: WYU Windows startup and shutdown.' }
         if ($D3D12Smoke) { Invoke-HostSmoke $assembly '--d3d12-smoke' 'PASS: WYU D3D12 Windows startup and shutdown.' }
         if ($TerrainSmoke) { Invoke-HostSmoke $assembly '--terrain-smoke' 'PASS: WYU D3D12 terrain presentation and native shutdown.' }
+        if ($WalkableSmoke) { Invoke-HostSmoke $assembly '--walkable-smoke' 'PASS: WYU walkable route and native shutdown.' -TimeoutSeconds 130 }
         Write-Host "PASS: WYU consumed $($expectedIds.Count) verified Groundwork $ExpectedVersion packages with a fresh locked restore."
         $global:LASTEXITCODE = 0
     } finally { Pop-Location }
