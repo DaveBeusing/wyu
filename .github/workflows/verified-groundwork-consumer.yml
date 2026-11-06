@@ -20,14 +20,14 @@ jobs:
       run:
         shell: pwsh
     env:
-      GROUNDWORK_RUN_ID: '42210884016'
+      GROUNDWORK_RUN_ID: '42225951792'
       GROUNDWORK_RUN_ATTEMPT: '1'
-      GROUNDWORK_EXPECTED_HEAD_SHA: '7eaefbfd2bba96618617c9dcfeb6dbcd6a0de828'
-      GROUNDWORK_EXPECTED_MANIFEST_SHA256: '1A4899932E28C69391BB6C3FA4DBEBDD9D597CFA8FD2597E027355DFE34EF310'
-      GROUNDWORK_EXPECTED_ARTIFACT_ZIP_SHA256: '7D05C466A385743B48E6F82C8165E8F05A4D69FD6C9EC5BA24DDE264407AAC87'
-      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.42210884016.1'
-      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.42210884016.1-immutable'
-      GROUNDWORK_ARCHIVE_RECORD_SHA256: '5E653B394673FCB7194F2D2221BAB187AFD9E2D81BF0B71182998193CEF6B1CD'
+      GROUNDWORK_EXPECTED_HEAD_SHA: 'd7645731c18693e4c8e42ebe05e794ea30b0454e'
+      GROUNDWORK_EXPECTED_MANIFEST_SHA256: '15DBEE87CE4BC3936757676E365D93ECF3F252F7C5C255B2615CB25BFEB0E841'
+      GROUNDWORK_EXPECTED_ARTIFACT_ZIP_SHA256: 'E1F86A55E84D7F4431C0767D40D3043E5E1040F2F65B3BFF7337E802A8EFC490'
+      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.42225951792.1'
+      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.42225951792.1-immutable'
+      GROUNDWORK_ARCHIVE_RECORD_SHA256: 'FFE62598133A308E8561B9107FF65578B51D275947B5EADDAABD3FB0837513F6'
       GROUNDWORK_LICENSE_SHA256: 'B1D2870F1A00E4D7F56576E5F0870CBA109E041F8AF66866CF5B499478E654E7'
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -59,7 +59,7 @@ jobs:
           if ([string]$release.target_commitish -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA) { throw 'Unexpected archived commit.' }
           $assets = @($release.assets)
           $names = @('manifest.json','archive-record.json','LICENSE')
-          $modules = @('Core','Diagnostics','Ecs','Jobs','Platform.Windows','Rendering','Rendering.D3D12','Simulation')
+          $modules = @('Core','Diagnostics','Ecs','Jobs','Platform.Windows','Rendering','Rendering.D3D12','Simulation','Voxels')
           $names += @($modules | ForEach-Object { "Groundwork.$_.$env:GROUNDWORK_EXPECTED_VERSION.nupkg" })
           if ($assets.Count -ne $names.Count) { throw 'Unexpected archived asset count.' }
           foreach ($name in $names) {

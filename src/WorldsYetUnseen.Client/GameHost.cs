@@ -9,7 +9,7 @@ using System.Runtime.ExceptionServices;
 
 namespace WorldsYetUnseen.Client;
 
-internal enum HostMode { Interactive, D3D12, D3D12Smoke, WindowSmoke, HeadlessSmoke, FaultSmoke }
+internal enum HostMode { Interactive, D3D12, D3D12Smoke, Terrain, TerrainSmoke, WindowSmoke, HeadlessSmoke, FaultSmoke }
 
 internal static class GameHost
 {
@@ -21,6 +21,10 @@ internal static class GameHost
     {
         Diagnostics = RuntimeQuota.Diagnostics with { EmergencyRecords = 21, EmergencyBytes = 61440 },
     };
+
+    private static bool IsDesktopSmoke(HostMode mode) => mode is HostMode.D3D12Smoke or HostMode.TerrainSmoke;
+
+    private static bool IsTerrain(HostMode mode) => mode is HostMode.Terrain or HostMode.TerrainSmoke;
 
     internal static async Task RunAsync(HostMode mode, CancellationToken cancellationToken)
     {
@@ -48,20 +52,22 @@ internal static class GameHost
                 new ComponentRegistryBuilder().Build(), new EcsLimits(16, 1, 0, 1024 * 1024, StorageBytes), storage);
             if (smokeClock is null)
             {
-                var title = mode == HostMode.D3D12Smoke ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen";
+                var title = IsDesktopSmoke(mode) ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen";
                 window = new WindowsHostModule(new WindowsHostOptions(title, 960, 540, 256),
                     runtime.UiWake, runtime.RuntimeOwnership);
                 await window.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
                 await window.StartAsync(cancellationToken).ConfigureAwait(false);
-                if ((mode is HostMode.WindowSmoke or HostMode.D3D12Smoke) &&
+                if ((mode == HostMode.WindowSmoke || IsDesktopSmoke(mode)) &&
                     window.Read() is not { Phase: HostWindowPhase.Open, ClientWidth: > 0, ClientHeight: > 0 })
                     throw new InvalidOperationException("The Windows host did not open a usable window.");
-                if (mode is HostMode.D3D12 or HostMode.D3D12Smoke)
+                if (mode == HostMode.D3D12 || IsDesktopSmoke(mode) || IsTerrain(mode))
                 {
-                    var diagnostics = mode == HostMode.D3D12Smoke
+                    var diagnostics = IsDesktopSmoke(mode)
                         ? new D3D12DiagnosticsOptions(EnableDebugLayer: true, EnableDred: true)
                         : default;
-                    renderer = new D3D12Renderer(diagnostics, window, runtime.RuntimeOwnership);
+                    renderer = IsTerrain(mode)
+                        ? D3D12Renderer.CreateWithMeshes(window, runtime.RuntimeOwnership, TerrainScene.CreateMeshes(), diagnostics)
+                        : new D3D12Renderer(diagnostics, window, runtime.RuntimeOwnership);
                     await renderer.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
                     await renderer.StartAsync(cancellationToken).ConfigureAwait(false);
                 }
@@ -72,7 +78,7 @@ internal static class GameHost
             success = await DriveAsync(mode, context, runtime, world, input, renderer, smokeClock, cancellationToken).ConfigureAwait(false);
             stopReason = mode == HostMode.FaultSmoke ? HostStopReason.RuntimeFault : HostStopReason.ExternalCancellation;
         }
-        catch (OperationCanceledException) when ((mode is HostMode.Interactive or HostMode.D3D12) &&
+        catch (OperationCanceledException) when ((mode is HostMode.Interactive or HostMode.D3D12 or HostMode.Terrain) &&
             (cancellationToken.IsCancellationRequested || runtime.State.Read().Conditions == SafetyCondition.TerminalStop) &&
             runtime.Diagnostics.ReadEmergency().Primary is null)
         {
@@ -94,8 +100,8 @@ internal static class GameHost
 
         if (failure is not null)
             ExceptionDispatchInfo.Throw(failure);
-        if (mode == HostMode.D3D12Smoke)
-            DesktopSmoke.VerifyShutdown(renderer!);
+        if (IsDesktopSmoke(mode))
+            DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: IsTerrain(mode));
         if (success is not null)
             Console.WriteLine(success);
     }
@@ -106,7 +112,7 @@ internal static class GameHost
         var injectedFault = mode == HostMode.FaultSmoke ? new InvalidOperationException("Controlled tick failure.") : null;
         var pipeline = new WorldTickPipeline(world, injectedFault);
         var simulation = new FixedStepSimulation(context, input, pipeline, world.Safety.State, runtime.SimulationWake);
-        var scene = renderer is null ? null : new CubeScene(renderer);
+        var scene = renderer is null ? null : new SceneSubmission(renderer, IsTerrain(mode));
         var nativeCloseSent = false;
         try
         {
@@ -119,11 +125,11 @@ internal static class GameHost
                 if (!nativeCloseSent && scene is not null)
                 {
                     scene.Submit(context.Clock, iteration, pipeline.PublishedTick);
-                    if (mode == HostMode.D3D12Smoke && pipeline.PublishedTick >= 3 &&
+                    if (IsDesktopSmoke(mode) && pipeline.PublishedTick >= 3 &&
                         renderer!.Read() is { LastPresentedSequence: > 0, Surface: RenderSurfaceState.Drawable } presented)
                     {
                         VerifySmokePublication(world, pipeline, simulation);
-                        DesktopSmoke.RequestNativeClose(presented);
+                        DesktopSmoke.RequestNativeClose(presented, IsTerrain(mode));
                         nativeCloseSent = true;
                     }
                 }
@@ -152,15 +158,17 @@ internal static class GameHost
         if ((worldConditions & SafetyCondition.RequiredEvidenceLost) != 0 ||
             worldConditions.HasFlag(SafetyCondition.TerminalStop) && !runtimeConditions.HasFlag(SafetyCondition.TerminalStop))
             throw new InvalidOperationException($"Groundwork stopped the world unexpectedly ({worldConditions}).");
-        if (mode is HostMode.Interactive or HostMode.D3D12)
+        if (mode is HostMode.Interactive or HostMode.D3D12 or HostMode.Terrain)
             return null;
 
         cancellationToken.ThrowIfCancellationRequested();
-        if (mode == HostMode.D3D12Smoke)
+        if (IsDesktopSmoke(mode))
         {
             if (!nativeCloseSent || !runtimeConditions.HasFlag(SafetyCondition.TerminalStop))
                 throw new InvalidOperationException("The D3D12 smoke did not present and observe native close.");
-            return "PASS: WYU D3D12 Windows startup and shutdown.";
+            return IsTerrain(mode)
+                ? "PASS: WYU D3D12 terrain presentation and native shutdown."
+                : "PASS: WYU D3D12 Windows startup and shutdown.";
         }
 
         if (mode == HostMode.HeadlessSmoke && (pipeline.PublishedTick != 3 || !pipeline.CloseRequested) || mode == HostMode.FaultSmoke)
