@@ -3,7 +3,7 @@ using Groundwork.Ecs;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class WorldTickPipeline(EcsWorld world, InvalidOperationException? injectedFault) : ITickPipeline
+internal sealed class WorldTickPipeline(EcsWorld world, InvalidOperationException? injectedFault, bool terrainEnabled) : ITickPipeline
 {
     private static readonly BarrierOutcome Stopped = new(BarrierStatus.Stopped, null);
     private readonly WorldPublicationPorts _ports = world.Safety.Publication;
@@ -11,6 +11,7 @@ internal sealed class WorldTickPipeline(EcsWorld world, InvalidOperationExceptio
     internal ulong PublishedTick { get; private set; }
     internal ulong GameplaySteps { get; private set; }
     internal bool CloseRequested { get; private set; }
+    internal bool TerrainVoxelRemoved { get; private set; }
 
     public ValueTask<BarrierOutcome> BeginTickAsync(TickContext tick, CancellationToken cancellationToken) =>
         RunBarrierAsync(tick.Tick, BarrierKind.BeginTick, cancellationToken);
@@ -38,6 +39,14 @@ internal sealed class WorldTickPipeline(EcsWorld world, InvalidOperationExceptio
         if (result == ObserverPublication.Published)
         {
             PublishedTick = tick.Tick;
+            if (terrainEnabled)
+            {
+                foreach (var input in tick.Input.Events)
+                {
+                    if (input is { Kind: InputEventKind.Pressed, Device: InputDevice.Keyboard, Control: InputControl.T })
+                        TerrainVoxelRemoved = !TerrainVoxelRemoved;
+                }
+            }
             CloseRequested |= tick.Input.HeldControls.Contains(InputControl.Escape) ||
                 tick.Input.Events.Any(static input => input.Kind == InputEventKind.Pressed && input.Control == InputControl.Escape);
         }
