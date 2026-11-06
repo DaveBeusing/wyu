@@ -8,7 +8,7 @@ internal static class TerrainScene
 {
     internal static RenderScene Camera { get; } = new(
         Matrix4x4.Identity, new Vector4(0.30f, 0.74f, 0.47f, 1),
-        Matrix4x4.CreateLookAt(new Vector3(-8, 25, 42), new Vector3(16, 2, 8), Vector3.UnitY),
+        Matrix4x4.CreateLookAt(new Vector3(12, 25, -25), new Vector3(16, 2, 8), Vector3.UnitY),
         MathF.PI / 3, 0.1f, 100);
 
     internal static RenderMeshPair CreateMeshes()
