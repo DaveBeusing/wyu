@@ -7,10 +7,10 @@ The game is planned around procedurally generated spherical, destructible
 voxel worlds, seamless surface-to-orbit travel and modular construction.
 Initial platform is Windows; initial gameplay is single-player.
 
-## WP01 bootstrap
+## WP01 Windows host
 
-The current host project is only a build scaffold. It explicitly reports
-that game-host wiring is not implemented; it is not a playable milestone.
-See docs/build-bootstrap.md for .NET 10 build requirements and the
-security-gated local NuGet package handover. Engine source remains in
-Groundwork, never linked directly into this repository.
+The host opens a Windows window, captures input, advances Groundwork's
+fixed-step simulation, and shuts down when the window closes. The current
+milestone exercises the engine lifecycle and uses an empty world.
+See the [build and smoke instructions](docs/build-bootstrap.md) to run it
+from the independently archived Groundwork packages.
