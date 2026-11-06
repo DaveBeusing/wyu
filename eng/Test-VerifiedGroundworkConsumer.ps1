@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory)][string]$ExpectedSourceCommit,
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [switch]$WindowSmoke,
-    [switch]$D3D12Smoke
+    [switch]$D3D12Smoke,
+    [switch]$TerrainSmoke
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -16,7 +17,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not (Test-Path -LiteralPath $ArtifactDirectory -PathType Container)) { throw 'Groundwork package archive is unavailable.' }
 $artifactRoot = (Resolve-Path -LiteralPath $ArtifactDirectory).Path
 $expectedIds = @('Groundwork.Core','Groundwork.Platform.Windows','Groundwork.Simulation','Groundwork.Ecs',
-    'Groundwork.Jobs','Groundwork.Diagnostics','Groundwork.Rendering','Groundwork.Rendering.D3D12')
+    'Groundwork.Jobs','Groundwork.Diagnostics','Groundwork.Rendering','Groundwork.Rendering.D3D12','Groundwork.Voxels')
 
 function Read-VerifiedArchive([string]$Directory, [string]$Version) {
     $manifestPath = Join-Path $Directory 'manifest.json'
@@ -138,6 +139,7 @@ try {
         Invoke-HostSmoke $assembly '--fault-smoke' 'PASS: WYU controlled fault shutdown.'
         if ($WindowSmoke) { Invoke-HostSmoke $assembly '--window-smoke' 'PASS: WYU Windows startup and shutdown.' }
         if ($D3D12Smoke) { Invoke-HostSmoke $assembly '--d3d12-smoke' 'PASS: WYU D3D12 Windows startup and shutdown.' }
+        if ($TerrainSmoke) { Invoke-HostSmoke $assembly '--terrain-smoke' 'PASS: WYU D3D12 terrain presentation and native shutdown.' }
         Write-Host "PASS: WYU consumed $($expectedIds.Count) verified Groundwork $ExpectedVersion packages with a fresh locked restore."
         $global:LASTEXITCODE = 0
     } finally { Pop-Location }

@@ -1,9 +1,9 @@
-# Windows host and WP02 renderer
+# Windows host, cube and terrain
 
 Build and run from a clean WYU checkout on Windows with the .NET 10 SDK,
 PowerShell 7, and GitHub CLI. The engine is supplied by the immutable
-Groundwork NuGet archive. WYU pins all eight packages at
-`0.1.0-dev.42210884016.1` and commits the SDK-generated lockfile.
+Groundwork NuGet archive. WYU pins all nine packages at
+`0.1.0-dev.42225951792.1` and commits the SDK-generated lockfile.
 The renderer runs on Windows x64 and requires a D3D12 hardware adapter.
 
 Download the archive to a new temporary directory and run the verification
@@ -12,13 +12,13 @@ gate from the WYU repository root.
 ```powershell
 $archive = Join-Path ([IO.Path]::GetTempPath()) ('wyu-archive-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $archive | Out-Null
-gh release download archive-groundwork-0.1.0-dev.42210884016.1-immutable `
+gh release download archive-groundwork-0.1.0-dev.42225951792.1-immutable `
   --repo DaveBeusing/Groundwork --dir $archive
 if ($LASTEXITCODE -ne 0) { throw 'Groundwork archive download failed.' }
 ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $archive `
-  -ExpectedManifestSha256 1A4899932E28C69391BB6C3FA4DBEBDD9D597CFA8FD2597E027355DFE34EF310 `
-  -ExpectedSourceCommit 7eaefbfd2bba96618617c9dcfeb6dbcd6a0de828 `
-  -ExpectedVersion 0.1.0-dev.42210884016.1
+  -ExpectedManifestSha256 15DBEE87CE4BC3936757676E365D93ECF3F252F7C5C255B2615CB25BFEB0E841 `
+  -ExpectedSourceCommit d7645731c18693e4c8e42ebe05e794ea30b0454e `
+  -ExpectedVersion 0.1.0-dev.42225951792.1
 ```
 
 The gate checks package provenance, stages a temporary external NuGet feed,
@@ -36,3 +36,10 @@ dotnet ./artifacts/bin/WorldsYetUnseen.Client/release/WorldsYetUnseen.Client.dll
 ```
 
 For archive provenance and CI verification, see [the package handover](../eng/README.md).
+
+Launch with `--terrain` to view WP03's two adjacent voxel chunks and the raised
+half of the second chunk. Escape or native window close stops the host. Use
+`-TerrainSmoke` with the verified consumer script on an interactive Windows
+desktop with Graphics Tools installed. It requires hardware D3D12, an active
+Debug Layer and DRED, a presented terrain frame, native close and a clean
+D3D12 live-object report.

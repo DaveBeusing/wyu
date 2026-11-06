@@ -12,6 +12,6 @@ Initial platform is Windows; initial gameplay is single-player.
 The host opens a Windows window, captures input, advances Groundwork's
 fixed-step simulation, and shuts down when the window closes. The current
 milestone exercises the engine lifecycle and uses an empty world. Pass
-`--d3d12` to open the Windows host with the WP02 D3D12 cube renderer.
+`--d3d12` to open the Windows host with the WP02 D3D12 cube renderer, or `--terrain` for the WP03 two-chunk terrain scene.
 See the [build and smoke instructions](docs/build-bootstrap.md) to run it
 from the independently archived Groundwork packages.

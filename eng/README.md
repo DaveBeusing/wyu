@@ -1,21 +1,21 @@
 # Groundwork package handover
 
 WYU independently versions its source at `0.1.0` and uses exact NuGet
-references to the eight Groundwork modules. `NuGet.Config` maps `Groundwork.*`
+references to the nine Groundwork modules. `NuGet.Config` maps `Groundwork.*`
 to a verified local feed and the committed lockfile records the SDK-generated
 package content hashes. NuGet.org supplies the renderer's transitive
 `TerraFX.Interop.Windows` dependency at `10.0.26100.6`.
 
 | Groundwork producer | Pinned value |
 | --- | --- |
-| Package version | `0.1.0-dev.42210884016.1` |
-| Master commit | `7eaefbfd2bba96618617c9dcfeb6dbcd6a0de828` |
-| Windows CI run and attempt | [`42210884016.1`](https://github.com/DaveBeusing/Groundwork/actions/runs/42210884016/attempts/1) |
-| Build manifest SHA-256 | `1A4899932E28C69391BB6C3FA4DBEBDD9D597CFA8FD2597E027355DFE34EF310` |
-| Archive record SHA-256 | `5E653B394673FCB7194F2D2221BAB187AFD9E2D81BF0B71182998193CEF6B1CD` |
+| Package version | `0.1.0-dev.42225951792.1` |
+| Master commit | `d7645731c18693e4c8e42ebe05e794ea30b0454e` |
+| Windows CI run and attempt | [`42225951792.1`](https://github.com/DaveBeusing/Groundwork/actions/runs/42225951792/attempts/1) |
+| Build manifest SHA-256 | `15DBEE87CE4BC3936757676E365D93ECF3F252F7C5C255B2615CB25BFEB0E841` |
+| Archive record SHA-256 | `FFE62598133A308E8561B9107FF65578B51D275947B5EADDAABD3FB0837513F6` |
 
-The [immutable GitHub release](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.42210884016.1-immutable)
-contains the original eight CI packages, the build manifest, the archive
+The [immutable GitHub release](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.42225951792.1-immutable)
+contains the original nine CI packages, the build manifest, the archive
 record, and the Apache-2.0 license. Keep the release available while any
 consumer pins the version.
 
