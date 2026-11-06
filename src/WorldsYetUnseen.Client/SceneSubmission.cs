@@ -4,7 +4,7 @@ using Groundwork.Simulation;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class SceneSubmission(IRenderer renderer, bool terrain)
+internal sealed class SceneSubmission(IRenderer renderer, bool terrain, Func<RenderScene>? walkableCamera = null)
 {
     private static readonly Vector4 ClearColor = new(0.04f, 0.08f, 0.12f, 1);
     private static readonly Vector4 CubeTint = new(0.28f, 0.76f, 0.94f, 1);
@@ -20,9 +20,9 @@ internal sealed class SceneSubmission(IRenderer renderer, bool terrain)
             return;
 
         var angle = (publishedTick % 360) * (MathF.Tau / 360);
-        var scene = terrain
+        var scene = walkableCamera?.Invoke() ?? (terrain
             ? TerrainScene.Camera
-            : new RenderScene(Matrix4x4.CreateRotationY(angle), CubeTint, View, MathF.PI / 3, 0.1f, 20);
+            : new RenderScene(Matrix4x4.CreateRotationY(angle), CubeTint, View, MathF.PI / 3, 0.1f, 20));
         var submission = renderer.TrySubmit(new RenderFrame(publishedTick, ClearColor, scene));
         if (submission is RenderSubmissionResult.Accepted or RenderSubmissionResult.Replaced)
             _submittedTick = publishedTick;

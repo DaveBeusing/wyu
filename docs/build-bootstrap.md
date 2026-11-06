@@ -3,7 +3,7 @@
 Build and run from a clean WYU checkout on Windows with the .NET 10 SDK,
 PowerShell 7, and GitHub CLI. The engine is supplied by the immutable
 Groundwork NuGet archive. WYU pins all nine packages at
-`0.1.0-dev.42274145071.1` and commits the SDK-generated lockfile.
+`0.1.0-dev.42292324031.1` and commits the SDK-generated lockfile.
 The renderer runs on Windows x64 and requires a D3D12 hardware adapter.
 
 Download the archive to a new temporary directory and run the verification
@@ -12,13 +12,13 @@ gate from the WYU repository root.
 ```powershell
 $archive = Join-Path ([IO.Path]::GetTempPath()) ('wyu-archive-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $archive | Out-Null
-gh release download archive-groundwork-0.1.0-dev.42274145071.1-immutable `
+gh release download archive-groundwork-0.1.0-dev.42292324031.1-immutable `
   --repo DaveBeusing/Groundwork --dir $archive
 if ($LASTEXITCODE -ne 0) { throw 'Groundwork archive download failed.' }
 ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $archive `
-  -ExpectedManifestSha256 A1F13142A00EDFC29F42AE72A8CA217C598B024C86DA5A83EDD7853AD811EA39 `
-  -ExpectedSourceCommit 49a55eb3447765bca58c6552bf3eebd26f5310ef `
-  -ExpectedVersion 0.1.0-dev.42274145071.1
+  -ExpectedManifestSha256 4294F71A1B42B9D6ED132B203D6553B673AB8B62C23FB23E37A16B77E03EA43E `
+  -ExpectedSourceCommit 269ab9e1128c15f5764f0dded499e8e02db4110c `
+  -ExpectedVersion 0.1.0-dev.42292324031.1
 ```
 
 The gate checks package provenance, stages a temporary external NuGet feed,
@@ -51,3 +51,27 @@ desktop with Graphics Tools installed. The smoke exercises voxel removal and
 restoration, rejection of stale geometry generations, native close and a clean
 D3D12 live-object report. For WP04 qualification, check the adapter diagnostics
 for NVIDIA hardware with an active Debug Layer and DRED.
+
+## WP05 walkable region
+
+Launch the WP05 region and use **W/S** to move forward or back, **A/D** to
+strafe, and **Left/Right** to turn. Escape or native window close stops the
+host.
+
+```powershell
+dotnet ./artifacts/bin/WorldsYetUnseen.Client/release/WorldsYetUnseen.Client.dll --walkable
+```
+
+Add `-WalkableSmoke` to the verified consumer command on an interactive
+Windows desktop with an NVIDIA D3D12 adapter and Windows Graphics Tools
+installed. This runs `--walkable-smoke`, which enables Debug Layer and DRED
+and drives the 914-tick fixed route from seed `0x57505535`, generator version
+`1`. The route reports its checkpoints, waits for terrain presentation
+at each chunk transition, checks wall contact and return, and closes the
+native window. Each readiness hold has a 10-second watchdog, and the
+host route smoke has a 120-second timeout. Check the adapter diagnostics
+for NVIDIA hardware, active Debug Layer and DRED, and a clean live-object
+report after shutdown.
+
+See the [Groundwork WP05 route contract](https://github.com/DaveBeusing/Groundwork/blob/269ab9e1128c15f5764f0dded499e8e02db4110c/docs/architecture/wp05-walkable-region-contract.md)
+for the fixed checkpoints and resource limits.

@@ -14,5 +14,10 @@ fixed-step simulation, and shuts down when the window closes. Pass `--d3d12`
 to open the WP02 D3D12 cube, or `--terrain` to open the WP04 editable two-chunk
 terrain scene. In terrain mode, press **T** to remove or restore the voxel at
 the shared chunk boundary.
+
+Pass `--walkable` to explore the WP05 region. Use **W/A/S/D** to move and
+**Left/Right** to turn. The scripted `--walkable-smoke` mode runs the fixed
+route through the streamed region and closes the window.
+
 See the [build and smoke instructions](docs/build-bootstrap.md) to run it
 from the independently archived Groundwork packages.

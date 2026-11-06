@@ -11,6 +11,8 @@ internal static class Program
             ["--d3d12-smoke"] => HostMode.D3D12Smoke,
             ["--terrain"] => HostMode.Terrain,
             ["--terrain-smoke"] => HostMode.TerrainSmoke,
+            ["--walkable"] => HostMode.Walkable,
+            ["--walkable-smoke"] => HostMode.WalkableSmoke,
             ["--window-smoke"] => HostMode.WindowSmoke,
             ["--headless-smoke"] => HostMode.HeadlessSmoke,
             ["--fault-smoke"] => HostMode.FaultSmoke,
@@ -18,13 +20,13 @@ internal static class Program
         };
         if (mode is null)
         {
-            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--d3d12 | --d3d12-smoke | --terrain | --terrain-smoke | --window-smoke | --headless-smoke | --fault-smoke]");
+            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--d3d12 | --d3d12-smoke | --terrain | --terrain-smoke | --walkable | --walkable-smoke | --window-smoke | --headless-smoke | --fault-smoke]");
             return 2;
         }
 
         using var cancellation = new CancellationTokenSource();
-        if (mode is not (HostMode.Interactive or HostMode.D3D12 or HostMode.Terrain))
-            cancellation.CancelAfter(TimeSpan.FromSeconds(15));
+        if (mode is not (HostMode.Interactive or HostMode.D3D12 or HostMode.Terrain or HostMode.Walkable))
+            cancellation.CancelAfter(TimeSpan.FromSeconds(mode == HostMode.WalkableSmoke ? 120 : 15));
 
         Console.CancelKeyPress += Cancel;
         try
