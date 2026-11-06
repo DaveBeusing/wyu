@@ -1,10 +1,12 @@
 name: WYU verified Groundwork consumer
 
 on:
+  push:
+    branches:
+      - master
   pull_request:
     branches:
       - master
-      - build/wp01-b00-bootstrap
   workflow_dispatch:
 
 permissions:
@@ -18,13 +20,13 @@ jobs:
       run:
         shell: pwsh
     env:
-      GROUNDWORK_RUN_ID: '41920122570'
+      GROUNDWORK_RUN_ID: '42137008200'
       GROUNDWORK_RUN_ATTEMPT: '1'
-      GROUNDWORK_EXPECTED_HEAD_SHA: '6930d66d383fb26427cf927115efe5cf9fc9b74b'
-      GROUNDWORK_EXPECTED_MANIFEST_SHA256: 'E07D23C78F922E8EBB193E03E5B7F5C2A8FDD4EF50C081B914B183D4017296F9'
-      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.41920122570.1'
-      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.41920122570.1-immutable'
-      GROUNDWORK_ARCHIVE_RECORD_SHA256: '8D6F79929EA159A146DB537B2344C561A1A1FAF0CD07376F291B8AAB121CB92E'
+      GROUNDWORK_EXPECTED_HEAD_SHA: '8da185b176961e365dc32261d8c80a672a01b7b9'
+      GROUNDWORK_EXPECTED_MANIFEST_SHA256: '7981A019E4D8C4706E66D0C00B5E3E9150ABBA5DE77439DFC13C73FEC9AF2DB3'
+      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.42137008200.1'
+      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.42137008200.1-immutable'
+      GROUNDWORK_ARCHIVE_RECORD_SHA256: '293DEA0BA15F0895A7C37D8FD5D0B9D3B36234874839A72EE0AA42F4018D01A3'
       GROUNDWORK_LICENSE_SHA256: 'B1D2870F1A00E4D7F56576E5F0870CBA109E041F8AF66866CF5B499478E654E7'
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -43,8 +45,8 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $null -eq $run) { throw 'Groundwork run unavailable.' }
           if ([string]$run.id -ne $env:GROUNDWORK_RUN_ID -or [string]$run.run_attempt -ne $env:GROUNDWORK_RUN_ATTEMPT) { throw 'Run attempt mismatch.' }
           if ($run.status -ne 'completed' -or $run.conclusion -ne 'success') { throw 'Producer CI did not pass.' }
-          if ($run.head_sha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $run.head_branch -ne 'build/wp01-l4-package-integrity') { throw 'Producer head is not approved.' }
-          if ($run.name -ne 'Groundwork Windows CI' -or $run.event -ne 'pull_request') { throw 'Unapproved producing workflow.' }
+          if ($run.head_sha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $run.head_branch -ne 'master') { throw 'Producer head is not approved.' }
+          if ($run.name -ne 'Groundwork Windows CI' -or $run.event -ne 'push') { throw 'Unapproved producing workflow.' }
           Write-Host 'PASS: independently pinned Groundwork CI run identity.'
 
       - name: Verify durable Groundwork release metadata
@@ -82,7 +84,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Groundwork release archive cannot be downloaded.' }
           "GROUNDWORK_ARTIFACT_DIR=$artifactDir" >> $env:GITHUB_ENV
 
-      - name: Validate manifest and locked WYU consumer
+      - name: Verify packages, build from locked restore and exercise host lifecycle
         run: |
           $ErrorActionPreference = 'Stop'
           $manifest = Join-Path $env:GROUNDWORK_ARTIFACT_DIR 'manifest.json'
@@ -98,11 +100,6 @@ jobs:
             if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine $pair.hash) { throw "Modified release archive asset: $($pair.name)" }
           }
           $archive = Get-Content (Join-Path $env:GROUNDWORK_ARTIFACT_DIR 'archive-record.json') -Raw | ConvertFrom-Json
-          if ($archive.producerRunId -ne $env:GROUNDWORK_RUN_ID -or [string]$archive.producerRunAttempt -ne $env:GROUNDWORK_RUN_ATTEMPT -or $archive.producerHeadSha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $archive.packageVersion -cne $env:GROUNDWORK_EXPECTED_VERSION -or $archive.manifestSha256 -ine $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256) { throw 'Archive provenance record does not match pinned producer.' }
-          $record = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
-          $commit = gh api "repos/DaveBeusing/Groundwork/commits/$($record.sourceCommit)" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or $null -eq $commit) { throw 'Manifest source commit unavailable.' }
-          $parents = @($commit.parents | ForEach-Object { $_.sha })
-          if ($record.sourceCommit -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -and $parents -notcontains $env:GROUNDWORK_EXPECTED_HEAD_SHA) { throw 'Manifest source unrelated to approved run head.' }
-          & ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $env:GROUNDWORK_ARTIFACT_DIR -ExpectedManifestSha256 $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256 -ExpectedSourceCommit $record.sourceCommit -ExpectedVersion $env:GROUNDWORK_EXPECTED_VERSION
+          if ($archive.producerRunId -ne $env:GROUNDWORK_RUN_ID -or [string]$archive.producerRunAttempt -ne $env:GROUNDWORK_RUN_ATTEMPT -or $archive.producerHeadSha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $archive.packagedCommitSha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $archive.packageVersion -cne $env:GROUNDWORK_EXPECTED_VERSION -or $archive.manifestSha256 -ine $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256) { throw 'Archive provenance record does not match pinned producer.' }
+          & ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $env:GROUNDWORK_ARTIFACT_DIR -ExpectedManifestSha256 $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256 -ExpectedSourceCommit $env:GROUNDWORK_EXPECTED_HEAD_SHA -ExpectedVersion $env:GROUNDWORK_EXPECTED_VERSION
           if ($LASTEXITCODE -ne 0) { throw 'Verified consumer gate failed.' }

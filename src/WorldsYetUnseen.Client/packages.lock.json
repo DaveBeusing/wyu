@@ -4,9 +4,54 @@
     "net10.0-windows7.0": {
       "Groundwork.Core": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.41920122570.1, 0.1.0-dev.41920122570.1]",
-        "resolved": "0.1.0-dev.41920122570.1",
-        "contentHash": "c4vUlp9qYn0MELVMQHh9EyR6ykPzR9L6j255ZxUy2StNgJsorc7KQ+LJiXPdeYr9auJU7i5KOe5/p25W/k5Hug=="
+        "requested": "[0.1.0-dev.42137008200.1, 0.1.0-dev.42137008200.1]",
+        "resolved": "0.1.0-dev.42137008200.1",
+        "contentHash": "Y6yKy9wy11kXh3muwSjExinVrI+GC4ZgYhdWoIIxJetx1eFN8ZjE86BKqs4IeRPaxkgdkRWM0VaefsqA6Wygrg=="
+      },
+      "Groundwork.Diagnostics": {
+        "type": "Direct",
+        "requested": "[0.1.0-dev.42137008200.1, 0.1.0-dev.42137008200.1]",
+        "resolved": "0.1.0-dev.42137008200.1",
+        "contentHash": "tNZtHQR+NhRAYVWb5DX3gnHw7+neVrzZQzGXLsmYvjzVyyhY4dOGjL9SIlgqTCKJt1pb6yAnnVak1IsUm3rv6Q==",
+        "dependencies": {
+          "Groundwork.Core": "0.1.0-dev.42137008200.1"
+        }
+      },
+      "Groundwork.Ecs": {
+        "type": "Direct",
+        "requested": "[0.1.0-dev.42137008200.1, 0.1.0-dev.42137008200.1]",
+        "resolved": "0.1.0-dev.42137008200.1",
+        "contentHash": "qba10Un3iQfiurLU0Kj3fM39f6SLt4FA114AoVag2YEiu0ayAjQmhIhRbqeK13Wqa6cxaSk8XUTiBxl9DHJRxg==",
+        "dependencies": {
+          "Groundwork.Core": "0.1.0-dev.42137008200.1"
+        }
+      },
+      "Groundwork.Jobs": {
+        "type": "Direct",
+        "requested": "[0.1.0-dev.42137008200.1, 0.1.0-dev.42137008200.1]",
+        "resolved": "0.1.0-dev.42137008200.1",
+        "contentHash": "npPm/oVAD073q8ETHsS5r542Ax8W+TBbrnxCBR8F5kmbmNfAn+PJ2k6V82d1WQG2iCNv7HUjwfuFbDOapCYHAw==",
+        "dependencies": {
+          "Groundwork.Core": "0.1.0-dev.42137008200.1"
+        }
+      },
+      "Groundwork.Platform.Windows": {
+        "type": "Direct",
+        "requested": "[0.1.0-dev.42137008200.1, 0.1.0-dev.42137008200.1]",
+        "resolved": "0.1.0-dev.42137008200.1",
+        "contentHash": "CIDFv1el8wavNwyvuJRz6ObXS7AFJ2PSlaikdhFvPCKzdQBnppqeh89do1Lo+UcyvMPkM3w4yD40KB8UNXGw1A==",
+        "dependencies": {
+          "Groundwork.Core": "0.1.0-dev.42137008200.1"
+        }
+      },
+      "Groundwork.Simulation": {
+        "type": "Direct",
+        "requested": "[0.1.0-dev.42137008200.1, 0.1.0-dev.42137008200.1]",
+        "resolved": "0.1.0-dev.42137008200.1",
+        "contentHash": "JZQDKp/U+x3CmB/wJeOQZVF8sfVzfBz+3rF33zk8YiIF/IWpUsvpkPsPKyCsdrFIdba5SoFbHZ6Ozu9VQFFieQ==",
+        "dependencies": {
+          "Groundwork.Core": "0.1.0-dev.42137008200.1"
+        }
       }
     }
   }

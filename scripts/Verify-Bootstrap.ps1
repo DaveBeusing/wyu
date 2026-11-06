@@ -1,4 +1,4 @@
-# WP01-B00: local Windows host scaffold build verification (not package acceptance).
+# Verify the WYU project graph and build from the supplied local feed.
 param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -26,16 +26,24 @@ try {
     $refs = @($project.SelectNodes('//ProjectReference'))
     Assert-True ($refs.Count -eq 0) 'The WYU host must not use source ProjectReference dependencies.'
     $packages = @($project.SelectNodes('//PackageReference'))
-    $expectedVersion = '0.1.0-dev.41920122570.1'
-    Assert-True ($packages.Count -eq 1) 'WYU must have exactly one approved Groundwork.Core package reference.'
-    Assert-True (($packages[0].GetAttribute('Include') -eq 'Groundwork.Core') -and ($packages[0].GetAttribute('Version') -eq "[$expectedVersion]")) 'Groundwork.Core must be exactly pinned to the reviewed CI package.'
+    $expectedVersion = '0.1.0-dev.42137008200.1'
+    $expectedIds = @('Core', 'Diagnostics', 'Ecs', 'Jobs', 'Platform.Windows', 'Simulation') |
+        ForEach-Object { "Groundwork.$_" }
+    Assert-True ($packages.Count -eq $expectedIds.Count) 'Unexpected WYU package reference count.'
     $lockPath = 'src/WorldsYetUnseen.Client/packages.lock.json'
     Assert-True (Test-Path $lockPath -PathType Leaf) 'Generated and committed NuGet lock file is missing.'
     $lock = Get-Content $lockPath -Raw | ConvertFrom-Json
     $framework = $lock.dependencies.PSObject.Properties | Where-Object { $_.Name -like 'net10.0-windows*' } | Select-Object -First 1
     Assert-True ($null -ne $framework) 'Unexpected lockfile target framework.'
-    $locked = $framework.Value.'Groundwork.Core'
-    Assert-True (($null -ne $locked) -and ($locked.resolved -eq $expectedVersion) -and ($locked.requested -eq "[$expectedVersion, $expectedVersion]")) 'NuGet lockfile does not agree with the exact package coordinate.'
+    Assert-True ($framework.Value.PSObject.Properties.Name.Count -eq $expectedIds.Count) 'Unexpected WYU lockfile dependency count.'
+    foreach ($id in $expectedIds) {
+        $reference = @($packages | Where-Object { $_.GetAttribute('Include') -ceq $id })
+        Assert-True (($reference.Count -eq 1) -and ($reference[0].GetAttribute('Version') -ceq "[$expectedVersion]")) "Expected exactly pinned package $id."
+        $locked = $framework.Value.PSObject.Properties[$id]
+        Assert-True (($null -ne $locked) -and ($locked.Value.type -ceq 'Direct') -and
+            ($locked.Value.resolved -ceq $expectedVersion) -and
+            ($locked.Value.requested -ceq "[$expectedVersion, $expectedVersion]")) "Lockfile does not agree with exact package $id."
+    }
     [xml] $config = Get-Content 'NuGet.Config' -Raw
     $feed = $config.SelectSingleNode('//packageSources/add[@key="groundwork-validated-local"]')
     Assert-True (($null -ne $feed) -and ($feed.GetAttribute('value') -eq '%GROUNDWORK_NUGET_FEED%')) 'Validated feed environment mapping is missing.'
@@ -51,10 +59,11 @@ try {
     $generated = @($tracked | Where-Object { $_ -match '(^|/)(bin|obj|artifacts|dist)/|\.(nupkg|snupkg|dll|exe)$' })
     Assert-True ($generated.Count -eq 0) ('Generated files are tracked: ' + ($generated -join ', '))
     Invoke-Native 'dotnet' @('--version')
-    Invoke-Native 'dotnet' @('restore', 'WorldsYetUnseen.slnx', '--configfile', 'NuGet.Config', '--locked-mode', '--force-evaluate')
+    $lockHash = (Get-FileHash -LiteralPath $lockPath -Algorithm SHA256).Hash
+    Invoke-Native 'dotnet' @('restore', 'WorldsYetUnseen.slnx', '--configfile', 'NuGet.Config', '--locked-mode', '--force')
+    Assert-True ((Get-FileHash -LiteralPath $lockPath -Algorithm SHA256).Hash -eq $lockHash) 'Locked restore changed the NuGet lockfile.'
     Invoke-Native 'dotnet' @('build', 'WorldsYetUnseen.slnx', '-c', 'Release', '--no-restore')
-    Write-Host 'PASS: WYU scaffold structure, restore and Release build.' -ForegroundColor Green
-    Write-Host 'Exact NuGet pin and lockfile were checked, but this does NOT authenticate feed provenance or game integration.'
+    Write-Host 'PASS: WYU structure, exact NuGet pins, locked restore and Release build.' -ForegroundColor Green
 } finally {
     Pop-Location
 }
