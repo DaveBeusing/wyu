@@ -40,6 +40,7 @@ internal static class GameHost
         EcsWorld? world = null;
         WindowsHostModule? window = null;
         D3D12Renderer? renderer = null;
+        TerrainScene? terrain = IsTerrain(mode) ? new TerrainScene() : null;
         var stopReason = HostStopReason.StartupFault;
         Exception? failure = null;
         string? success = null;
@@ -60,13 +61,13 @@ internal static class GameHost
                 if ((mode == HostMode.WindowSmoke || IsDesktopSmoke(mode)) &&
                     window.Read() is not { Phase: HostWindowPhase.Open, ClientWidth: > 0, ClientHeight: > 0 })
                     throw new InvalidOperationException("The Windows host did not open a usable window.");
-                if (mode == HostMode.D3D12 || IsDesktopSmoke(mode) || IsTerrain(mode))
+                if (mode == HostMode.D3D12 || IsDesktopSmoke(mode) || terrain is not null)
                 {
                     var diagnostics = IsDesktopSmoke(mode)
                         ? new D3D12DiagnosticsOptions(EnableDebugLayer: true, EnableDred: true)
                         : default;
-                    renderer = IsTerrain(mode)
-                        ? D3D12Renderer.CreateWithMeshes(window, runtime.RuntimeOwnership, TerrainScene.CreateMeshes(), diagnostics)
+                    renderer = terrain is not null
+                        ? D3D12Renderer.CreateWithMeshReplacement(window, runtime.RuntimeOwnership, terrain.CreateMeshes(), diagnostics)
                         : new D3D12Renderer(diagnostics, window, runtime.RuntimeOwnership);
                     await renderer.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
                     await renderer.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -75,7 +76,8 @@ internal static class GameHost
 
             stopReason = HostStopReason.RuntimeFault;
             IInputSource input = window is not null ? window : new SmokeInput();
-            success = await DriveAsync(mode, context, runtime, world, input, renderer, smokeClock, cancellationToken).ConfigureAwait(false);
+            success = await DriveAsync(mode, context, runtime, world, input, renderer, terrain, smokeClock, cancellationToken)
+                .ConfigureAwait(false);
             stopReason = mode == HostMode.FaultSmoke ? HostStopReason.RuntimeFault : HostStopReason.ExternalCancellation;
         }
         catch (OperationCanceledException) when ((mode is HostMode.Interactive or HostMode.D3D12 or HostMode.Terrain) &&
@@ -107,12 +109,19 @@ internal static class GameHost
     }
 
     private static async Task<string?> DriveAsync(HostMode mode, EngineModuleContext context, RuntimeSafetyAuthority runtime,
-        EcsWorld world, IInputSource input, D3D12Renderer? renderer, SmokeClock? smokeClock, CancellationToken cancellationToken)
+        EcsWorld world, IInputSource input, D3D12Renderer? renderer, TerrainScene? terrain,
+        SmokeClock? smokeClock, CancellationToken cancellationToken)
     {
         var injectedFault = mode == HostMode.FaultSmoke ? new InvalidOperationException("Controlled tick failure.") : null;
-        var pipeline = new WorldTickPipeline(world, injectedFault);
+        var pipeline = new WorldTickPipeline(world, injectedFault, terrain is not null);
         var simulation = new FixedStepSimulation(context, input, pipeline, world.Safety.State, runtime.SimulationWake);
-        var scene = renderer is null ? null : new SceneSubmission(renderer, IsTerrain(mode));
+        var scene = renderer is null ? null : new SceneSubmission(renderer, terrain is not null);
+        var terrainSmoke = mode == HostMode.TerrainSmoke ? new TerrainEditSmoke() : null;
+        var meshPort = renderer?.MeshReplacement;
+        var edits = terrain is null ? null : new TerrainEdits(terrain,
+            meshPort ?? throw new InvalidOperationException("The terrain renderer has no mesh replacement port."),
+            runtime.RuntimeOwnership, terrainSmoke is null ? null : terrainSmoke.BeforeCompletion);
+        var voxelRemoved = false;
         var nativeCloseSent = false;
         try
         {
@@ -124,9 +133,20 @@ internal static class GameHost
                     break;
                 if (!nativeCloseSent && scene is not null)
                 {
+                    if (edits is not null)
+                    {
+                        // Apply published input outside the simulation writer and observer leases.
+                        if (pipeline.TerrainVoxelRemoved != voxelRemoved)
+                        {
+                            edits.Toggle();
+                            voxelRemoved = pipeline.TerrainVoxelRemoved;
+                        }
+                        edits.Advance();
+                    }
                     scene.Submit(context.Clock, iteration, pipeline.PublishedTick);
                     if (IsDesktopSmoke(mode) && pipeline.PublishedTick >= 3 &&
-                        renderer!.Read() is { LastPresentedSequence: > 0, Surface: RenderSurfaceState.Drawable } presented)
+                        renderer!.Read() is { LastPresentedSequence: > 0, Surface: RenderSurfaceState.Drawable } presented &&
+                        (terrainSmoke is null || terrainSmoke.Advance(meshPort!, edits!)))
                     {
                         VerifySmokePublication(world, pipeline, simulation);
                         DesktopSmoke.RequestNativeClose(presented, IsTerrain(mode));
@@ -149,6 +169,11 @@ internal static class GameHost
                     { Classification: FaultClass.UnknownCritical, Subsystem: FaultSubsystem.Simulation, Context: { Tick: 2, Phase: TickPhase.Base } })
                 throw new InvalidOperationException("The controlled fault did not fence the runtime at the expected tick.", failure);
             return "PASS: WYU controlled fault shutdown.";
+        }
+        finally
+        {
+            edits?.Stop();
+            terrainSmoke?.Release();
         }
 
         if (runtime.Diagnostics.ReadEmergency().Primary is { } fault)
