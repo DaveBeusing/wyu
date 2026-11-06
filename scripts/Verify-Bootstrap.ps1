@@ -26,8 +26,8 @@ try {
     $refs = @($project.SelectNodes('//ProjectReference'))
     Assert-True ($refs.Count -eq 0) 'The WYU host must not use source ProjectReference dependencies.'
     $packages = @($project.SelectNodes('//PackageReference'))
-    $expectedVersion = '0.1.0-dev.42137008200.1'
-    $expectedIds = @('Core', 'Diagnostics', 'Ecs', 'Jobs', 'Platform.Windows', 'Simulation') |
+    $expectedVersion = '0.1.0-dev.42210884016.1'
+    $expectedIds = @('Core', 'Diagnostics', 'Ecs', 'Jobs', 'Platform.Windows', 'Rendering', 'Rendering.D3D12', 'Simulation') |
         ForEach-Object { "Groundwork.$_" }
     Assert-True ($packages.Count -eq $expectedIds.Count) 'Unexpected WYU package reference count.'
     $lockPath = 'src/WorldsYetUnseen.Client/packages.lock.json'
@@ -35,7 +35,7 @@ try {
     $lock = Get-Content $lockPath -Raw | ConvertFrom-Json
     $framework = $lock.dependencies.PSObject.Properties | Where-Object { $_.Name -like 'net10.0-windows*' } | Select-Object -First 1
     Assert-True ($null -ne $framework) 'Unexpected lockfile target framework.'
-    Assert-True ($framework.Value.PSObject.Properties.Name.Count -eq $expectedIds.Count) 'Unexpected WYU lockfile dependency count.'
+    Assert-True ($framework.Value.PSObject.Properties.Name.Count -eq ($expectedIds.Count + 1)) 'Unexpected WYU lockfile dependency count.'
     foreach ($id in $expectedIds) {
         $reference = @($packages | Where-Object { $_.GetAttribute('Include') -ceq $id })
         Assert-True (($reference.Count -eq 1) -and ($reference[0].GetAttribute('Version') -ceq "[$expectedVersion]")) "Expected exactly pinned package $id."
@@ -44,11 +44,17 @@ try {
             ($locked.Value.resolved -ceq $expectedVersion) -and
             ($locked.Value.requested -ceq "[$expectedVersion, $expectedVersion]")) "Lockfile does not agree with exact package $id."
     }
+    $binding = $framework.Value.PSObject.Properties['TerraFX.Interop.Windows']
+    Assert-True (($null -ne $binding) -and ($binding.Value.type -ceq 'Transitive') -and
+        ($binding.Value.resolved -ceq '10.0.26100.6')) 'Unexpected D3D12 binding in the lockfile.'
     [xml] $config = Get-Content 'NuGet.Config' -Raw
     $feed = $config.SelectSingleNode('//packageSources/add[@key="groundwork-validated-local"]')
     Assert-True (($null -ne $feed) -and ($feed.GetAttribute('value') -eq '%GROUNDWORK_NUGET_FEED%')) 'Validated feed environment mapping is missing.'
     $groundworkMapping = $config.SelectSingleNode('//packageSourceMapping/packageSource[@key="groundwork-validated-local"]/package[@pattern="Groundwork.*"]')
     Assert-True ($null -ne $groundworkMapping) 'Groundwork packages must map to the validated local feed.'
+    $publicMapping = @($config.SelectNodes('//packageSourceMapping/packageSource[@key="nuget.org"]/package'))
+    Assert-True (($publicMapping.Count -eq 1) -and
+        ($publicMapping[0].GetAttribute('pattern') -ceq 'TerraFX.Interop.Windows')) 'Only the approved D3D12 binding may map to nuget.org.'
     Assert-True (-not [string]::IsNullOrWhiteSpace($env:GROUNDWORK_NUGET_FEED)) 'Set GROUNDWORK_NUGET_FEED to a validated local directory outside worktrees.'
     $feedPath = [System.IO.Path]::GetFullPath($env:GROUNDWORK_NUGET_FEED)
     $rootWithSeparator = $root.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
