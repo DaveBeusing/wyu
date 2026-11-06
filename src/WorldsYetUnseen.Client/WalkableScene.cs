@@ -1,30 +1,34 @@
 using System.Numerics;
 using Groundwork.Core;
+using Groundwork.Persistence;
 using Groundwork.Rendering;
 using Groundwork.Voxels;
 
 namespace WorldsYetUnseen.Client;
 
 // The host serializes coordinator calls. Workers only use their reserved inputs and Core lease.
-internal sealed class WalkableScene(IRuntimeOwnership ownership)
+internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? initialPose = null,
+    ReadOnlySpan<TerrainChunkDelta> terrain = default)
 {
-    internal const uint Seed = 0x57505535;
-    internal const ulong GeneratorVersion = 1;
     private const int Unit = VoxelCollision.UnitsPerVoxel;
-    private static readonly RegionBounds World = new(-4, 4, -2, 2);
+    private static readonly RegionBounds World = WalkableTerrain.Recipe.Bounds;
     private static readonly ChunkCoordinate WestEdge = new(-4, 0, 0);
 
-    private readonly WalkableRegion _region = new(World);
     private readonly List<PendingLoad> _loads = new(WalkableRegion.MaximumLoads);
     private readonly Dictionary<ulong, Coverage> _coverage = new(3);
-    private VoxelMotionState _motion = new(new VoxelPose(-20 * Unit - Unit / 2, 4 * Unit, 7 * Unit + Unit / 2));
+    private WalkableRegion _region = new(World);
+    private VoxelMotionState _motion = new(initialPose ?? WalkableTerrain.Spawn);
+    private TerrainChunkDelta[] _terrain = terrain.ToArray();
     private PendingMesh? _mesh;
     private IRenderMeshRegionReplacement? _renderer;
+    private ulong _generationOffset;
     private ulong _westIdentity;
     private ulong _westFingerprint;
+    private TerrainReload _terrainReload;
     private bool _stopped;
 
     internal VoxelPose Pose => _motion.Pose;
+    internal ReadOnlySpan<TerrainChunkDelta> Terrain => _terrain;
     internal RegionUsage Usage => _region.Usage;
     internal RegionUsage HighWater => _region.HighWater;
 
@@ -56,6 +60,29 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership)
 
     internal void Attach(IRenderMeshRegionReplacement renderer) => _renderer = renderer;
 
+    internal VoxelOccupancy ReadCell(int x, int y, int z)
+    {
+        using var read = ReadPublishedRegion();
+        return read.GetCell(x, y, z);
+    }
+
+    internal bool TryToggleTerrain()
+    {
+        if (_stopped || _terrainReload != TerrainReload.None || _renderer is null)
+            return false;
+
+        var status = _renderer.ReadMeshReplacement();
+        if (status.LastPresentedGeneration != RendererGeneration(_region.DesiredGeneration) ||
+            !WalkableTerrain.TryToggle(Pose, _terrain, out var terrain))
+            return false;
+
+        _terrain = terrain;
+        _terrainReload = TerrainReload.Draining;
+        _coverage.Clear();
+        _region.Stop();
+        return true;
+    }
+
     internal void Advance(int deltaX, int deltaZ, ulong tick, WalkableRouteSmoke? route = null, bool drawable = true)
     {
         if (_stopped)
@@ -63,11 +90,18 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership)
 
         var renderer = _renderer ?? throw new InvalidOperationException("The walkable scene has no renderer.");
         DrainWorkers();
+        if (_terrainReload != TerrainReload.None)
+        {
+            AdvanceTerrainReload(renderer);
+            return;
+        }
+
         var status = renderer.ReadMeshReplacement();
         RetainCoverage(status);
         using (var read = ReadPublishedRegion())
         {
-            var ready = drawable && read.Anchor == _region.DesiredAnchor && read.Generation == status.LastPresentedGeneration;
+            var ready = drawable && read.Anchor == _region.DesiredAnchor &&
+                RendererGeneration(read.Generation) == status.LastPresentedGeneration;
             if (route is not null)
                 (deltaX, deltaZ) = route.NextMovement(ready);
 
@@ -83,17 +117,42 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership)
             }
         }
 
+        PublishAndDispatch(renderer);
+    }
+
+    private void AdvanceTerrainReload(IRenderMeshRegionReplacement renderer)
+    {
+        if (_terrainReload == TerrainReload.Draining)
+        {
+            if (!_region.IsSettled)
+                return;
+
+            // Renderer generations outlive the coordinator, including while its old mesh stays visible.
+            _generationOffset = renderer.ReadMeshReplacement().DesiredGeneration;
+            _region = new WalkableRegion(World);
+            _westIdentity = 0;
+            _westFingerprint = 0;
+            _terrainReload = TerrainReload.Presenting;
+        }
+
+        PublishAndDispatch(renderer);
+        if (renderer.ReadMeshReplacement().LastPresentedGeneration == RendererGeneration(_region.DesiredGeneration))
+            _terrainReload = TerrainReload.None;
+    }
+
+    private void PublishAndDispatch(IRenderMeshRegionReplacement renderer)
+    {
         var previousIntent = _region.DesiredGeneration;
         var activated = _region.PublishTick(Pose, published: true);
         if (previousIntent != _region.DesiredGeneration &&
-            !CheckSubmission(renderer.TryDeclareMeshGeneration(_region.DesiredGeneration)))
+            !CheckSubmission(renderer.TryDeclareMeshGeneration(RendererGeneration(_region.DesiredGeneration))))
             return;
 
         if (activated)
         {
             using var read = ReadPublishedRegion();
             var meshes = Capture(read);
-            if (!CheckSubmission(renderer.TrySubmitMeshRegion(read.Generation, meshes)))
+            if (!CheckSubmission(renderer.TrySubmitMeshRegion(RendererGeneration(read.Generation), meshes)))
                 return;
         }
 
@@ -178,7 +237,8 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership)
             Task<ChunkSnapshot?>? task;
             try
             {
-                task = Schedule(reservation, () => Generate(reservation));
+                var terrain = _terrain;
+                task = Schedule(reservation, () => Generate(reservation, terrain));
             }
             catch (Exception error)
             {
@@ -273,9 +333,11 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership)
             instances[i] = new(RenderMesh.Create(read.GetMeshPositions(i), read.GetMeshIndices(i)), coordinate.GetOrigin());
             identities[i] = (coordinate, identity);
         }
-        _coverage.Add(read.Generation, new Coverage(identities));
+        _coverage.Add(RendererGeneration(read.Generation), new Coverage(identities));
         return new RenderMeshRegion(instances);
     }
+
+    private ulong RendererGeneration(ulong generation) => checked(_generationOffset + generation);
 
     private void RetainCoverage(MeshReplacementSnapshot status)
     {
@@ -292,36 +354,19 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership)
         if (result == MeshReplacementSubmissionResult.Accepted)
             return true;
         if (result != MeshReplacementSubmissionResult.Closed)
-            throw new InvalidOperationException($"The renderer rejected walkable generation {_region.DesiredGeneration} ({result}).");
+            throw new InvalidOperationException($"The renderer rejected walkable generation {RendererGeneration(_region.DesiredGeneration)} ({result}).");
 
         Stop();
         return false;
     }
 
-    private static ChunkSnapshot? Generate(RegionLoadWork work)
+    private static ChunkSnapshot? Generate(RegionLoadWork work, TerrainChunkDelta[] terrain)
     {
         if (work.IsCancellationRequested)
             return null;
 
-        const int size = ChunkSnapshot.Size;
-        Span<byte> cells = stackalloc byte[ChunkSnapshot.CellCount];
-        var coordinate = work.Coordinate;
-        for (var z = 0; z < size; z++)
-        {
-            if (work.IsCancellationRequested)
-                return null;
-            var worldZ = coordinate.Z * size + z;
-            for (var x = 0; x < size; x++)
-            {
-                var worldX = coordinate.X * size + x;
-                var marker = unchecked(Seed ^ ((uint)worldX * 73856093u) ^ ((uint)worldZ * 19349663u));
-                var height = worldX == 34 && worldZ is >= 7 and <= 9 ? 8 : worldZ >= 13 && marker % 17 == 0 ? 6 : 4;
-                for (var y = 0; y < size; y++)
-                    cells[x + size * (y + size * z)] = y < height ? (byte)1 : (byte)0;
-            }
-        }
-
-        return ChunkSnapshot.Create(coordinate, GeneratorVersion, cells);
+        var snapshot = WalkableTerrain.Snapshot(work.Coordinate, terrain);
+        return work.IsCancellationRequested ? null : snapshot;
     }
 
     private static ulong Fingerprint(ChunkSnapshot snapshot)
@@ -336,6 +381,8 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership)
 
     private static Exception WorkerFailure(Task task) => task.Exception?.InnerException ??
         new InvalidOperationException("A reserved walkable region worker did not return a result.");
+
+    private enum TerrainReload { None, Draining, Presenting }
 
     private sealed record PendingLoad(RegionLoadWork Work, Task<ChunkSnapshot?> Task);
     private sealed record PendingMesh(RegionMeshWork Work, Task<RegionMeshResult?> Task);

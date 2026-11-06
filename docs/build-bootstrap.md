@@ -2,8 +2,8 @@
 
 Build and run from a clean WYU checkout on Windows with the .NET 10 SDK,
 PowerShell 7, and GitHub CLI. The engine is supplied by the immutable
-Groundwork NuGet archive. WYU pins all nine packages at
-`0.1.0-dev.42292324031.1` and commits the SDK-generated lockfile.
+Groundwork NuGet archive. WYU pins all ten packages at
+`0.1.0-dev.42303559178.1` and commits the SDK-generated lockfile.
 The renderer runs on Windows x64 and requires a D3D12 hardware adapter.
 
 Download the archive to a new temporary directory and run the verification
@@ -12,13 +12,13 @@ gate from the WYU repository root.
 ```powershell
 $archive = Join-Path ([IO.Path]::GetTempPath()) ('wyu-archive-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $archive | Out-Null
-gh release download archive-groundwork-0.1.0-dev.42292324031.1-immutable `
+gh release download archive-groundwork-0.1.0-dev.42303559178.1-immutable `
   --repo DaveBeusing/Groundwork --dir $archive
 if ($LASTEXITCODE -ne 0) { throw 'Groundwork archive download failed.' }
 ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $archive `
-  -ExpectedManifestSha256 4294F71A1B42B9D6ED132B203D6553B673AB8B62C23FB23E37A16B77E03EA43E `
-  -ExpectedSourceCommit 269ab9e1128c15f5764f0dded499e8e02db4110c `
-  -ExpectedVersion 0.1.0-dev.42292324031.1
+  -ExpectedManifestSha256 D82D42F2271A5A885E18937B7B0124854268EB3CDDFD1820FCBF84EBE50580E8 `
+  -ExpectedSourceCommit 5ab62bbbee7498a178b75a246804709a63238e07 `
+  -ExpectedVersion 0.1.0-dev.42303559178.1
 ```
 
 The gate checks package provenance, stages a temporary external NuGet feed,
@@ -75,3 +75,21 @@ report after shutdown.
 
 See the [Groundwork WP05 route contract](https://github.com/DaveBeusing/Groundwork/blob/269ab9e1128c15f5764f0dded499e8e02db4110c/docs/architecture/wp05-walkable-region-contract.md)
 for the fixed checkpoints and resource limits.
+
+## WP06 save and resume
+
+Launch the walkable region with save and resume enabled. The optional path
+selects a save slot directory.
+
+```powershell
+dotnet ./artifacts/bin/WorldsYetUnseen.Client/release/WorldsYetUnseen.Client.dll --save-world
+```
+
+Press **T** to toggle the boundary voxel in the test terrain and **F5** to save.
+On restart, use the same slot directory to resume the last committed terrain,
+player pose, and inventory.
+
+Add `-SaveSmoke` to the verified consumer command to exercise interrupted
+writes on Windows. The headless smoke kills the writer process after the
+pending save has been flushed and checks that a fresh process can still
+load the last committed terrain edit, player pose, and inventory.

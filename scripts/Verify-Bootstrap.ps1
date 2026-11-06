@@ -26,8 +26,8 @@ try {
     $refs = @($project.SelectNodes('//ProjectReference'))
     Assert-True ($refs.Count -eq 0) 'The WYU host must not use source ProjectReference dependencies.'
     $packages = @($project.SelectNodes('//PackageReference'))
-    $expectedVersion = '0.1.0-dev.42292324031.1'
-    $expectedIds = @('Core', 'Diagnostics', 'Ecs', 'Jobs', 'Platform.Windows', 'Rendering', 'Rendering.D3D12', 'Simulation', 'Voxels') |
+    $expectedVersion = '0.1.0-dev.42303559178.1'
+    $expectedIds = @('Core', 'Diagnostics', 'Ecs', 'Jobs', 'Persistence', 'Platform.Windows', 'Rendering', 'Rendering.D3D12', 'Simulation', 'Voxels') |
         ForEach-Object { "Groundwork.$_" }
     Assert-True ($packages.Count -eq $expectedIds.Count) 'Unexpected WYU package reference count.'
     $lockPath = 'src/WorldsYetUnseen.Client/packages.lock.json'

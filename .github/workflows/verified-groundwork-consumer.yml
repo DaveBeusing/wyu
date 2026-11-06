@@ -20,14 +20,14 @@ jobs:
       run:
         shell: pwsh
     env:
-      GROUNDWORK_RUN_ID: '42292324031'
+      GROUNDWORK_RUN_ID: '42303559178'
       GROUNDWORK_RUN_ATTEMPT: '1'
-      GROUNDWORK_EXPECTED_HEAD_SHA: '269ab9e1128c15f5764f0dded499e8e02db4110c'
-      GROUNDWORK_EXPECTED_MANIFEST_SHA256: '4294F71A1B42B9D6ED132B203D6553B673AB8B62C23FB23E37A16B77E03EA43E'
-      GROUNDWORK_EXPECTED_ARTIFACT_ZIP_SHA256: '24BC64FE2EF66337C910A83846B2BA1C834901F32833E88432E6EDDEF71A7B57'
-      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.42292324031.1'
-      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.42292324031.1-immutable'
-      GROUNDWORK_ARCHIVE_RECORD_SHA256: '22957F7AA16EA11B4C3060E9DFEEBE63FC510B6DE6D0FB906DA1DF89C5515F48'
+      GROUNDWORK_EXPECTED_HEAD_SHA: '5ab62bbbee7498a178b75a246804709a63238e07'
+      GROUNDWORK_EXPECTED_MANIFEST_SHA256: 'D82D42F2271A5A885E18937B7B0124854268EB3CDDFD1820FCBF84EBE50580E8'
+      GROUNDWORK_EXPECTED_ARTIFACT_ZIP_SHA256: '62863269EBD0C46C4B44250A4072A1D135DB5996CA009FA8A320E54692477A1E'
+      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.42303559178.1'
+      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.42303559178.1-immutable'
+      GROUNDWORK_ARCHIVE_RECORD_SHA256: 'E8AD1A170D3CD7FE93BD0F32AF22BB6E2794DF28BEBB6BDDF77980E850592C20'
       GROUNDWORK_LICENSE_SHA256: 'B1D2870F1A00E4D7F56576E5F0870CBA109E041F8AF66866CF5B499478E654E7'
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -59,7 +59,7 @@ jobs:
           if ([string]$release.target_commitish -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA) { throw 'Unexpected archived commit.' }
           $assets = @($release.assets)
           $names = @('manifest.json','archive-record.json','LICENSE')
-          $modules = @('Core','Diagnostics','Ecs','Jobs','Platform.Windows','Rendering','Rendering.D3D12','Simulation','Voxels')
+          $modules = @('Core','Diagnostics','Ecs','Jobs','Persistence','Platform.Windows','Rendering','Rendering.D3D12','Simulation','Voxels')
           $names += @($modules | ForEach-Object { "Groundwork.$_.$env:GROUNDWORK_EXPECTED_VERSION.nupkg" })
           if ($assets.Count -ne $names.Count) { throw 'Unexpected archived asset count.' }
           foreach ($name in $names) {
@@ -85,7 +85,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Groundwork release archive cannot be downloaded.' }
           "GROUNDWORK_ARTIFACT_DIR=$artifactDir" >> $env:GITHUB_ENV
 
-      - name: Verify packages, build from locked restore and exercise host lifecycle
+      - name: Verify packages, build from locked restore and exercise host lifecycle and save recovery
         run: |
           $ErrorActionPreference = 'Stop'
           $manifest = Join-Path $env:GROUNDWORK_ARTIFACT_DIR 'manifest.json'
@@ -111,5 +111,5 @@ jobs:
               $archive.artifactZipSha256 -ine $env:GROUNDWORK_EXPECTED_ARTIFACT_ZIP_SHA256) {
             throw 'Archive provenance record does not match pinned producer.'
           }
-          & ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $env:GROUNDWORK_ARTIFACT_DIR -ExpectedManifestSha256 $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256 -ExpectedSourceCommit $env:GROUNDWORK_EXPECTED_HEAD_SHA -ExpectedVersion $env:GROUNDWORK_EXPECTED_VERSION
+          & ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $env:GROUNDWORK_ARTIFACT_DIR -ExpectedManifestSha256 $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256 -ExpectedSourceCommit $env:GROUNDWORK_EXPECTED_HEAD_SHA -ExpectedVersion $env:GROUNDWORK_EXPECTED_VERSION -SaveSmoke
           if ($LASTEXITCODE -ne 0) { throw 'Verified consumer gate failed.' }
