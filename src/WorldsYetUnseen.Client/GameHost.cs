@@ -9,7 +9,7 @@ using System.Runtime.ExceptionServices;
 
 namespace WorldsYetUnseen.Client;
 
-internal enum HostMode { Interactive, D3D12, D3D12Smoke, Terrain, TerrainSmoke, Walkable, WalkableSmoke, WindowSmoke, HeadlessSmoke, FaultSmoke }
+internal enum HostMode { Interactive, D3D12, D3D12Smoke, Terrain, TerrainSmoke, Walkable, WalkableSmoke, SaveWorld, WindowSmoke, HeadlessSmoke, FaultSmoke }
 
 internal static class GameHost
 {
@@ -26,9 +26,32 @@ internal static class GameHost
 
     private static bool IsTerrain(HostMode mode) => mode is HostMode.Terrain or HostMode.TerrainSmoke;
 
-    private static bool IsInteractive(HostMode mode) => mode is HostMode.Interactive or HostMode.D3D12 or HostMode.Terrain or HostMode.Walkable;
+    internal static bool IsInteractive(HostMode mode) => mode is HostMode.Interactive or HostMode.D3D12 or HostMode.Terrain or HostMode.Walkable or HostMode.SaveWorld;
 
-    internal static async Task RunAsync(HostMode mode, CancellationToken cancellationToken)
+    internal static async Task RunSaveSmokeAsync(string phase, string directory, string token, CancellationToken cancellationToken)
+    {
+        var clock = TimeProvider.System;
+        var timing = new RuntimeTimingLimits(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        var budget = new ProcessResourceBudget(new ProcessResourceLimits(1, RuntimeQuota));
+        using var reservation = budget.TryReserveRuntime(RuntimeQuota) ??
+            throw new InvalidOperationException("Could not reserve the WYU runtime budget.");
+        var runtime = RuntimeSafetyAuthority.Create(clock, timing, reservation);
+        var smoke = new SaveResumeSmoke(runtime.RuntimeOwnership);
+        try
+        {
+            await smoke.RunAsync(phase, directory, token, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            await StopAsync(runtime, clock, null, null, null, new EcsStorageBudget(StorageBytes),
+                smoke.Scene, smoke.Save, HostStopReason.ExternalCancellation).ConfigureAwait(false);
+        }
+        Console.WriteLine(phase == "--save-smoke-init"
+            ? "PASS: WYU committed the initial edited terrain."
+            : "PASS: WYU restored committed terrain, position and inventory after interrupted save.");
+    }
+
+    internal static async Task RunAsync(HostMode mode, CancellationToken cancellationToken, string? saveDirectory = null)
     {
         var smokeClock = mode is HostMode.HeadlessSmoke or HostMode.FaultSmoke ? new SmokeClock() : null;
         TimeProvider clock = smokeClock ?? TimeProvider.System;
@@ -43,6 +66,7 @@ internal static class GameHost
         WindowsHostModule? window = null;
         D3D12Renderer? renderer = null;
         TerrainScene? terrain = IsTerrain(mode) ? new TerrainScene() : null;
+        WorldSave? save = null;
         WalkableScene? walkable = mode is HostMode.Walkable or HostMode.WalkableSmoke
             ? new WalkableScene(runtime.RuntimeOwnership)
             : null;
@@ -54,6 +78,17 @@ internal static class GameHost
         {
             using var wakeOnCancellation = cancellationToken.UnsafeRegister(
                 static state => ((RuntimeWakeSignal)state!).Signal(), runtime.SimulationWake);
+            if (mode == HostMode.SaveWorld)
+            {
+                saveDirectory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "WorldsYetUnseen", "WP06");
+                save = await WorldSave.OpenAsync(saveDirectory, runtime.RuntimeOwnership, cancellationToken).ConfigureAwait(false);
+                walkable = new WalkableScene(runtime.RuntimeOwnership, save.Pose, save.Terrain.Span);
+                if (save.Generation != 0)
+                    Console.WriteLine($"Resumed save generation {save.Generation}.");
+                if (save.Recovery is { } recovery)
+                    Console.WriteLine($"Save recovery: {recovery.FileName} ({recovery.Reason}).");
+            }
             world = EcsWorld.Open(runtime, WorldQuota, new BarrierSupervisorPolicy(WorldQuota.Diagnostics.RequiredEvidenceRecords),
                 new ComponentRegistryBuilder().Build(), new EcsLimits(16, 1, 0, 1024 * 1024, StorageBytes), storage);
             if (smokeClock is null)
@@ -92,7 +127,7 @@ internal static class GameHost
 
             stopReason = HostStopReason.RuntimeFault;
             IInputSource input = window is not null ? window : new SmokeInput();
-            success = await DriveAsync(mode, context, runtime, world, input, renderer, terrain, walkable, smokeClock, cancellationToken)
+            success = await DriveAsync(mode, context, runtime, world, input, renderer, terrain, walkable, save, smokeClock, cancellationToken)
                 .ConfigureAwait(false);
             stopReason = mode == HostMode.FaultSmoke ? HostStopReason.RuntimeFault : HostStopReason.ExternalCancellation;
         }
@@ -109,7 +144,7 @@ internal static class GameHost
 
         try
         {
-            await StopAsync(runtime, clock, renderer, window, world, storage, walkable, stopReason).ConfigureAwait(false);
+            await StopAsync(runtime, clock, renderer, window, world, storage, walkable, save, stopReason).ConfigureAwait(false);
         }
         catch (Exception cleanup) when (failure is not null)
         {
@@ -126,7 +161,7 @@ internal static class GameHost
 
     private static async Task<string?> DriveAsync(HostMode mode, EngineModuleContext context, RuntimeSafetyAuthority runtime,
         EcsWorld world, IInputSource input, D3D12Renderer? renderer, TerrainScene? terrain,
-        WalkableScene? walkable, SmokeClock? smokeClock, CancellationToken cancellationToken)
+        WalkableScene? walkable, WorldSave? save, SmokeClock? smokeClock, CancellationToken cancellationToken)
     {
         var injectedFault = mode == HostMode.FaultSmoke ? new InvalidOperationException("Controlled tick failure.") : null;
         var route = mode == HostMode.WalkableSmoke ? new WalkableRouteSmoke() : null;
@@ -234,6 +269,20 @@ internal static class GameHost
             var drawable = renderer!.Read().Surface == RenderSurfaceState.Drawable;
             var (x, z) = route is null && drawable ? ReadWalkableInput(tick.Input, ref yaw) : default;
             walkable!.Advance(x, z, tick.Tick, route, drawable);
+            if (save is not null)
+            {
+                save.Advance();
+                if (drawable && !tick.Input.TransitionLoss)
+                {
+                    if (tick.Input.Events.Any(static e => e is
+                        { Kind: InputEventKind.Pressed, Device: InputDevice.Keyboard, Control: InputControl.T }))
+                        walkable.TryToggleTerrain();
+                    if (tick.Input.Events.Any(static e => e is
+                        { Kind: InputEventKind.Pressed, Device: InputDevice.Keyboard, Control: InputControl.F5 })
+                        && !save.RequestSave(walkable.Pose, walkable.Terrain))
+                        Console.WriteLine("Save request could not be queued.");
+                }
+            }
             if (route is { Completed: true } && routeCompletionTick == 0)
                 routeCompletionTick = tick.Tick;
         }
@@ -287,9 +336,10 @@ internal static class GameHost
     }
 
     private static async Task StopAsync(RuntimeSafetyAuthority runtime, TimeProvider clock, D3D12Renderer? renderer, WindowsHostModule? window,
-        EcsWorld? world, EcsStorageBudget storage, WalkableScene? walkable, HostStopReason reason)
+        EcsWorld? world, EcsStorageBudget storage, WalkableScene? walkable, WorldSave? save, HostStopReason reason)
     {
         walkable?.Stop();
+        save?.Stop();
         var deadline = runtime.StopControl.RequestStop(reason);
         var failures = new List<Exception>();
         try
@@ -324,10 +374,11 @@ internal static class GameHost
 
         try
         {
-            if (walkable is not null)
+            if (walkable is not null || save is not null)
             {
                 using var workerDeadline = new CancellationTokenSource(deadline.GetRemainingForSettlement(clock));
-                await walkable.SettleAsync(workerDeadline.Token).ConfigureAwait(false);
+                await Task.WhenAll(walkable?.SettleAsync(workerDeadline.Token) ?? Task.CompletedTask,
+                    save?.SettleAsync(workerDeadline.Token) ?? Task.CompletedTask).ConfigureAwait(false);
             }
         }
         catch (Exception error)

@@ -6,7 +6,8 @@ param(
     [switch]$WindowSmoke,
     [switch]$D3D12Smoke,
     [switch]$TerrainSmoke,
-    [switch]$WalkableSmoke
+    [switch]$WalkableSmoke,
+    [switch]$SaveSmoke
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -18,7 +19,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not (Test-Path -LiteralPath $ArtifactDirectory -PathType Container)) { throw 'Groundwork package archive is unavailable.' }
 $artifactRoot = (Resolve-Path -LiteralPath $ArtifactDirectory).Path
 $expectedIds = @('Groundwork.Core','Groundwork.Platform.Windows','Groundwork.Simulation','Groundwork.Ecs',
-    'Groundwork.Jobs','Groundwork.Diagnostics','Groundwork.Rendering','Groundwork.Rendering.D3D12','Groundwork.Voxels')
+    'Groundwork.Jobs','Groundwork.Diagnostics','Groundwork.Rendering','Groundwork.Rendering.D3D12','Groundwork.Voxels','Groundwork.Persistence')
 
 function Read-VerifiedArchive([string]$Directory, [string]$Version) {
     $manifestPath = Join-Path $Directory 'manifest.json'
@@ -56,20 +57,26 @@ function Assert-ArchiveRejected([string]$Directory, [string]$Version, [string]$E
     throw "Invalid archive accepted. Expected rejection: $ExpectedMessage"
 }
 
-function Invoke-HostSmoke([string]$Assembly, [string]$Mode, [string]$PassLine, [int]$TimeoutSeconds = 30) {
+function Start-HostSmoke([string]$Assembly, [string]$Mode, [string[]]$Arguments) {
     $start = [System.Diagnostics.ProcessStartInfo]::new('dotnet')
     $start.ArgumentList.Add($Assembly)
     $start.ArgumentList.Add($Mode)
+    foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
-    $process = [System.Diagnostics.Process]::Start($start)
+    [System.Diagnostics.Process]::Start($start)
+}
+
+function Invoke-HostSmoke([string]$Assembly, [string]$Mode, [string]$PassLine, [int]$TimeoutSeconds = 30, [string[]]$Arguments = @()) {
+    $process = Start-HostSmoke $Assembly $Mode $Arguments
     try {
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             $process.Kill($true)
+            [void]$process.WaitForExit(5000)
             throw "WYU $Mode exceeded $TimeoutSeconds seconds."
         }
         $output = $stdout.GetAwaiter().GetResult()
@@ -79,6 +86,59 @@ function Invoke-HostSmoke([string]$Assembly, [string]$Mode, [string]$PassLine, [
             throw "WYU $Mode failed with exit $($process.ExitCode). $errors"
         }
     } finally { $process.Dispose() }
+}
+
+function Invoke-SaveSmoke([string]$Assembly, [string]$WorkDirectory) {
+    $slot = Join-Path $WorkDirectory 'save-smoke'
+    [void](New-Item -ItemType Directory -Path $slot)
+    $token = [guid]::NewGuid().ToString('N')
+    Set-Content -LiteralPath (Join-Path $slot 'wyu-save-smoke.fixture') -Value $token
+    $arguments = @($slot, $token)
+    Invoke-HostSmoke $Assembly '--save-smoke-init' 'PASS: WYU committed the initial edited terrain.' -Arguments $arguments
+
+    $first = Join-Path $slot 'save.a'
+    $second = Join-Path $slot 'save.b'
+    $pending = Join-Path $slot 'save.pending'
+    $marker = Join-Path $slot 'wyu-save-smoke.ready'
+    $committedHash = (Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash
+    $writer = Start-HostSmoke $Assembly '--save-smoke-interrupt' $arguments
+    try {
+        $stdout = $writer.StandardOutput.ReadToEndAsync()
+        $stderr = $writer.StandardError.ReadToEndAsync()
+        $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
+        $expectedMarker = "$token $($writer.Id)"
+        $ready = $false
+        while (!$writer.HasExited -and $elapsed.Elapsed.TotalSeconds -lt 30) {
+            if ((Test-Path -LiteralPath $marker -PathType Leaf) -and
+                (Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue) -ceq $expectedMarker) {
+                $ready = $true
+                break
+            }
+            Start-Sleep -Milliseconds 50
+        }
+        if ($writer.HasExited) {
+            throw "WYU save writer exited before interruption. $($stdout.GetAwaiter().GetResult()) $($stderr.GetAwaiter().GetResult())"
+        }
+        if (!$ready) { throw 'WYU save writer did not reach the flush boundary.' }
+        $frame = [System.IO.File]::ReadAllBytes($pending)
+        if ($frame.Length -lt 24 -or [BitConverter]::ToUInt64($frame, 16) -ne 2 -or (Test-Path -LiteralPath $second)) {
+            throw 'Generation 2 was not staged at the expected publication boundary.'
+        }
+        $writer.Kill()
+        if (!$writer.WaitForExit(5000)) { throw 'WYU save writer did not terminate.' }
+        if ((Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash -cne $committedHash -or (Test-Path -LiteralPath $second)) {
+            throw 'The interruption changed the committed checkpoint.'
+        }
+        Write-Host 'PASS: Windows terminated the writer after generation 2 was flushed and before it was installed.'
+    } finally {
+        if (!$writer.HasExited) {
+            $writer.Kill()
+            [void]$writer.WaitForExit(5000)
+        }
+        $writer.Dispose()
+    }
+
+    Invoke-HostSmoke $Assembly '--save-smoke-resume' 'PASS: WYU restored committed terrain, position and inventory after interrupted save.' -Arguments $arguments
 }
 
 $entries = @(Read-VerifiedArchive $artifactRoot $ExpectedVersion)
@@ -142,6 +202,7 @@ try {
         if ($D3D12Smoke) { Invoke-HostSmoke $assembly '--d3d12-smoke' 'PASS: WYU D3D12 Windows startup and shutdown.' }
         if ($TerrainSmoke) { Invoke-HostSmoke $assembly '--terrain-smoke' 'PASS: WYU D3D12 terrain presentation and native shutdown.' }
         if ($WalkableSmoke) { Invoke-HostSmoke $assembly '--walkable-smoke' 'PASS: WYU walkable route and native shutdown.' -TimeoutSeconds 130 }
+        if ($SaveSmoke) { Invoke-SaveSmoke $assembly $work }
         Write-Host "PASS: WYU consumed $($expectedIds.Count) verified Groundwork $ExpectedVersion packages with a fresh locked restore."
         $global:LASTEXITCODE = 0
     } finally { Pop-Location }
