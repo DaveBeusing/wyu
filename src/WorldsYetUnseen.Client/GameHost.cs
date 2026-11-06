@@ -2,12 +2,14 @@ using Groundwork.Core;
 using Groundwork.Diagnostics;
 using Groundwork.Ecs;
 using Groundwork.Platform.Windows;
+using Groundwork.Rendering;
+using Groundwork.Rendering.D3D12;
 using Groundwork.Simulation;
 using System.Runtime.ExceptionServices;
 
 namespace WorldsYetUnseen.Client;
 
-internal enum HostMode { Interactive, WindowSmoke, HeadlessSmoke, FaultSmoke }
+internal enum HostMode { Interactive, D3D12, D3D12Smoke, WindowSmoke, HeadlessSmoke, FaultSmoke }
 
 internal static class GameHost
 {
@@ -33,6 +35,7 @@ internal static class GameHost
         var storage = new EcsStorageBudget(StorageBytes);
         EcsWorld? world = null;
         WindowsHostModule? window = null;
+        D3D12Renderer? renderer = null;
         var stopReason = HostStopReason.StartupFault;
         Exception? failure = null;
         string? success = null;
@@ -45,20 +48,31 @@ internal static class GameHost
                 new ComponentRegistryBuilder().Build(), new EcsLimits(16, 1, 0, 1024 * 1024, StorageBytes), storage);
             if (smokeClock is null)
             {
-                window = new WindowsHostModule(new WindowsHostOptions("Worlds Yet Unseen", 960, 540, 256),
+                var title = mode == HostMode.D3D12Smoke ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen";
+                window = new WindowsHostModule(new WindowsHostOptions(title, 960, 540, 256),
                     runtime.UiWake, runtime.RuntimeOwnership);
                 await window.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
                 await window.StartAsync(cancellationToken).ConfigureAwait(false);
-                if (mode == HostMode.WindowSmoke && window.Read() is not { Phase: HostWindowPhase.Open, ClientWidth: > 0, ClientHeight: > 0 })
+                if ((mode is HostMode.WindowSmoke or HostMode.D3D12Smoke) &&
+                    window.Read() is not { Phase: HostWindowPhase.Open, ClientWidth: > 0, ClientHeight: > 0 })
                     throw new InvalidOperationException("The Windows host did not open a usable window.");
+                if (mode is HostMode.D3D12 or HostMode.D3D12Smoke)
+                {
+                    var diagnostics = mode == HostMode.D3D12Smoke
+                        ? new D3D12DiagnosticsOptions(EnableDebugLayer: true, EnableDred: true)
+                        : default;
+                    renderer = new D3D12Renderer(diagnostics, window, runtime.RuntimeOwnership);
+                    await renderer.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
+                    await renderer.StartAsync(cancellationToken).ConfigureAwait(false);
+                }
             }
 
             stopReason = HostStopReason.RuntimeFault;
             IInputSource input = window is not null ? window : new SmokeInput();
-            success = await DriveAsync(mode, context, runtime, world, input, smokeClock, cancellationToken).ConfigureAwait(false);
+            success = await DriveAsync(mode, context, runtime, world, input, renderer, smokeClock, cancellationToken).ConfigureAwait(false);
             stopReason = mode == HostMode.FaultSmoke ? HostStopReason.RuntimeFault : HostStopReason.ExternalCancellation;
         }
-        catch (OperationCanceledException) when (mode == HostMode.Interactive &&
+        catch (OperationCanceledException) when ((mode is HostMode.Interactive or HostMode.D3D12) &&
             (cancellationToken.IsCancellationRequested || runtime.State.Read().Conditions == SafetyCondition.TerminalStop) &&
             runtime.Diagnostics.ReadEmergency().Primary is null)
         {
@@ -71,7 +85,7 @@ internal static class GameHost
 
         try
         {
-            await StopAsync(runtime, clock, window, world, storage, stopReason).ConfigureAwait(false);
+            await StopAsync(runtime, clock, renderer, window, world, storage, stopReason).ConfigureAwait(false);
         }
         catch (Exception cleanup) when (failure is not null)
         {
@@ -80,16 +94,20 @@ internal static class GameHost
 
         if (failure is not null)
             ExceptionDispatchInfo.Throw(failure);
+        if (mode == HostMode.D3D12Smoke)
+            DesktopSmoke.VerifyShutdown(renderer!);
         if (success is not null)
             Console.WriteLine(success);
     }
 
     private static async Task<string?> DriveAsync(HostMode mode, EngineModuleContext context, RuntimeSafetyAuthority runtime,
-        EcsWorld world, IInputSource input, SmokeClock? smokeClock, CancellationToken cancellationToken)
+        EcsWorld world, IInputSource input, D3D12Renderer? renderer, SmokeClock? smokeClock, CancellationToken cancellationToken)
     {
         var injectedFault = mode == HostMode.FaultSmoke ? new InvalidOperationException("Controlled tick failure.") : null;
         var pipeline = new WorldTickPipeline(world, injectedFault);
         var simulation = new FixedStepSimulation(context, input, pipeline, world.Safety.State, runtime.SimulationWake);
+        var scene = renderer is null ? null : new CubeScene(renderer);
+        var nativeCloseSent = false;
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -98,6 +116,17 @@ internal static class GameHost
                 var iteration = await simulation.AdvanceAsync(CancellationToken.None).ConfigureAwait(false);
                 if (iteration.State == SimulationState.Stopped || pipeline.CloseRequested)
                     break;
+                if (!nativeCloseSent && scene is not null)
+                {
+                    scene.Submit(context.Clock, iteration, pipeline.PublishedTick);
+                    if (mode == HostMode.D3D12Smoke && pipeline.PublishedTick >= 3 &&
+                        renderer!.Read() is { LastPresentedSequence: > 0, Surface: RenderSurfaceState.Drawable } presented)
+                    {
+                        VerifySmokePublication(world, pipeline, simulation);
+                        DesktopSmoke.RequestNativeClose(presented);
+                        nativeCloseSent = true;
+                    }
+                }
                 if (mode == HostMode.WindowSmoke && iteration.CompletedTick >= 3)
                     break;
                 if (smokeClock is not null)
@@ -123,23 +152,34 @@ internal static class GameHost
         if ((worldConditions & SafetyCondition.RequiredEvidenceLost) != 0 ||
             worldConditions.HasFlag(SafetyCondition.TerminalStop) && !runtimeConditions.HasFlag(SafetyCondition.TerminalStop))
             throw new InvalidOperationException($"Groundwork stopped the world unexpectedly ({worldConditions}).");
-        if (mode == HostMode.Interactive)
+        if (mode is HostMode.Interactive or HostMode.D3D12)
             return null;
 
         cancellationToken.ThrowIfCancellationRequested();
+        if (mode == HostMode.D3D12Smoke)
+        {
+            if (!nativeCloseSent || !runtimeConditions.HasFlag(SafetyCondition.TerminalStop))
+                throw new InvalidOperationException("The D3D12 smoke did not present and observe native close.");
+            return "PASS: WYU D3D12 Windows startup and shutdown.";
+        }
+
+        if (mode == HostMode.HeadlessSmoke && (pipeline.PublishedTick != 3 || !pipeline.CloseRequested) || mode == HostMode.FaultSmoke)
+            throw new InvalidOperationException("The WYU smoke did not complete the expected input sequence.");
+        VerifySmokePublication(world, pipeline, simulation);
+        return mode == HostMode.WindowSmoke ? "PASS: WYU Windows startup and shutdown." : "PASS: WYU headless startup and shutdown.";
+    }
+
+    private static void VerifySmokePublication(EcsWorld world, WorldTickPipeline pipeline, FixedStepSimulation simulation)
+    {
         if (pipeline.PublishedTick < 3 || pipeline.GameplaySteps != pipeline.PublishedTick / 3 ||
             simulation.LastConfirmedBarrier is not { Kind: BarrierKind.CommitResults } barrier ||
-            barrier.Tick != pipeline.PublishedTick || barrier.Epoch != 2 * barrier.Tick ||
-            mode == HostMode.HeadlessSmoke && (pipeline.PublishedTick != 3 || !pipeline.CloseRequested) ||
-            mode == HostMode.FaultSmoke)
-            throw new InvalidOperationException("The WYU smoke did not complete the expected simulation and input sequence.");
+            barrier.Tick != pipeline.PublishedTick || barrier.Epoch != 2 * barrier.Tick)
+            throw new InvalidOperationException("The WYU smoke did not complete the expected simulation sequence.");
 
         var observer = world.Safety.Publication.ObserverSnapshots.TryAcquire();
         using var lease = observer.Lease;
         if (observer.Status != ObserverReadStatus.Acquired || lease?.Current.Stamp != barrier)
             throw new InvalidOperationException("The final observer frame does not match the last committed tick.");
-
-        return mode == HostMode.WindowSmoke ? "PASS: WYU Windows startup and shutdown." : "PASS: WYU headless startup and shutdown.";
     }
 
     private static void WaitForNextIteration(TimeProvider clock, RuntimeWakeSignal wake, long? targetTimestamp)
@@ -158,11 +198,27 @@ internal static class GameHost
         }
     }
 
-    private static async Task StopAsync(RuntimeSafetyAuthority runtime, TimeProvider clock, WindowsHostModule? window,
+    private static async Task StopAsync(RuntimeSafetyAuthority runtime, TimeProvider clock, D3D12Renderer? renderer, WindowsHostModule? window,
         EcsWorld? world, EcsStorageBudget storage, HostStopReason reason)
     {
         var deadline = runtime.StopControl.RequestStop(reason);
-        Exception? windowFailure = null;
+        var failures = new List<Exception>();
+        try
+        {
+            if (renderer is not null)
+            {
+                await renderer.DisposeAsync().ConfigureAwait(false);
+                var status = renderer.Read();
+                if (status is not { Lifecycle: RendererLifecycle.Stopped, FirstFault: null,
+                    FirstCleanupFault: null, IncompleteCleanup: false })
+                    throw new InvalidOperationException($"The D3D12 renderer stopped with invalid settlement ({status}).");
+            }
+        }
+        catch (Exception error)
+        {
+            failures.Add(error);
+        }
+
         try
         {
             if (window is not null)
@@ -174,7 +230,7 @@ internal static class GameHost
         }
         catch (Exception error)
         {
-            windowFailure = error;
+            failures.Add(error);
         }
 
         try
@@ -190,13 +246,15 @@ internal static class GameHost
             if (settlement != ShutdownSettlement.Released || (world is not null && !world.TryReleaseStorage()) || storage.ReservedBytes != 0)
                 throw new InvalidOperationException($"Groundwork shutdown did not release its resources ({settlement}).");
         }
-        catch (Exception settlementFailure) when (windowFailure is not null)
+        catch (Exception error)
         {
-            throw new AggregateException(windowFailure, settlementFailure);
+            failures.Add(error);
         }
 
-        if (windowFailure is not null)
-            ExceptionDispatchInfo.Throw(windowFailure);
+        if (failures.Count == 1)
+            ExceptionDispatchInfo.Throw(failures[0]);
+        if (failures.Count > 1)
+            throw new AggregateException(failures);
     }
 
     private sealed class SmokeClock : TimeProvider

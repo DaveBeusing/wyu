@@ -7,6 +7,8 @@ internal static class Program
         HostMode? mode = args switch
         {
             [] => HostMode.Interactive,
+            ["--d3d12"] => HostMode.D3D12,
+            ["--d3d12-smoke"] => HostMode.D3D12Smoke,
             ["--window-smoke"] => HostMode.WindowSmoke,
             ["--headless-smoke"] => HostMode.HeadlessSmoke,
             ["--fault-smoke"] => HostMode.FaultSmoke,
@@ -14,12 +16,12 @@ internal static class Program
         };
         if (mode is null)
         {
-            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--window-smoke | --headless-smoke | --fault-smoke]");
+            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--d3d12 | --d3d12-smoke | --window-smoke | --headless-smoke | --fault-smoke]");
             return 2;
         }
 
         using var cancellation = new CancellationTokenSource();
-        if (mode != HostMode.Interactive)
+        if (mode is not (HostMode.Interactive or HostMode.D3D12))
             cancellation.CancelAfter(TimeSpan.FromSeconds(15));
 
         Console.CancelKeyPress += Cancel;

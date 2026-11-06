@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)][string]$ExpectedManifestSha256,
     [Parameter(Mandatory)][string]$ExpectedSourceCommit,
     [Parameter(Mandatory)][string]$ExpectedVersion,
-    [switch]$WindowSmoke
+    [switch]$WindowSmoke,
+    [switch]$D3D12Smoke
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -14,7 +15,8 @@ if ($ExpectedVersion -notmatch '^0\.1\.0-dev\.[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*$
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not (Test-Path -LiteralPath $ArtifactDirectory -PathType Container)) { throw 'Groundwork package archive is unavailable.' }
 $artifactRoot = (Resolve-Path -LiteralPath $ArtifactDirectory).Path
-$expectedIds = @('Groundwork.Core','Groundwork.Platform.Windows','Groundwork.Simulation','Groundwork.Ecs','Groundwork.Jobs','Groundwork.Diagnostics')
+$expectedIds = @('Groundwork.Core','Groundwork.Platform.Windows','Groundwork.Simulation','Groundwork.Ecs',
+    'Groundwork.Jobs','Groundwork.Diagnostics','Groundwork.Rendering','Groundwork.Rendering.D3D12')
 
 function Read-VerifiedArchive([string]$Directory, [string]$Version) {
     $manifestPath = Join-Path $Directory 'manifest.json'
@@ -24,7 +26,7 @@ function Read-VerifiedArchive([string]$Directory, [string]$Version) {
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     if ($manifest.schemaVersion -ne 1 -or $manifest.sourceCommit -ine $ExpectedSourceCommit) { throw 'Unexpected producer commit or schema.' }
     $entries = @($manifest.packages)
-    if ($entries.Count -ne $expectedIds.Count) { throw 'Expected six package entries.' }
+    if ($entries.Count -ne $expectedIds.Count) { throw "Expected $($expectedIds.Count) package entries." }
     $seen = @()
     foreach ($package in $entries) {
         $id = [string]$package.packageId
@@ -80,7 +82,7 @@ function Invoke-HostSmoke([string]$Assembly, [string]$Mode, [string]$PassLine) {
 $entries = @(Read-VerifiedArchive $artifactRoot $ExpectedVersion)
 [xml]$project = Get-Content -LiteralPath (Join-Path $root 'src/WorldsYetUnseen.Client/WorldsYetUnseen.Client.csproj') -Raw
 $references = @($project.SelectNodes('//PackageReference'))
-if ($references.Count -ne $expectedIds.Count) { throw 'WYU must explicitly pin all six Groundwork packages.' }
+if ($references.Count -ne $expectedIds.Count) { throw 'WYU must explicitly pin every approved Groundwork package.' }
 foreach ($id in $expectedIds) {
     $pin = @($references | Where-Object { $_.GetAttribute('Include') -ceq $id })
     if ($pin.Count -ne 1 -or $pin[0].GetAttribute('Version') -cne "[$ExpectedVersion]") {
@@ -135,7 +137,8 @@ try {
         Invoke-HostSmoke $assembly '--headless-smoke' 'PASS: WYU headless startup and shutdown.'
         Invoke-HostSmoke $assembly '--fault-smoke' 'PASS: WYU controlled fault shutdown.'
         if ($WindowSmoke) { Invoke-HostSmoke $assembly '--window-smoke' 'PASS: WYU Windows startup and shutdown.' }
-        Write-Host "PASS: WYU consumed six verified Groundwork $ExpectedVersion packages with a fresh locked restore."
+        if ($D3D12Smoke) { Invoke-HostSmoke $assembly '--d3d12-smoke' 'PASS: WYU D3D12 Windows startup and shutdown.' }
+        Write-Host "PASS: WYU consumed $($expectedIds.Count) verified Groundwork $ExpectedVersion packages with a fresh locked restore."
         $global:LASTEXITCODE = 0
     } finally { Pop-Location }
 } finally {
