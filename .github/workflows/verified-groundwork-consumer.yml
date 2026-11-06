@@ -41,7 +41,7 @@ jobs:
       - name: Validate Groundwork CI run identity
         run: |
           $ErrorActionPreference = 'Stop'
-          $run = gh api "repos/DaveBeusing/Groundwork/actions/runs/$env:GROUNDWORK_RUN_ID" | ConvertFrom-Json
+          $run = gh api "repos/DaveBeusing/Groundwork/actions/runs/$env:GROUNDWORK_RUN_ID/attempts/$env:GROUNDWORK_RUN_ATTEMPT" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $null -eq $run) { throw 'Groundwork run unavailable.' }
           if ([string]$run.id -ne $env:GROUNDWORK_RUN_ID -or [string]$run.run_attempt -ne $env:GROUNDWORK_RUN_ATTEMPT) { throw 'Run attempt mismatch.' }
           if ($run.status -ne 'completed' -or $run.conclusion -ne 'success') { throw 'Producer CI did not pass.' }
