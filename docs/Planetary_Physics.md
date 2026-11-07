@@ -20,11 +20,12 @@ Die Physik in **Worlds Yet Unseen (WYU)** soll **glaubwürdig, konsistent und re
 **Name:** New Terra. Der Startplanet ist grundsätzlich erdähnlich und in den üblichen, bewohnbaren Oberflächenregionen ohne künstliche Atemversorgung begehbar.
 
 - **Oberflächengravitation:** Rund **1 g = 9,81 m/s²** unter typischen Oberflächenbedingungen, entsprechend der Erde. Bewegung, Springen und Fallen fühlen sich deshalb zunächst vertraut an. Die Schwerkraftrichtung zeigt zur Planetenmitte; mit wachsender Entfernung vom Planetenzentrum darf ihre Stärke plausibel abnehmen.
+- **Tageslänge:** **24 Stunden planetare Ortszeit** je vollständigem Tag-Nacht-Zyklus (erdähnlicher Sonnentag). **Noch offen:** Wie viele Minuten oder Stunden realer Spielzeit einem solchen Tag entsprechen; die Zeitkompression wird später anhand von Gameplay, Erkundung und Performance abgestimmt. Die planetare Tageslänge und die Echtzeit-zu-Spielzeit-Skalierung sind getrennte Parameter.
 - **Atembare Grundatmosphäre:** Der Spieler benötigt bei normaler Erkundung an Land weder Atemmaske noch Sauerstofftank.
 - **Unter Wasser:** Freies Atmen ist nicht möglich; Tauchzeit und später geeignete Atemtechnik bzw. Lebenserhaltung werden relevant.
 - **Große Höhen:** Durch sinkenden Luftdruck nimmt auch der Sauerstoff-Partialdruck ab. Ab bestimmten Höhen können Atemprobleme auftreten; konkrete Schwellen und Spielmechaniken bleiben offen.
 - **Regionaler Charakter:** Sauerstoffmangel ist auf solche physikalisch begründeten Bedingungen begrenzt und kein genereller Überlebenszwang im frühen Spiel.
-- **Offen:** Konkreter Planetenradius und -masse (so aufeinander abzustimmen, dass ungefähr 1 g an der Oberfläche entsteht), Atmosphärenzusammensetzung, Tageslänge und genaue Höhenstufen; keine willkürlichen Grenzwerte ohne spätere Abstimmung.
+- **Offen:** Konkreter Planetenradius und -masse (so aufeinander abzustimmen, dass ungefähr 1 g an der Oberfläche entsteht), Atmosphärenzusammensetzung, Zeitrafferfaktor des 24-Stunden-Tages und genaue Höhenstufen; keine willkürlichen Grenzwerte ohne spätere Abstimmung.
 
 **Wichtige Unterscheidung:** Bei einer gut durchmischten Atmosphäre muss der Sauerstoff-*Anteil* mit der Höhe nicht deutlich abnehmen. Relevant für die Atmung ist vor allem der abnehmende **Partialdruck** infolge sinkenden Gesamtdrucks.
 
@@ -67,6 +68,7 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 3. Welchen Grad an realistischem Flug-/Orbitalverhalten soll die Raumfahrt erfordern?
 4. Welche Auswirkungen von Temperatur, Sauerstoff, Druck und Strahlung sind spielrelevant?
 5. Welche Mindestanforderungen gelten für Druck- und Sauerstoffsysteme in unterirdischen oder geschlossenen Basen?
-6. Welche Simulationsbudgets, Genauigkeiten und Skalierungsgrenzen werden erst nach Prototypen festgelegt?
+6. Wie schnell sollen die festgelegten 24 planetaren Stunden in Echtzeit vergehen (Spielzeitfaktor)?
+7. Welche Simulationsbudgets, Genauigkeiten und Skalierungsgrenzen werden erst nach Prototypen festgelegt?
 
-**Abgrenzung:** Außer der festgelegten erdähnlichen Oberflächengravitation von rund 1 g bleiben die konkreten Zahlen für den Startplaneten offen. Dieses Dokument legt weder eine vollständige Liste aller Himmelskörper noch eine endgültige Simulationsarchitektur fest. Die Vorschläge werden schrittweise mit dem Spielkonzept abgestimmt.
+**Abgrenzung:** Außer der festgelegten erdähnlichen Oberflächengravitation von rund 1 g und dem 24-Stunden-Sonnentag bleiben die konkreten Zahlen für den Startplaneten offen. Dieses Dokument legt weder eine vollständige Liste aller Himmelskörper noch eine endgültige Simulationsarchitektur fest. Die Vorschläge werden schrittweise mit dem Spielkonzept abgestimmt.
