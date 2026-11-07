@@ -4,90 +4,91 @@
     "net10.0-windows7.0": {
       "Groundwork.Core": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.42367247347.1, 0.1.0-dev.42367247347.1]",
-        "resolved": "0.1.0-dev.42367247347.1",
-        "contentHash": "Kv7QW1CagagSnQJ8xvIBLBolz9y6eBbOK7NmtCUQZXswFy48hb6ieZwHmxZaaWuKkGCFDwdx7VT8zvh2eV/M2Q=="
+        "requested": "[0.1.0-dev.42411077659.1, 0.1.0-dev.42411077659.1]",
+        "resolved": "0.1.0-dev.42411077659.1",
+        "contentHash": "9mYgkhh2bfJJOQaBX3zRB7x694kiOrJnatIlvfdW9iM1Dfv8sEjztTy+IFU4mNVnbFlfCS2pkZnRIrCQQDwzKg=="
       },
       "Groundwork.Diagnostics": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.42367247347.1, 0.1.0-dev.42367247347.1]",
-        "resolved": "0.1.0-dev.42367247347.1",
-        "contentHash": "Z6VexQpz8vRe0yZ8e885BQnNGpSHF9y9G260zieIuDAFlTnm/MDgvBBsmhBpUtfhQX2VxwTyHiZhaje9POfJxA==",
+        "requested": "[0.1.0-dev.42411077659.1, 0.1.0-dev.42411077659.1]",
+        "resolved": "0.1.0-dev.42411077659.1",
+        "contentHash": "IrFAj+36lUyWpHz+qx3qrtQV2XxkD8+Bh9mFMSwjFl85MRIQz6h7fqYU/Ms97pixwrSqoovjtYTT9+Fshqoq4A==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.42367247347.1"
+          "Groundwork.Core": "0.1.0-dev.42411077659.1"
         }
       },
       "Groundwork.Ecs": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.42367247347.1, 0.1.0-dev.42367247347.1]",
-        "resolved": "0.1.0-dev.42367247347.1",
-        "contentHash": "wOuyDipgurqP8ibcZpGqdtsienzgF5LLXpONArl2Xby/cqsHjfv40x+m/0e3nrcCZ1Ss0YoBIOOtbLUn2uQb7g==",
+        "requested": "[0.1.0-dev.42411077659.1, 0.1.0-dev.42411077659.1]",
+        "resolved": "0.1.0-dev.42411077659.1",
+        "contentHash": "X/eH/I7I0ai107M0GND6jJgxJQ20JRonrAFYGfAAuEDWR/f3oH/GFUQ+8VQ+CiEhtveQcfjjRaFa5aQ8ip0dxg==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.42367247347.1"
+          "Groundwork.Core": "0.1.0-dev.42411077659.1"
         }
       },
       "Groundwork.Jobs": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.42367247347.1, 0.1.0-dev.42367247347.1]",
-        "resolved": "0.1.0-dev.42367247347.1",
-        "contentHash": "NGxSNcjfIBVTs9zva2SCKcknjThC2lhT93JeMsWXRUz6EQu7RnxiL5WcxX3JnLKcP75NTvgoi/j9qOcwpbFtVA==",
+        "requested": "[0.1.0-dev.42411077659.1, 0.1.0-dev.42411077659.1]",
+        "resolved": "0.1.0-dev.42411077659.1",
+        "contentHash": "UIbSvcvJEkmHfM+QnCwnHaxePyc4Ec1Dzl0wzxHcFd/avk7ySC+JivYNDKKL82ETDBo23JEnNM+7Y+ZHm8alWQ==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.42367247347.1"
+          "Groundwork.Core": "0.1.0-dev.42411077659.1"
         }
       },
       "Groundwork.Persistence": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.42367247347.1, 0.1.0-dev.42367247347.1]",
-        "resolved": "0.1.0-dev.42367247347.1",
-        "contentHash": "lw4ru2EtvsbbqhZbJ41JgCWJ6kuiPoHIiuPO0D9i7YscevwWGXzL+E3qSoReHRlB+T0EGqe4ob9QqMa9nUi/oA==",
+        "requested": "[0.1.0-dev.42411077659.1, 0.1.0-dev.42411077659.1]",
+        "resolved": "0.1.0-dev.42411077659.1",
+        "contentHash": "QjSwq2k6FzyASzpNf0iXoHkvOJuFOZS2Q+3g1CTZJPZgeT5EOb5+IzqYWIx6vtQWUmL08+WUwWwhe/r7FpQxpg==",
         "dependencies": {
-          "Groundwork.Voxels": "0.1.0-dev.42367247347.1"
+          "Groundwork.Voxels": "0.1.0-dev.42411077659.1"
         }
       },
       "Groundwork.Platform.Windows": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.42367247347.1, 0.1.0-dev.42367247347.1]",
-        "resolved": "0.1.0-dev.42367247347.1",
-        "contentHash": "A2oEvAaN3pIO1jPOMXfZicpJJoF3xTnFZ0Sp6EScOE1v3vAcgrGcClFBV0juBEKqkdISaZzRKiWrwQn1Qz++Kg==",
+        "requested": "[0.1.0-dev.42411077659.1, 0.1.0-dev.42411077659.1]",
+        "resolved": "0.1.0-dev.42411077659.1",
+        "contentHash": "fWVhe0/fslNy8DIkcakmTP2gzvV6D1nwgPqdvHEp/3bqcwMn5LRbc9q7m/em3oUETxT9miPBZmZKDujmhR6t9g==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.42367247347.1"
+          "Groundwork.Core": "0.1.0-dev.42411077659.1"
         }
       },
       "Groundwork.Rendering": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.42367247347.1, 0.1.0-dev.42367247347.1]",
-        "resolved": "0.1.0-dev.42367247347.1",
-        "contentHash": "wTPl3UKT0Z/QK6M+vKLXpbU+Yw1Yjw5cNKU6G/K6CnN9YBFxkDn/wjYl31BVSJgjx6jRJpLCcPA/C4cD+zXO/A==",
+        "requested": "[0.1.0-dev.42411077659.1, 0.1.0-dev.42411077659.1]",
+        "resolved": "0.1.0-dev.42411077659.1",
+        "contentHash": "l6EdcLRFgYN4A/timuZWu4qvv5TBscx/OQqtnzJDU0mL91DPfbmUCc0Af+M2de7LdhBKUVzMwL5wouNskoJdSg==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.42367247347.1"
+          "Groundwork.Core": "0.1.0-dev.42411077659.1"
         }
       },
       "Groundwork.Rendering.D3D12": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.42367247347.1, 0.1.0-dev.42367247347.1]",
-        "resolved": "0.1.0-dev.42367247347.1",
-        "contentHash": "ZvBNe13daNm1GRCiuFwbEoHoa+qiZ8f6GOFteyGV7EhGAWywSmM1eMbGT+TxmR0zBYz9APwsHJHzSNjbqODhjw==",
+        "requested": "[0.1.0-dev.42411077659.1, 0.1.0-dev.42411077659.1]",
+        "resolved": "0.1.0-dev.42411077659.1",
+        "contentHash": "ZEOGFj+9GHZl9PlVvPRYhp6jJhQ9XvbmjkPkRiWFeVsCDcpiT/NIqwGBOtIIkvWHe1epy0PGH8WC5fpytzmRsA==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.42367247347.1",
-          "Groundwork.Platform.Windows": "0.1.0-dev.42367247347.1",
-          "Groundwork.Rendering": "0.1.0-dev.42367247347.1",
+          "Groundwork.Core": "0.1.0-dev.42411077659.1",
+          "Groundwork.Platform.Windows": "0.1.0-dev.42411077659.1",
+          "Groundwork.Rendering": "0.1.0-dev.42411077659.1",
+          "Groundwork.Voxels": "0.1.0-dev.42411077659.1",
           "TerraFX.Interop.Windows": "[10.0.26100.6]"
         }
       },
       "Groundwork.Simulation": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.42367247347.1, 0.1.0-dev.42367247347.1]",
-        "resolved": "0.1.0-dev.42367247347.1",
-        "contentHash": "lctHb4zjPF9/w0zfIYwCDhENEVPZie62Ow0YOeK2opcOZq6tIINX3BRfLbVMH1yYOVy/v9mqiTuIux7RNiSSYw==",
+        "requested": "[0.1.0-dev.42411077659.1, 0.1.0-dev.42411077659.1]",
+        "resolved": "0.1.0-dev.42411077659.1",
+        "contentHash": "qXw8Me0I6X89BCBMa2obODlZXfRy+/KZWo3wa3uYA6743Mg0RCkNkXQxvy3ozXXW+wpAD501Mzw2gxVsIygTgA==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.42367247347.1"
+          "Groundwork.Core": "0.1.0-dev.42411077659.1"
         }
       },
       "Groundwork.Voxels": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.42367247347.1, 0.1.0-dev.42367247347.1]",
-        "resolved": "0.1.0-dev.42367247347.1",
-        "contentHash": "URXWFqc7uhkk7sU4YJAQsmpMYTV9HbWUjwIKpGaVFjk59K+xMsevXeyNnfa7DJi0ehWayxHOOqXTyF8GNr2moA=="
+        "requested": "[0.1.0-dev.42411077659.1, 0.1.0-dev.42411077659.1]",
+        "resolved": "0.1.0-dev.42411077659.1",
+        "contentHash": "F5Xy/1mboiktzC++mH9SwKcK0pqaqbfZgmowdxvwosZLgDNWeRYDt3EALugdokDScehII8yZTGH6krJ4IYOZtg=="
       },
       "TerraFX.Interop.Windows": {
         "type": "Transitive",

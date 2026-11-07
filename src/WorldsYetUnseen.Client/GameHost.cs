@@ -9,7 +9,7 @@ using System.Runtime.ExceptionServices;
 
 namespace WorldsYetUnseen.Client;
 
-internal enum HostMode { Prototype, PrototypeSmoke, D3D12, D3D12Smoke, Terrain, TerrainSmoke, Walkable, WalkableSmoke, SaveWorld, WindowSmoke, HeadlessSmoke, FaultSmoke }
+internal enum HostMode { Prototype, PrototypeSmoke, D3D12, D3D12Smoke, Terrain, TerrainSmoke, Walkable, WalkableSmoke, Planet, PlanetSmoke, SaveWorld, WindowSmoke, HeadlessSmoke, FaultSmoke }
 
 internal static class GameHost
 {
@@ -23,12 +23,12 @@ internal static class GameHost
     };
 
     private static bool IsDesktopSmoke(HostMode mode) =>
-        mode is HostMode.D3D12Smoke or HostMode.TerrainSmoke or HostMode.WalkableSmoke or HostMode.PrototypeSmoke;
+        mode is HostMode.D3D12Smoke or HostMode.TerrainSmoke or HostMode.WalkableSmoke or HostMode.PrototypeSmoke or HostMode.PlanetSmoke;
 
     private static bool IsTerrain(HostMode mode) => mode is HostMode.Terrain or HostMode.TerrainSmoke;
 
     internal static bool IsInteractive(HostMode mode) =>
-        mode is HostMode.Prototype or HostMode.D3D12 or HostMode.Terrain or HostMode.Walkable or HostMode.SaveWorld;
+        mode is HostMode.Prototype or HostMode.D3D12 or HostMode.Terrain or HostMode.Walkable or HostMode.Planet or HostMode.SaveWorld;
 
     internal static async Task RunSaveSmokeAsync(string phase, string directory, string token, CancellationToken cancellationToken)
     {
@@ -142,12 +142,16 @@ internal static class GameHost
                 if ((mode == HostMode.WindowSmoke || IsDesktopSmoke(mode)) &&
                     window.Read() is not { Phase: HostWindowPhase.Open, ClientWidth: > 0, ClientHeight: > 0 })
                     throw new InvalidOperationException("The Windows host did not open a usable window.");
-                if (mode == HostMode.D3D12 || IsDesktopSmoke(mode) || terrain is not null || walkable is not null)
+                if (mode is HostMode.D3D12 or HostMode.Planet || IsDesktopSmoke(mode) || terrain is not null || walkable is not null)
                 {
                     var diagnostics = IsDesktopSmoke(mode)
                         ? new D3D12DiagnosticsOptions(EnableDebugLayer: true, EnableDred: true)
                         : default;
-                    if (walkable is not null)
+                    if (mode is HostMode.Planet or HostMode.PlanetSmoke)
+                    {
+                        renderer = D3D12Renderer.CreateWithPlanetTerrain(window, runtime.RuntimeOwnership, diagnostics);
+                    }
+                    else if (walkable is not null)
                     {
                         var initial = await walkable.StartAsync(cancellationToken).ConfigureAwait(false);
                         renderer = D3D12Renderer.CreateWithMeshRegionReplacement(window, runtime.RuntimeOwnership, initial, diagnostics);
@@ -199,7 +203,8 @@ internal static class GameHost
         if (failure is not null)
             ExceptionDispatchInfo.Throw(failure);
         if (IsDesktopSmoke(mode))
-            DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: IsTerrain(mode) || mode is HostMode.WalkableSmoke or HostMode.PrototypeSmoke);
+            DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: IsTerrain(mode) || mode is HostMode.WalkableSmoke or HostMode.PrototypeSmoke or HostMode.PlanetSmoke,
+                requireNvidia: mode == HostMode.PlanetSmoke);
         if (success is not null)
             Console.WriteLine(success);
     }
@@ -215,6 +220,7 @@ internal static class GameHost
             ? new PrototypeSession(walkable!, prototypeSave?.Checkpoint?.Progress ?? default) : null;
         var menu = prototypeSave is null ? null : new PrototypeMenu(prototypeSave);
         var prototypeRoute = mode == HostMode.PrototypeSmoke ? new PrototypeRouteSmoke() : null;
+        var planet = mode is HostMode.Planet or HostMode.PlanetSmoke ? new PlanetRoute(mode == HostMode.PlanetSmoke) : null;
         var caption = mode == HostMode.Prototype ? new PrototypeCaption() : null;
         using var mouseLook = mode == HostMode.Prototype && input is IHostWindowStateSource windowState
             ? new PrototypeMouseLook(windowState) : null;
@@ -222,9 +228,9 @@ internal static class GameHost
         var pitch = -0.20f;
         ulong routeCompletionTick = 0;
         var pipeline = new WorldTickPipeline(world, injectedFault, terrain is not null,
-            walkable is null ? null : AdvanceWalkable, escapeCloses: prototype is null);
+            planet is not null ? AdvancePlanet : walkable is null ? null : AdvanceWalkable, escapeCloses: prototype is null);
         var simulation = new FixedStepSimulation(context, input, pipeline, world.Safety.State, runtime.SimulationWake);
-        var scene = renderer is null ? null : new SceneSubmission(renderer, terrain is not null,
+        var scene = renderer is null || planet is not null ? null : new SceneSubmission(renderer, terrain is not null,
             walkable is null ? null : () => walkable.GetScene(route?.CameraYaw ?? yaw, prototype is null ? null : pitch));
         var terrainSmoke = mode == HostMode.TerrainSmoke ? new TerrainEditSmoke() : null;
         var meshPort = renderer?.MeshReplacement;
@@ -243,6 +249,18 @@ internal static class GameHost
                     break;
                 if (caption is not null)
                     caption.Update(prototype!.Paused ? menu!.Caption : prototype.Caption);
+                if (!nativeCloseSent && planet is not null)
+                {
+                    var rendered = renderer!.Read();
+                    if (rendered.Surface == RenderSurfaceState.Drawable)
+                        planet.Present(renderer, pipeline.PublishedTick);
+                    if (mode == HostMode.PlanetSmoke && planet.Completed && planet.FinalCameraPresented(rendered))
+                    {
+                        VerifySmokePublication(world, pipeline, simulation);
+                        DesktopSmoke.RequestNativeClose(rendered, "planet route");
+                        nativeCloseSent = true;
+                    }
+                }
                 if (!nativeCloseSent && scene is not null)
                 {
                     if (edits is not null)
@@ -295,6 +313,7 @@ internal static class GameHost
         finally
         {
             edits?.Stop();
+            planet?.Stop();
             terrainSmoke?.Release();
         }
 
@@ -318,6 +337,7 @@ internal static class GameHost
                 HostMode.TerrainSmoke => "PASS: WYU D3D12 terrain presentation and native shutdown.",
                 HostMode.WalkableSmoke => "PASS: WYU walkable route and native shutdown.",
                 HostMode.PrototypeSmoke => "PASS: WYU WP07 rescue beacon route and native shutdown.",
+                HostMode.PlanetSmoke => "PASS: WYU WP08 planet route and native shutdown.",
                 _ => "PASS: WYU D3D12 Windows startup and shutdown.",
             };
         }
@@ -326,6 +346,9 @@ internal static class GameHost
             throw new InvalidOperationException("The WYU smoke did not complete the expected input sequence.");
         VerifySmokePublication(world, pipeline, simulation);
         return mode == HostMode.WindowSmoke ? "PASS: WYU Windows startup and shutdown." : "PASS: WYU headless startup and shutdown.";
+
+        void AdvancePlanet(TickContext tick) =>
+            planet!.Tick(tick, renderer!.Read().Surface == RenderSurfaceState.Drawable);
 
         void AdvanceWalkable(TickContext tick)
         {

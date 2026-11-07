@@ -18,7 +18,7 @@ internal static class DesktopSmoke
             $"{presented.AppliedWidth}x{presented.AppliedHeight}; native close requested.");
     }
 
-    internal static void VerifyShutdown(D3D12Renderer renderer, bool requireDebugLayer)
+    internal static void VerifyShutdown(D3D12Renderer renderer, bool requireDebugLayer, bool requireNvidia = false)
     {
         using var process = Process.GetCurrentProcess();
         if (process.MainWindowHandle != IntPtr.Zero)
@@ -27,6 +27,8 @@ internal static class DesktopSmoke
         var diagnostics = renderer.ReadDiagnostics();
         if (diagnostics.Adapter is not { IsSoftware: false } adapter || diagnostics.DeviceRemoval is not null)
             throw new InvalidOperationException("The D3D12 smoke did not settle a healthy hardware adapter.");
+        if (requireNvidia && adapter.VendorId != 0x10DE)
+            throw new InvalidOperationException("The planet route requires an NVIDIA hardware adapter.");
 
         Console.WriteLine($"D3D12 adapter: {adapter.Description} ({adapter.VendorId:X4}:{adapter.DeviceId:X4}), " +
             $"driver {adapter.DriverVersion ?? "unavailable"}; software={adapter.IsSoftware}.");
