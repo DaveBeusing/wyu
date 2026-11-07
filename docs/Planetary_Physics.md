@@ -85,6 +85,7 @@ Kleidungsstücke erhalten zunächst **qualitativ beschriebene Eigenschaften stat
 **Verbindlich für das Tauchen:**
 
 - Freitauchen ist zu Spielbeginn grundsätzlich möglich und durch das Anhalten des Atems begrenzt.
+- **Zeitpunkt der Tauchausrüstung:** Professionelle oder improvisierte Atem- und Tauchausrüstung ist **nicht** als frühe Einstiegstechnologie vorgesehen. Unterwassererkundung soll erst mit **fortgeschrittenem Technologie-Fortschritt** systematisch möglich werden, da sie am Spielanfang kein primäres Ziel ist.
 - Spätere Tauchausrüstung ermöglicht längere Aufenthalte unter Wasser; Versorgungsvorräte sind endlich.
 - **Steigender Wasserdruck begrenzt die erreichbare Tiefe.** Je tiefer der Spieler taucht, desto anspruchsvollere geeignete Ausrüstung bzw. druckgeschützte Fahrzeuge werden benötigt.
 - Fortgeschrittene Unterwassererkundung mit Fahrzeugen und möglicherweise Unterwasserbasen ist eine Entwicklungsrichtung, aber noch nicht technisch spezifiziert.
