@@ -43,7 +43,8 @@ Die Reihenfolge der drei konkret benannten Quellen ist damit im Grundsatz: **Ver
 - Stromversorgung setzt grundsätzlich eine nachvollziehbare, vom Spieler hergestellte Verbindung voraus.
 - Die Leitungsführung ist Teil des freien modularen Basisbaus und kann an die individuelle Konstruktion angepasst werden.
 - Ob Leitungen sichtbar, verdeckt, durch Wände oder über spezielle Bauelemente verlaufen dürfen, wird später im Bausystem ausgearbeitet.
-- Kabeltypen, Reichweite, Leistungsgrenzen, Verluste, Sicherungen, mögliche Kurzschlüsse und die konkrete Netzsimulation bleiben offen.
+- **Keine frühen Sicherungen:** Einfache elektrische Sicherungen bzw. Überlastschutzgeräte sollen **nicht bereits zu Spielbeginn** als eigenständige frühe Technologie zur Verfügung stehen. Ob und wann Schutzmechanismen später hinzukommen, entscheiden wir beim Technologiebaum.
+- Kabeltypen, Reichweite, Leistungsgrenzen, Verluste, mögliche Kurzschlüsse und die konkrete Netzsimulation bleiben offen.
 - Eine spätere Automatisierung und Überwachung der Stromversorgung soll mit den technischen Schaltkreisen bzw. Steuerungssystemen abgestimmt werden.
 
 ## 6. Technologische Einordnung
