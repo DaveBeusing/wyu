@@ -63,7 +63,22 @@ Hitze und Kälte sollen für den Spieler **spürbare, nachvollziehbare körperli
 
 **Noch nicht entschieden:** Konkrete Schwellenwerte, Zeitdauern, Flüssigkeitsverbrauch, UI-Anzeigen und Auswirkungen auf Ausdauer oder Lebenspunkte. Auch Temperatureffekte auf Ressourcen und Maschinen sind nicht festgelegt.
 
-## 6. Performance-Leitlinie
+## 6. Kleidung und persönliche Schutzausrüstung — qualitative Grundlagen
+
+**Verbindlich: Freies modulares Kleidungssystem.** Der Spieler kann einzelne Kleidungsstücke unabhängig voneinander kombinieren, statt ausschließlich komplette Outfits auszurüsten. Beispiele für mögliche Kategorien sind Oberteile, Hosen, Jacken, Schuhe, Handschuhe und Kopfbedeckungen; die endgültige Slot- und Teileliste bleibt offen.
+
+Kleidungsstücke erhalten zunächst **qualitativ beschriebene Eigenschaften statt fest definierter Schutzstufen, Punkte oder Prozentwerte**:
+
+- **Wärmeisolierung:** Wärmende Kleidung hilft bei Kälte, kann bei Hitze aber nachteilig sein.
+- **Atmungsaktivität:** Luftige Kleidung unterstützt die Wärmeabgabe bei höheren Temperaturen.
+- **Wetter- und Nässeschutz:** Geeignete Kleidung schützt gegen Wind und Regen und beeinflusst das Risiko auszukühlen.
+- **Sonnenschutz:** Bedeckende oder dafür geeignete Kleidung vermindert die Belastung durch direkte Sonneneinstrahlung.
+- **Kontextabhängige Wirkung:** Die Eignung ergibt sich aus Wetter, Temperatur, Aktivität und der Kombination der getragenen Teile; es gibt nicht zwingend ein universell „bestes“ Outfit.
+- **Spätere Spezialausrüstung:** Atemmasken, Sauerstoffversorgung, Schutzanzüge und Raumanzüge ergänzen das Grundsystem für anspruchsvollere Umgebungen. Ihre konkrete Funktionsweise bleibt offen.
+
+**Bewusst offen:** Anzahl und Art der Kleidungsslots, numerische Schutzwerte, Qualitäts- und Seltenheitsstufen, Materialwerte, Verschleiß, Crafting, Gewicht, Inventarlogik und konkrete UI. Diese Details sind noch nicht beschlossen.
+
+## 7. Performance-Leitlinie
 
 Die **Daten eines Himmelskörpers** bilden die stabile Ausgangslage. **Lokale Bedingungen** werden bei Bedarf für eine Region, eine Position oder ein aktives Objekt abgeleitet. Nicht jede entfernte Region benötigt in jedem Simulationsschritt eine hochaufgelöste Berechnung.
 
@@ -74,7 +89,7 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 - Statische strukturelle Prüfungen für Bauwerke und dynamische Physik primär bei Bewegung, Schäden oder Einsturz.
 - Kontinuierlich wirkende Übergänge zwischen Oberfläche, Atmosphäre und Weltraum ohne notwendigen Anspruch auf vollständige Mehrkörper-Himmelsmechanik.
 
-## 7. Offene Entscheidungen
+## 8. Offene Entscheidungen
 
 1. Welche Höhen- und Tauchbedingungen erfordern zusätzliche Atemtechnik auf New Terra?
 2. Welche physikalischen Eigenschaften sollen tatsächlich von Planet zu Planet variieren und welche nur lokal?
@@ -83,6 +98,7 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 5. Welche Mindestanforderungen gelten für Druck- und Sauerstoffsysteme in unterirdischen oder geschlossenen Basen?
 6. Wie schnell sollen die festgelegten 24 planetaren Stunden in Echtzeit vergehen (Spielzeitfaktor)?
 7. Wie lang ist ein New-Terra-Jahr, welche konkreten Temperatur-/Wettergrenzen gelten regional und wie schnell laufen die Jahreszeiten in Echtzeit ab?
-8. Welche Simulationsbudgets, Genauigkeiten und Skalierungsgrenzen werden erst nach Prototypen festgelegt?
+8. Wie werden die qualitativ beschriebenen Kleidungseigenschaften später in Ausrüstungsslots, Werte, Darstellung und Balancing überführt?
+9. Welche Simulationsbudgets, Genauigkeiten und Skalierungsgrenzen werden erst nach Prototypen festgelegt?
 
 **Abgrenzung:** Außer der festgelegten erdähnlichen Oberflächengravitation von rund 1 g und dem 24-Stunden-Sonnentag bleiben die konkreten Zahlen für den Startplaneten offen. Dieses Dokument legt weder eine vollständige Liste aller Himmelskörper noch eine endgültige Simulationsarchitektur fest. Die Vorschläge werden schrittweise mit dem Spielkonzept abgestimmt.
