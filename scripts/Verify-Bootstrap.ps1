@@ -28,7 +28,8 @@ try {
     Assert-True (($null -ne $version) -and ($version.InnerText -eq '0.1.0')) 'Source version must be 0.1.0.'
     [xml] $project = Get-Content $clientProject -Raw
     $refs = @($project.SelectNodes('//ProjectReference'))
-    Assert-True ($refs.Count -eq 0) 'The WYU host must not use source ProjectReference dependencies.'
+    Assert-True ($refs.Count -eq 1 -and
+        $refs[0].GetAttribute('Include') -ceq '../WorldsYetUnseen.Gameplay/WorldsYetUnseen.Gameplay.csproj') 'Unexpected WYU host project dependency.'
     $packages = @($project.SelectNodes('//PackageReference'))
     $expectedVersion = '0.1.0-dev.42303559178.1'
     $expectedIds = @('Core', 'Diagnostics', 'Ecs', 'Jobs', 'Persistence', 'Platform.Windows', 'Rendering', 'Rendering.D3D12', 'Simulation', 'Voxels') |
@@ -39,7 +40,9 @@ try {
     $lock = Get-Content $lockPath -Raw | ConvertFrom-Json
     $framework = $lock.dependencies.PSObject.Properties | Where-Object { $_.Name -like 'net10.0-windows*' } | Select-Object -First 1
     Assert-True ($null -ne $framework) 'Unexpected lockfile target framework.'
-    Assert-True ($framework.Value.PSObject.Properties.Name.Count -eq ($expectedIds.Count + 1)) 'Unexpected WYU lockfile dependency count.'
+    Assert-True ($framework.Value.PSObject.Properties.Name.Count -eq ($expectedIds.Count + 2)) 'Unexpected WYU lockfile dependency count.'
+    $gameplayLock = $framework.Value.PSObject.Properties['worldsyetunseen.gameplay']
+    Assert-True ($null -ne $gameplayLock -and $gameplayLock.Value.type -ceq 'Project') 'Missing local gameplay project in the lockfile.'
     foreach ($id in $expectedIds) {
         $reference = @($packages | Where-Object { $_.GetAttribute('Include') -ceq $id })
         Assert-True (($reference.Count -eq 1) -and ($reference[0].GetAttribute('Version') -ceq "[$expectedVersion]")) "Expected exactly pinned package $id."

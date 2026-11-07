@@ -72,6 +72,23 @@ internal static class WalkableTerrain
 
     private static (int X, int Y, int Z) SortKey(ChunkCoordinate coordinate) => (coordinate.X, coordinate.Y, coordinate.Z);
 
+    internal static void GenerateSurface(uint seed, ChunkCoordinate coordinate, Span<byte> cells)
+    {
+        const int size = ChunkSnapshot.Size;
+        for (var z = 0; z < size; z++)
+        {
+            var worldZ = coordinate.Z * size + z;
+            for (var x = 0; x < size; x++)
+            {
+                var worldX = coordinate.X * size + x;
+                var marker = unchecked(seed ^ ((uint)worldX * 73856093u) ^ ((uint)worldZ * 19349663u));
+                var height = worldX == 34 && worldZ is >= 7 and <= 9 ? 8 : worldZ >= 13 && marker % 17 == 0 ? 6 : 4;
+                for (var y = 0; y < size; y++)
+                    cells[x + size * (y + size * z)] = y < height ? (byte)1 : (byte)0;
+            }
+        }
+    }
+
     private sealed class RouteGenerator : ISaveTerrainGenerator
     {
         public void Generate(SaveWorldRecipe recipe, ChunkCoordinate coordinate, Span<byte> cells)
@@ -79,19 +96,7 @@ internal static class WalkableTerrain
             if (recipe != Recipe)
                 throw new ArgumentException("The saved recipe does not identify the walkable route generator.", nameof(recipe));
 
-            const int size = ChunkSnapshot.Size;
-            for (var z = 0; z < size; z++)
-            {
-                var worldZ = coordinate.Z * size + z;
-                for (var x = 0; x < size; x++)
-                {
-                    var worldX = coordinate.X * size + x;
-                    var marker = unchecked(recipe.Seed ^ ((uint)worldX * 73856093u) ^ ((uint)worldZ * 19349663u));
-                    var height = worldX == 34 && worldZ is >= 7 and <= 9 ? 8 : worldZ >= 13 && marker % 17 == 0 ? 6 : 4;
-                    for (var y = 0; y < size; y++)
-                        cells[x + size * (y + size * z)] = y < height ? (byte)1 : (byte)0;
-                }
-            }
+            GenerateSurface(recipe.Seed, coordinate, cells);
         }
     }
 }

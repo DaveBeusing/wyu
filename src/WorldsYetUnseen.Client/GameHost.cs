@@ -9,7 +9,7 @@ using System.Runtime.ExceptionServices;
 
 namespace WorldsYetUnseen.Client;
 
-internal enum HostMode { Interactive, D3D12, D3D12Smoke, Terrain, TerrainSmoke, Walkable, WalkableSmoke, SaveWorld, WindowSmoke, HeadlessSmoke, FaultSmoke }
+internal enum HostMode { Prototype, PrototypeSmoke, D3D12, D3D12Smoke, Terrain, TerrainSmoke, Walkable, WalkableSmoke, SaveWorld, WindowSmoke, HeadlessSmoke, FaultSmoke }
 
 internal static class GameHost
 {
@@ -22,11 +22,13 @@ internal static class GameHost
         Diagnostics = RuntimeQuota.Diagnostics with { EmergencyRecords = 21, EmergencyBytes = 61440 },
     };
 
-    private static bool IsDesktopSmoke(HostMode mode) => mode is HostMode.D3D12Smoke or HostMode.TerrainSmoke or HostMode.WalkableSmoke;
+    private static bool IsDesktopSmoke(HostMode mode) =>
+        mode is HostMode.D3D12Smoke or HostMode.TerrainSmoke or HostMode.WalkableSmoke or HostMode.PrototypeSmoke;
 
     private static bool IsTerrain(HostMode mode) => mode is HostMode.Terrain or HostMode.TerrainSmoke;
 
-    internal static bool IsInteractive(HostMode mode) => mode is HostMode.Interactive or HostMode.D3D12 or HostMode.Terrain or HostMode.Walkable or HostMode.SaveWorld;
+    internal static bool IsInteractive(HostMode mode) =>
+        mode is HostMode.Prototype or HostMode.D3D12 or HostMode.Terrain or HostMode.Walkable or HostMode.SaveWorld;
 
     internal static async Task RunSaveSmokeAsync(string phase, string directory, string token, CancellationToken cancellationToken)
     {
@@ -67,9 +69,13 @@ internal static class GameHost
         D3D12Renderer? renderer = null;
         TerrainScene? terrain = IsTerrain(mode) ? new TerrainScene() : null;
         WorldSave? save = null;
-        WalkableScene? walkable = mode is HostMode.Walkable or HostMode.WalkableSmoke
-            ? new WalkableScene(runtime.RuntimeOwnership)
-            : null;
+        WalkableScene? walkable = mode switch
+        {
+            HostMode.Walkable or HostMode.WalkableSmoke => new WalkableScene(runtime.RuntimeOwnership),
+            HostMode.Prototype or HostMode.PrototypeSmoke => new WalkableScene(runtime.RuntimeOwnership,
+                PrototypeWorld.Spawn, snapshot: PrototypeWorld.Snapshot, bounds: PrototypeWorld.Recipe.Bounds),
+            _ => null
+        };
         var stopReason = HostStopReason.StartupFault;
         Exception? failure = null;
         string? success = null;
@@ -154,7 +160,7 @@ internal static class GameHost
         if (failure is not null)
             ExceptionDispatchInfo.Throw(failure);
         if (IsDesktopSmoke(mode))
-            DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: IsTerrain(mode) || mode == HostMode.WalkableSmoke);
+            DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: IsTerrain(mode) || mode is HostMode.WalkableSmoke or HostMode.PrototypeSmoke);
         if (success is not null)
             Console.WriteLine(success);
     }
@@ -165,12 +171,17 @@ internal static class GameHost
     {
         var injectedFault = mode == HostMode.FaultSmoke ? new InvalidOperationException("Controlled tick failure.") : null;
         var route = mode == HostMode.WalkableSmoke ? new WalkableRouteSmoke() : null;
+        var prototype = mode is HostMode.Prototype or HostMode.PrototypeSmoke ? new PrototypeSession(walkable!) : null;
+        var prototypeRoute = mode == HostMode.PrototypeSmoke ? new PrototypeRouteSmoke() : null;
+        var caption = mode == HostMode.Prototype ? new PrototypeCaption() : null;
         var yaw = 0f;
+        var pitch = -0.20f;
         ulong routeCompletionTick = 0;
-        var pipeline = new WorldTickPipeline(world, injectedFault, terrain is not null, walkable is null ? null : AdvanceWalkable);
+        var pipeline = new WorldTickPipeline(world, injectedFault, terrain is not null,
+            walkable is null ? null : AdvanceWalkable, escapeCloses: prototype is null);
         var simulation = new FixedStepSimulation(context, input, pipeline, world.Safety.State, runtime.SimulationWake);
         var scene = renderer is null ? null : new SceneSubmission(renderer, terrain is not null,
-            walkable is null ? null : () => walkable.GetScene(route?.CameraYaw ?? yaw));
+            walkable is null ? null : () => walkable.GetScene(route?.CameraYaw ?? yaw, prototype is null ? null : pitch));
         var terrainSmoke = mode == HostMode.TerrainSmoke ? new TerrainEditSmoke() : null;
         var meshPort = renderer?.MeshReplacement;
         var edits = terrain is null ? null : new TerrainEdits(terrain,
@@ -186,6 +197,8 @@ internal static class GameHost
                 var iteration = await simulation.AdvanceAsync(CancellationToken.None).ConfigureAwait(false);
                 if (iteration.State == SimulationState.Stopped || pipeline.CloseRequested)
                     break;
+                if (caption is not null)
+                    caption.Update(prototype!.Caption);
                 if (!nativeCloseSent && scene is not null)
                 {
                     if (edits is not null)
@@ -198,7 +211,10 @@ internal static class GameHost
                         }
                         edits.Advance();
                     }
-                    scene.Submit(context.Clock, iteration, pipeline.PublishedTick);
+                    // Keep the long diagnostic route within the D3D12 message budget.
+                    // Simulation still advances on every tick and waits for the actual presented generation.
+                    if (prototypeRoute is null || pipeline.PublishedTick % 2 == 0)
+                        scene.Submit(context.Clock, iteration, pipeline.PublishedTick);
                     var rendered = renderer!.Read();
                     if (route is not null)
                         route.ObservePresentation(rendered, renderer.MeshRegionReplacement!.ReadMeshReplacement());
@@ -206,10 +222,12 @@ internal static class GameHost
                     if (IsDesktopSmoke(mode) && pipeline.PublishedTick >= 3 &&
                         rendered is { LastPresentedSequence: > 0, Surface: RenderSurfaceState.Drawable } &&
                         (terrainSmoke is null || terrainSmoke.Advance(meshPort!, edits!)) &&
-                        (route is null || routeCompletionTick > 0 && rendered.LastPresentedSequence >= routeCompletionTick))
+                        (route is null && prototypeRoute is null ||
+                         routeCompletionTick > 0 && rendered.LastPresentedSequence >= routeCompletionTick))
                     {
                         VerifySmokePublication(world, pipeline, simulation);
-                        DesktopSmoke.RequestNativeClose(rendered, route is not null ? "walkable region" : IsTerrain(mode) ? "terrain" : "cube");
+                        DesktopSmoke.RequestNativeClose(rendered, prototypeRoute is not null ? "rescue beacon" :
+                            route is not null ? "walkable region" : IsTerrain(mode) ? "terrain" : "cube");
                         nativeCloseSent = true;
                     }
                 }
@@ -255,6 +273,7 @@ internal static class GameHost
             {
                 HostMode.TerrainSmoke => "PASS: WYU D3D12 terrain presentation and native shutdown.",
                 HostMode.WalkableSmoke => "PASS: WYU walkable route and native shutdown.",
+                HostMode.PrototypeSmoke => "PASS: WYU WP07 rescue beacon route and native shutdown.",
                 _ => "PASS: WYU D3D12 Windows startup and shutdown.",
             };
         }
@@ -267,6 +286,11 @@ internal static class GameHost
         void AdvanceWalkable(TickContext tick)
         {
             var drawable = renderer!.Read().Surface == RenderSurfaceState.Drawable;
+            if (prototype is not null)
+            {
+                AdvancePrototype(tick, drawable);
+                return;
+            }
             var (x, z) = route is null && drawable ? ReadWalkableInput(tick.Input, ref yaw) : default;
             walkable!.Advance(x, z, tick.Tick, route, drawable);
             if (save is not null)
@@ -286,6 +310,38 @@ internal static class GameHost
             if (route is { Completed: true } && routeCompletionTick == 0)
                 routeCompletionTick = tick.Tick;
         }
+
+        void AdvancePrototype(TickContext tick, bool drawable)
+        {
+            var input = tick.Input;
+            var x = 0;
+            var z = 0;
+            var interact = false;
+            if (prototypeRoute is not null)
+            {
+                (x, z, yaw, pitch, interact) = prototypeRoute.NextInput(walkable!, prototype!.Progress, drawable && prototype.Ready);
+            }
+            else if (!input.TransitionLoss)
+            {
+                if (Pressed(input, InputControl.Escape))
+                    prototype!.Paused = !prototype.Paused;
+                if (drawable && !prototype!.Paused)
+                {
+                    (x, z) = ReadWalkableInput(input, ref yaw);
+                    var held = input.HeldControls;
+                    var tilt = (held.Contains(InputControl.Up) ? 1 : 0) - (held.Contains(InputControl.Down) ? 1 : 0);
+                    pitch = Math.Clamp(pitch + tilt * (MathF.PI / 90), -1.4f, 1.4f);
+                    interact = Pressed(input, InputControl.E);
+                }
+            }
+            walkable!.Advance(x, z, tick.Tick, drawable: drawable);
+            prototype!.Advance(yaw, pitch, interact, drawable, showObjective: caption is not null);
+            if (prototypeRoute is { Completed: true } && routeCompletionTick == 0)
+                routeCompletionTick = tick.Tick;
+        }
+
+        static bool Pressed(InputSnapshot input, InputControl control) =>
+            input.Events.Any(e => e.Kind == InputEventKind.Pressed && e.Device == InputDevice.Keyboard && e.Control == control);
     }
 
     private static (int X, int Z) ReadWalkableInput(InputSnapshot input, ref float yaw)

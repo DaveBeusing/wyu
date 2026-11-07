@@ -93,3 +93,24 @@ Add `-SaveSmoke` to the verified consumer command to exercise interrupted
 writes on Windows. The headless smoke kills the writer process after the
 pending save has been flushed and checks that a fresh process can still
 load the last committed terrain edit, player pose, and inventory.
+
+## WP07 rescue beacon
+
+Launch the Windows client without arguments or use `--prototype`. The
+window title displays the objective, stone, deposit count and the action
+in focus. Use **WASD** to move, **Left/Right** to turn, **Up/Down** to aim,
+**E** to interact and **Esc** to pause or resume.
+
+Follow the directions to the three deposits and mine each one. Return to
+the marked pad, focus its interaction point and build the foundation, mast
+and signal head. Focus the pad again and press **E** to send the signal.
+WP07 checkpoint persistence is a separate implementation step.
+
+On an interactive Windows desktop, add `-PrototypeSmoke` to the verified
+consumer command. It enables the D3D12 Debug Layer and DRED, drives the
+fixed route to the signal and verifies the native window and GPU shutdown.
+The smoke submits a frame every second simulation tick to stay within
+the provider's bounded diagnostic message buffer.
+The route checks blocked actions outside reach and behind the built mast,
+the occupied foundation socket, and seam geometry and collision before
+mining, after replacement and after unload and reload.
