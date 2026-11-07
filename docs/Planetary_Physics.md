@@ -78,7 +78,22 @@ Kleidungsstücke erhalten zunächst **qualitativ beschriebene Eigenschaften stat
 
 **Bewusst offen:** Anzahl und Art der Kleidungsslots, numerische Schutzwerte, Qualitäts- und Seltenheitsstufen, Materialwerte, Verschleiß, Crafting, Gewicht, Inventarlogik und konkrete UI. Diese Details sind noch nicht beschlossen.
 
-## 7. Performance-Leitlinie
+## 7. Sauerstoff und Tauchen auf New Terra — abgestimmte Grundlagen
+
+**Sauerstoff ist eine begrenzte, speicherbare und transportierbare Ressource.** Für das normale Atmen in den bewohnbaren Oberflächenregionen von New Terra ist keine künstliche Versorgung erforderlich. Bei Tauchgängen und in weiteren Umgebungen ohne ausreichend atembare Luft ist dagegen eine begrenzte Atemgasversorgung relevant. Eine spätere eigene Erzeugung und Befüllung ist als technologische Entwicklungsrichtung vorgesehen; konkrete Herstellungswege sind offen.
+
+**Verbindlich für das Tauchen:**
+
+- Freitauchen ist zu Spielbeginn grundsätzlich möglich und durch das Anhalten des Atems begrenzt.
+- Spätere Tauchausrüstung ermöglicht längere Aufenthalte unter Wasser; Versorgungsvorräte sind endlich.
+- **Steigender Wasserdruck begrenzt die erreichbare Tiefe.** Je tiefer der Spieler taucht, desto anspruchsvollere geeignete Ausrüstung bzw. druckgeschützte Fahrzeuge werden benötigt.
+- Fortgeschrittene Unterwassererkundung mit Fahrzeugen und möglicherweise Unterwasserbasen ist eine Entwicklungsrichtung, aber noch nicht technisch spezifiziert.
+- Auftrieb, Wasserwiderstand, Sicht und hydrostatischer Druck sollen plausibel wirken, ohne eine vollständige Fluid- oder Tauchmedizin-Simulation vorauszusetzen.
+- **Atemgas und Druckschutz sind getrennte Anforderungen:** Ein größerer Tank allein beseitigt nicht die Gefahren hoher Tauchtiefe. Welche Atemgasmischungen und Drucksysteme genutzt werden, wird später festgelegt.
+
+**Bewusst offen:** Tauchzeit, Tiefenlimits, Verbrauchsraten, Druckschadensmodell, Dekompression, Atemgasmischungen, Tankvolumen, Ausrüstungsstufen und konkrete Bau-/Fahrzeuganforderungen. Es gelten noch keine Zahlenwerte.
+
+## 8. Performance-Leitlinie
 
 Die **Daten eines Himmelskörpers** bilden die stabile Ausgangslage. **Lokale Bedingungen** werden bei Bedarf für eine Region, eine Position oder ein aktives Objekt abgeleitet. Nicht jede entfernte Region benötigt in jedem Simulationsschritt eine hochaufgelöste Berechnung.
 
@@ -89,9 +104,9 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 - Statische strukturelle Prüfungen für Bauwerke und dynamische Physik primär bei Bewegung, Schäden oder Einsturz.
 - Kontinuierlich wirkende Übergänge zwischen Oberfläche, Atmosphäre und Weltraum ohne notwendigen Anspruch auf vollständige Mehrkörper-Himmelsmechanik.
 
-## 8. Offene Entscheidungen
+## 9. Offene Entscheidungen
 
-1. Welche Höhen- und Tauchbedingungen erfordern zusätzliche Atemtechnik auf New Terra?
+1. Bei welchen Höhen braucht der Spieler Atemtechnik, und welche Tauchzeiten, Tiefengrenzen, Atemgas- und Druckschutzausrüstungen werden später definiert?
 2. Welche physikalischen Eigenschaften sollen tatsächlich von Planet zu Planet variieren und welche nur lokal?
 3. Welchen Grad an realistischem Flug-/Orbitalverhalten soll die Raumfahrt erfordern?
 4. Welche konkreten Schwellenwerte und abgestuften Auswirkungen erhalten Hitzebelastung, Durst und Unterkühlung; welche Auswirkungen von Sauerstoff, Druck und Strahlung sind zusätzlich spielrelevant?
