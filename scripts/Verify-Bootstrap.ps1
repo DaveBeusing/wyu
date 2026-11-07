@@ -60,8 +60,11 @@ try {
     $groundworkMapping = $config.SelectSingleNode('//packageSourceMapping/packageSource[@key="groundwork-validated-local"]/package[@pattern="Groundwork.*"]')
     Assert-True ($null -ne $groundworkMapping) 'Groundwork packages must map to the validated local feed.'
     $publicMapping = @($config.SelectNodes('//packageSourceMapping/packageSource[@key="nuget.org"]/package'))
-    Assert-True (($publicMapping.Count -eq 1) -and
-        ($publicMapping[0].GetAttribute('pattern') -ceq 'TerraFX.Interop.Windows')) 'Only the approved D3D12 binding may map to nuget.org.'
+    $allowedPublicPackages = @('TerraFX.Interop.Windows','Microsoft.NETCore.App.Runtime.win-x64',
+        'Microsoft.NETCore.App.Host.win-x64','Microsoft.WindowsDesktop.App.Runtime.win-x64','Microsoft.AspNetCore.App.Runtime.win-x64')
+    $mappedPublicPackages = @($publicMapping | ForEach-Object { $_.GetAttribute('pattern') })
+    Assert-True ($mappedPublicPackages.Count -eq $allowedPublicPackages.Count -and
+        @($allowedPublicPackages | Where-Object { $_ -cnotin $mappedPublicPackages }).Count -eq 0) 'Unexpected nuget.org package mapping.'
     Assert-True (-not [string]::IsNullOrWhiteSpace($env:GROUNDWORK_NUGET_FEED)) 'Set GROUNDWORK_NUGET_FEED to a validated local directory outside worktrees.'
     $feedPath = [System.IO.Path]::GetFullPath($env:GROUNDWORK_NUGET_FEED)
     $rootWithSeparator = $root.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
