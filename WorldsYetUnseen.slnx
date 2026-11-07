@@ -1,5 +1,9 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/WorldsYetUnseen.Client/WorldsYetUnseen.Client.csproj" />
+    <Project Path="src/WorldsYetUnseen.Gameplay/WorldsYetUnseen.Gameplay.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WorldsYetUnseen.Gameplay.Tests/WorldsYetUnseen.Gameplay.Tests.csproj" />
   </Folder>
 </Solution>
