@@ -97,14 +97,20 @@ load the last committed terrain edit, player pose, and inventory.
 ## WP07 rescue beacon
 
 Launch the Windows client without arguments or use `--prototype`. The
-window title displays the objective, stone, deposit count and the action
-in focus. Use **WASD** to move, **Left/Right** to turn, **Up/Down** to aim,
-**E** to interact and **Esc** to pause or resume.
+window title displays the start menu, with **New Game** for an empty slot
+or **Continue** for a valid checkpoint. Navigate with **Up/Down** and
+**Enter**. During play, the title shows the objective, stone, deposit
+count and the action in focus. Use **WASD** to move, **Left/Right** to turn,
+**Up/Down** to aim, **E** to interact and **Esc** to pause or resume.
 
 Follow the directions to the three deposits and mine each one. Return to
 the marked pad, focus its interaction point and build the foundation, mast
 and signal head. Focus the pad again and press **E** to send the signal.
-WP07 checkpoint persistence is a separate implementation step.
+Use **Save** in the pause menu and wait for the confirmed generation.
+**Continue** restores your position, inventory, mined terrain, built
+modules and signal state. The default slot is
+`%LOCALAPPDATA%\WorldsYetUnseen\WP07`. To test with an independent local
+NTFS directory, launch with `--prototype [slot-directory]`.
 
 On an interactive Windows desktop, add `-PrototypeSmoke` to the verified
 consumer command. It enables the D3D12 Debug Layer and DRED, drives the
@@ -114,3 +120,8 @@ the provider's bounded diagnostic message buffer.
 The route checks blocked actions outside reach and behind the built mast,
 the occupied foundation socket, and seam geometry and collision before
 mining, after replacement and after unload and reload.
+
+Add `-PrototypeSaveSmoke` for the headless WP07 checkpoint suite. It
+terminates Windows writers before and after atomic publication, then uses
+fresh processes to verify the mining, construction and completed objective
+checkpoints. The verified-consumer CI runs this suite.

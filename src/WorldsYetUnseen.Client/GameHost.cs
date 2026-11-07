@@ -38,6 +38,20 @@ internal static class GameHost
         using var reservation = budget.TryReserveRuntime(RuntimeQuota) ??
             throw new InvalidOperationException("Could not reserve the WYU runtime budget.");
         var runtime = RuntimeSafetyAuthority.Create(clock, timing, reservation);
+        if (phase.StartsWith("--prototype-save-", StringComparison.Ordinal))
+        {
+            var prototype = new PrototypeSaveSmoke(runtime.RuntimeOwnership);
+            try
+            {
+                await prototype.RunAsync(phase, directory, token, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                await StopAsync(runtime, clock, null, null, null, new EcsStorageBudget(StorageBytes),
+                    prototype.Scene, null, HostStopReason.ExternalCancellation, prototype.Save).ConfigureAwait(false);
+            }
+            return;
+        }
         var smoke = new SaveResumeSmoke(runtime.RuntimeOwnership);
         try
         {
@@ -69,10 +83,12 @@ internal static class GameHost
         D3D12Renderer? renderer = null;
         TerrainScene? terrain = IsTerrain(mode) ? new TerrainScene() : null;
         WorldSave? save = null;
+        PrototypeSave? prototypeSave = null;
+        var startGame = true;
         WalkableScene? walkable = mode switch
         {
             HostMode.Walkable or HostMode.WalkableSmoke => new WalkableScene(runtime.RuntimeOwnership),
-            HostMode.Prototype or HostMode.PrototypeSmoke => new WalkableScene(runtime.RuntimeOwnership,
+            HostMode.PrototypeSmoke => new WalkableScene(runtime.RuntimeOwnership,
                 PrototypeWorld.Spawn, snapshot: PrototypeWorld.Snapshot, bounds: PrototypeWorld.Recipe.Bounds),
             _ => null
         };
@@ -104,6 +120,24 @@ internal static class GameHost
                     runtime.UiWake, runtime.RuntimeOwnership);
                 await window.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
                 await window.StartAsync(cancellationToken).ConfigureAwait(false);
+                if (mode == HostMode.Prototype)
+                {
+                    saveDirectory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "WorldsYetUnseen", "WP07");
+                    var startCaption = new PrototypeCaption();
+                    startCaption.Update("WYU | Checking save slot");
+                    prototypeSave = await PrototypeSave.OpenAsync(saveDirectory, runtime.RuntimeOwnership, cancellationToken)
+                        .ConfigureAwait(false);
+                    startGame = await PrototypeMenu.ChooseStartAsync(window, prototypeSave, startCaption, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (startGame)
+                    {
+                        var checkpoint = prototypeSave.Checkpoint;
+                        walkable = new WalkableScene(runtime.RuntimeOwnership, checkpoint?.Pose ?? PrototypeWorld.Spawn,
+                            checkpoint is { } selected ? PrototypeWorld.EffectiveTerrain(selected.Progress) : [],
+                            snapshot: PrototypeWorld.Snapshot, bounds: PrototypeWorld.Recipe.Bounds);
+                    }
+                }
                 if ((mode == HostMode.WindowSmoke || IsDesktopSmoke(mode)) &&
                     window.Read() is not { Phase: HostWindowPhase.Open, ClientWidth: > 0, ClientHeight: > 0 })
                     throw new InvalidOperationException("The Windows host did not open a usable window.");
@@ -131,10 +165,13 @@ internal static class GameHost
                 }
             }
 
-            stopReason = HostStopReason.RuntimeFault;
-            IInputSource input = window is not null ? window : new SmokeInput();
-            success = await DriveAsync(mode, context, runtime, world, input, renderer, terrain, walkable, save, smokeClock, cancellationToken)
-                .ConfigureAwait(false);
+            if (startGame)
+            {
+                stopReason = HostStopReason.RuntimeFault;
+                IInputSource input = window is not null ? window : new SmokeInput();
+                success = await DriveAsync(mode, context, runtime, world, input, renderer, terrain, walkable, save,
+                    prototypeSave, smokeClock, cancellationToken).ConfigureAwait(false);
+            }
             stopReason = mode == HostMode.FaultSmoke ? HostStopReason.RuntimeFault : HostStopReason.ExternalCancellation;
         }
         catch (OperationCanceledException) when (IsInteractive(mode) &&
@@ -150,7 +187,8 @@ internal static class GameHost
 
         try
         {
-            await StopAsync(runtime, clock, renderer, window, world, storage, walkable, save, stopReason).ConfigureAwait(false);
+            await StopAsync(runtime, clock, renderer, window, world, storage, walkable, save, stopReason, prototypeSave)
+                .ConfigureAwait(false);
         }
         catch (Exception cleanup) when (failure is not null)
         {
@@ -167,11 +205,14 @@ internal static class GameHost
 
     private static async Task<string?> DriveAsync(HostMode mode, EngineModuleContext context, RuntimeSafetyAuthority runtime,
         EcsWorld world, IInputSource input, D3D12Renderer? renderer, TerrainScene? terrain,
-        WalkableScene? walkable, WorldSave? save, SmokeClock? smokeClock, CancellationToken cancellationToken)
+        WalkableScene? walkable, WorldSave? save, PrototypeSave? prototypeSave, SmokeClock? smokeClock,
+        CancellationToken cancellationToken)
     {
         var injectedFault = mode == HostMode.FaultSmoke ? new InvalidOperationException("Controlled tick failure.") : null;
         var route = mode == HostMode.WalkableSmoke ? new WalkableRouteSmoke() : null;
-        var prototype = mode is HostMode.Prototype or HostMode.PrototypeSmoke ? new PrototypeSession(walkable!) : null;
+        var prototype = mode is HostMode.Prototype or HostMode.PrototypeSmoke
+            ? new PrototypeSession(walkable!, prototypeSave?.Checkpoint?.Progress ?? default) : null;
+        var menu = prototypeSave is null ? null : new PrototypeMenu(prototypeSave);
         var prototypeRoute = mode == HostMode.PrototypeSmoke ? new PrototypeRouteSmoke() : null;
         var caption = mode == HostMode.Prototype ? new PrototypeCaption() : null;
         var yaw = 0f;
@@ -195,10 +236,10 @@ internal static class GameHost
             {
                 // The coordinator lets an owned barrier settle before handling console cancellation.
                 var iteration = await simulation.AdvanceAsync(CancellationToken.None).ConfigureAwait(false);
-                if (iteration.State == SimulationState.Stopped || pipeline.CloseRequested)
+                if (iteration.State == SimulationState.Stopped || pipeline.CloseRequested || menu is { QuitRequested: true })
                     break;
                 if (caption is not null)
-                    caption.Update(prototype!.Caption);
+                    caption.Update(prototype!.Paused ? menu!.Caption : prototype.Caption);
                 if (!nativeCloseSent && scene is not null)
                 {
                     if (edits is not null)
@@ -323,25 +364,25 @@ internal static class GameHost
             }
             else if (!input.TransitionLoss)
             {
-                if (Pressed(input, InputControl.Escape))
-                    prototype!.Paused = !prototype.Paused;
-                if (drawable && !prototype!.Paused)
+                if (drawable && !prototype!.Paused && !PrototypeMenu.Pressed(input, InputControl.Escape))
                 {
                     (x, z) = ReadWalkableInput(input, ref yaw);
                     var held = input.HeldControls;
                     var tilt = (held.Contains(InputControl.Up) ? 1 : 0) - (held.Contains(InputControl.Down) ? 1 : 0);
                     pitch = Math.Clamp(pitch + tilt * (MathF.PI / 90), -1.4f, 1.4f);
-                    interact = Pressed(input, InputControl.E);
+                    interact = PrototypeMenu.Pressed(input, InputControl.E);
                 }
             }
             walkable!.Advance(x, z, tick.Tick, drawable: drawable);
             prototype!.Advance(yaw, pitch, interact, drawable, showObjective: caption is not null);
+            if (menu is not null)
+            {
+                prototypeSave!.Advance();
+                menu.Handle(input, prototype, new PrototypeCheckpoint(walkable.Pose, prototype.Progress));
+            }
             if (prototypeRoute is { Completed: true } && routeCompletionTick == 0)
                 routeCompletionTick = tick.Tick;
         }
-
-        static bool Pressed(InputSnapshot input, InputControl control) =>
-            input.Events.Any(e => e.Kind == InputEventKind.Pressed && e.Device == InputDevice.Keyboard && e.Control == control);
     }
 
     private static (int X, int Z) ReadWalkableInput(InputSnapshot input, ref float yaw)
@@ -392,10 +433,12 @@ internal static class GameHost
     }
 
     private static async Task StopAsync(RuntimeSafetyAuthority runtime, TimeProvider clock, D3D12Renderer? renderer, WindowsHostModule? window,
-        EcsWorld? world, EcsStorageBudget storage, WalkableScene? walkable, WorldSave? save, HostStopReason reason)
+        EcsWorld? world, EcsStorageBudget storage, WalkableScene? walkable, WorldSave? save, HostStopReason reason,
+        PrototypeSave? prototypeSave = null)
     {
         walkable?.Stop();
         save?.Stop();
+        prototypeSave?.Stop();
         var deadline = runtime.StopControl.RequestStop(reason);
         var failures = new List<Exception>();
         try
@@ -430,11 +473,12 @@ internal static class GameHost
 
         try
         {
-            if (walkable is not null || save is not null)
+            if (walkable is not null || save is not null || prototypeSave is not null)
             {
                 using var workerDeadline = new CancellationTokenSource(deadline.GetRemainingForSettlement(clock));
                 await Task.WhenAll(walkable?.SettleAsync(workerDeadline.Token) ?? Task.CompletedTask,
-                    save?.SettleAsync(workerDeadline.Token) ?? Task.CompletedTask).ConfigureAwait(false);
+                    save?.SettleAsync(workerDeadline.Token) ?? Task.CompletedTask,
+                    prototypeSave?.SettleAsync(workerDeadline.Token) ?? Task.CompletedTask).ConfigureAwait(false);
             }
         }
         catch (Exception error)

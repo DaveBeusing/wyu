@@ -54,6 +54,20 @@ public readonly record struct PrototypeProgress
     public bool BeaconOnline { get; }
     public int Stone => BitOperations.PopCount((uint)MinedDeposits) - InstalledModules;
 
+    /// <summary>Restores the canonical progress represented by a validated checkpoint.</summary>
+    public static bool TryRestore(DepositMask minedDeposits, int installedModules, bool beaconOnline,
+        out PrototypeProgress progress)
+    {
+        const DepositMask allDeposits = DepositMask.West | DepositMask.Seam | DepositMask.East;
+        progress = default;
+        if ((minedDeposits & ~allDeposits) != 0 || installedModules < 0 ||
+            installedModules > BitOperations.PopCount((uint)minedDeposits) || beaconOnline && installedModules != 3)
+            return false;
+
+        progress = new PrototypeProgress(minedDeposits, installedModules, beaconOnline);
+        return true;
+    }
+
     public BeaconModule? NextModule => InstalledModules switch
     {
         0 => BeaconModule.Foundation,

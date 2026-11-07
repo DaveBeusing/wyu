@@ -8,7 +8,8 @@ param(
     [switch]$TerrainSmoke,
     [switch]$WalkableSmoke,
     [switch]$SaveSmoke,
-    [switch]$PrototypeSmoke
+    [switch]$PrototypeSmoke,
+    [switch]$PrototypeSaveSmoke
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -89,6 +90,47 @@ function Invoke-HostSmoke([string]$Assembly, [string]$Mode, [string]$PassLine, [
     } finally { $process.Dispose() }
 }
 
+function Stop-HostAtSaveMarker([string]$Assembly, [string]$Mode, [string[]]$Arguments,
+        [string]$Marker, [string]$MarkerSuffix, [scriptblock]$AssertBoundary) {
+    $writer = Start-HostSmoke $Assembly $Mode $Arguments
+    try {
+        $stdout = $writer.StandardOutput.ReadToEndAsync()
+        $stderr = $writer.StandardError.ReadToEndAsync()
+        $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
+        $expectedMarker = "$($Arguments[1]) $($writer.Id)$MarkerSuffix"
+        $ready = $false
+        while (!$writer.HasExited -and $elapsed.Elapsed.TotalSeconds -lt 30) {
+            if ((Test-Path -LiteralPath $marker -PathType Leaf) -and
+                (Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue) -ceq $expectedMarker) {
+                $ready = $true
+                break
+            }
+            Start-Sleep -Milliseconds 50
+        }
+        if ($writer.HasExited) {
+            throw "WYU save writer exited before interruption. $($stdout.GetAwaiter().GetResult()) $($stderr.GetAwaiter().GetResult())"
+        }
+        if (!$ready) { throw "WYU save writer did not reach the expected boundary ($Mode)." }
+        & $AssertBoundary
+        $writer.Kill()
+        if (!$writer.WaitForExit(5000)) { throw 'WYU save writer did not terminate.' }
+    } finally {
+        if (!$writer.HasExited) {
+            $writer.Kill()
+            [void]$writer.WaitForExit(5000)
+        }
+        $writer.Dispose()
+    }
+
+}
+
+function Assert-SaveGeneration([string]$Path, [uint64]$Generation) {
+    $frame = [System.IO.File]::ReadAllBytes($Path)
+    if ($frame.Length -lt 24 -or [BitConverter]::ToUInt64($frame, 16) -ne $Generation) {
+        throw "Save generation $Generation was not present in '$Path'."
+    }
+}
+
 function Invoke-SaveSmoke([string]$Assembly, [string]$WorkDirectory) {
     $slot = Join-Path $WorkDirectory 'save-smoke'
     [void](New-Item -ItemType Directory -Path $slot)
@@ -102,44 +144,57 @@ function Invoke-SaveSmoke([string]$Assembly, [string]$WorkDirectory) {
     $pending = Join-Path $slot 'save.pending'
     $marker = Join-Path $slot 'wyu-save-smoke.ready'
     $committedHash = (Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash
-    $writer = Start-HostSmoke $Assembly '--save-smoke-interrupt' $arguments
-    try {
-        $stdout = $writer.StandardOutput.ReadToEndAsync()
-        $stderr = $writer.StandardError.ReadToEndAsync()
-        $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
-        $expectedMarker = "$token $($writer.Id)"
-        $ready = $false
-        while (!$writer.HasExited -and $elapsed.Elapsed.TotalSeconds -lt 30) {
-            if ((Test-Path -LiteralPath $marker -PathType Leaf) -and
-                (Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue) -ceq $expectedMarker) {
-                $ready = $true
-                break
-            }
-            Start-Sleep -Milliseconds 50
-        }
-        if ($writer.HasExited) {
-            throw "WYU save writer exited before interruption. $($stdout.GetAwaiter().GetResult()) $($stderr.GetAwaiter().GetResult())"
-        }
-        if (!$ready) { throw 'WYU save writer did not reach the flush boundary.' }
-        $frame = [System.IO.File]::ReadAllBytes($pending)
-        if ($frame.Length -lt 24 -or [BitConverter]::ToUInt64($frame, 16) -ne 2 -or (Test-Path -LiteralPath $second)) {
-            throw 'Generation 2 was not staged at the expected publication boundary.'
-        }
-        $writer.Kill()
-        if (!$writer.WaitForExit(5000)) { throw 'WYU save writer did not terminate.' }
-        if ((Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash -cne $committedHash -or (Test-Path -LiteralPath $second)) {
-            throw 'The interruption changed the committed checkpoint.'
-        }
-        Write-Host 'PASS: Windows terminated the writer after generation 2 was flushed and before it was installed.'
-    } finally {
-        if (!$writer.HasExited) {
-            $writer.Kill()
-            [void]$writer.WaitForExit(5000)
-        }
-        $writer.Dispose()
+    Stop-HostAtSaveMarker $Assembly '--save-smoke-interrupt' $arguments $marker '' {
+        Assert-SaveGeneration $pending 2
+        if (Test-Path -LiteralPath $second) { throw 'Generation 2 was already installed.' }
+    }
+    if ((Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash -cne $committedHash -or (Test-Path -LiteralPath $second)) {
+        throw 'The interruption changed the committed checkpoint.'
+    }
+    Write-Host 'PASS: Windows terminated the writer after generation 2 was flushed and before it was installed.'
+    Invoke-HostSmoke $Assembly '--save-smoke-resume' 'PASS: WYU restored committed terrain, position and inventory after interrupted save.' -Arguments $arguments
+}
+
+function Invoke-PrototypeSaveSmoke([string]$Assembly, [string]$WorkDirectory) {
+    $slot = Join-Path $WorkDirectory 'prototype-save-smoke'
+    [void](New-Item -ItemType Directory -Path $slot)
+    $drive = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($slot))
+    if ($drive.DriveType -ne [System.IO.DriveType]::Fixed -or $drive.DriveFormat -cne 'NTFS') {
+        throw 'The WP07 interruption test requires a local NTFS fixture directory.'
     }
 
-    Invoke-HostSmoke $Assembly '--save-smoke-resume' 'PASS: WYU restored committed terrain, position and inventory after interrupted save.' -Arguments $arguments
+    $token = [guid]::NewGuid().ToString('N')
+    Set-Content -LiteralPath (Join-Path $slot 'wyu-prototype-save.fixture') -Value $token
+    $arguments = @($slot, $token)
+    Invoke-HostSmoke $Assembly '--prototype-save-init' 'PASS: WP07 committed the mining checkpoint.' -Arguments $arguments
+
+    $first = Join-Path $slot 'save.a'
+    $second = Join-Path $slot 'save.b'
+    $pending = Join-Path $slot 'save.pending'
+    $marker = Join-Path $slot 'wyu-prototype-save.ready'
+    $committedHash = (Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash
+    Stop-HostAtSaveMarker $Assembly '--prototype-save-before-publish' $arguments $marker ' --prototype-save-before-publish' {
+        Assert-SaveGeneration $pending 2
+        if (Test-Path -LiteralPath $second) { throw 'WP07 generation 2 was already installed.' }
+    }
+    if ((Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash -cne $committedHash -or (Test-Path -LiteralPath $second)) {
+        throw 'WP07 pre-publication interruption changed the committed checkpoint.'
+    }
+    Write-Host 'PASS: WP07 interruption before installation preserved the first committed file byte for byte.'
+
+    Remove-Item -LiteralPath $marker
+    Stop-HostAtSaveMarker $Assembly '--prototype-save-after-publish' $arguments $marker ' --prototype-save-after-publish' {
+        Assert-SaveGeneration $second 2
+        if (Test-Path -LiteralPath $pending) { throw 'WP07 generation 2 was not moved atomically.' }
+    }
+    if ((Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash -cne $committedHash) {
+        throw 'WP07 generation 2 overwrote the previous committed checkpoint.'
+    }
+    Assert-SaveGeneration $second 2
+    Write-Host 'PASS: WP07 interruption after installation left a complete generation 2 for a fresh process.'
+
+    Invoke-HostSmoke $Assembly '--prototype-save-finish' 'PASS: WP07 resumed partial construction and committed the rescue signal without mutating the staged checkpoint.' -Arguments $arguments
+    Invoke-HostSmoke $Assembly '--prototype-save-verify' 'PASS: WP07 restored the completed beacon and protected invalid or unsupported checkpoints.' -Arguments $arguments
 }
 
 $entries = @(Read-VerifiedArchive $artifactRoot $ExpectedVersion)
@@ -205,6 +260,7 @@ try {
         if ($WalkableSmoke) { Invoke-HostSmoke $assembly '--walkable-smoke' 'PASS: WYU walkable route and native shutdown.' -TimeoutSeconds 130 }
         if ($PrototypeSmoke) { Invoke-HostSmoke $assembly '--prototype-smoke' 'PASS: WYU WP07 rescue beacon route and native shutdown.' -TimeoutSeconds 130 }
         if ($SaveSmoke) { Invoke-SaveSmoke $assembly $work }
+        if ($PrototypeSaveSmoke) { Invoke-PrototypeSaveSmoke $assembly $work }
         Write-Host "PASS: WYU consumed $($expectedIds.Count) verified Groundwork $ExpectedVersion packages with a fresh locked restore."
         $global:LASTEXITCODE = 0
     } finally { Pop-Location }
