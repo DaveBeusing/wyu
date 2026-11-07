@@ -33,21 +33,31 @@ Die Reihenfolge der drei konkret benannten Quellen ist damit im Grundsatz: **Ver
 - **Verbrennung** ist grundsätzlich planbar, solange Brennstoffvorräte und funktionsfähige Anlagen vorhanden sind.
 - **Solarenergie** hängt später unter anderem von Tageszeit, Sonneneinstrahlung, Wolken und saisonalen Bedingungen ab.
 - **Windkraft** hängt von den örtlichen und zeitlichen Windverhältnissen ab.
-- Unterschiedliche Quellen können einander ergänzen; einfache Batterien zur Zwischenspeicherung sind früh vorgesehen. Konkrete Wirkungsgrade, Ausfallverhalten, Verkabelung und Speicherwerte sind noch zu entscheiden.
+- Unterschiedliche Quellen können einander ergänzen; einfache Batterien zur Zwischenspeicherung sind früh vorgesehen. Konkrete Wirkungsgrade, Ausfallverhalten, Kabeltypen und Speicherwerte sind noch zu entscheiden.
 - Die späten Solarstürme sind für technische Infrastrukturen relevant. Exakte Auswirkungen auf Energieerzeuger, Netze und Schutztechniken werden separat ausgearbeitet.
 
-## 5. Technologische Einordnung
+## 5. Manuell verlegte Stromleitungen — abgestimmte Grundlage
+
+**Verbindlich:** Der Spieler verlegt elektrische Kabel selbst und verbindet damit Stromerzeuger, Batterien und Verbraucher zu einem funktionierenden Netz. Die Nähe benachbarter Gebäude oder Geräte erzeugt **keine automatische Stromverbindung**.
+
+- Stromversorgung setzt grundsätzlich eine nachvollziehbare, vom Spieler hergestellte Verbindung voraus.
+- Die Leitungsführung ist Teil des freien modularen Basisbaus und kann an die individuelle Konstruktion angepasst werden.
+- Ob Leitungen sichtbar, verdeckt, durch Wände oder über spezielle Bauelemente verlaufen dürfen, wird später im Bausystem ausgearbeitet.
+- Kabeltypen, Reichweite, Leistungsgrenzen, Verluste, Sicherungen, mögliche Kurzschlüsse und die konkrete Netzsimulation bleiben offen.
+- Eine spätere Automatisierung und Überwachung der Stromversorgung soll mit den technischen Schaltkreisen bzw. Steuerungssystemen abgestimmt werden.
+
+## 6. Technologische Einordnung
 
 - **WYU** definiert Energiequellen, Rezepte, Verbrauch, Fortschrittsbedingungen und Balancing.
 - **Groundwork** soll nur allgemein wiederverwendbare Grundlagen für Simulations- und Versorgungssysteme bereitstellen.
 - Das spätere Energie- und Technologiekonzept entscheidet, welche Geräte erforderlich sind, wie Energie zwischen Anlagen übertragen und gespeichert wird und welche Ressourcen verbrennbar sind.
 
-## 6. Absichtlich offene Fragen
+## 7. Absichtlich offene Fragen
 
 1. Welche brennbaren Ressourcen stehen auf New Terra zur Verfügung und wie werden sie gewonnen?
 2. Welche frühen Anwendungen benötigen Wärme, welche Elektrizität und wann wird der erste Verbrennungsgenerator technisch möglich?
 3. Welche Herstellungsschritte schalten Solar- und Windstrom als gleichrangige, parallel entwickelbare Ausbaustufen frei?
-4. Wie werden elektrische Netze, Generatoren, Lasten und die beschlossenen frühen Batterien verbunden? Welche Leistungsgrenzen, Kapazitäten und Verluste gelten?
+4. Wie werden die bereits beschlossenen, manuell zu verlegenden Stromleitungen im modularen Bausystem geführt und angeschlossen? Welche Leistungsgrenzen, Kapazitäten und Verluste gelten?
 5. Wie sollen unterschiedliche Energiequellen skaliert, kombiniert und automatisiert werden?
 6. Welche späteren, leistungsfähigeren Energiequellen sind für Industrie und Raumfahrt vorgesehen?
 7. Welche Auswirkungen haben Wetter und die erst spät relevanten Solarstürme auf die Stromversorgung?
