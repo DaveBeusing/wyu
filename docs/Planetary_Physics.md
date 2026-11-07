@@ -51,7 +51,19 @@ Die Physik in **Worlds Yet Unseen (WYU)** soll **glaubwürdig, konsistent und re
 - Gewöhnliche Stürme und Unwetter unabhängig vom deutlich späteren Solarsturm-Thema.
 - Lokale Auswirkungen auf Sicht, Bewegung, Bau, Energiebedarf und Technik.
 
-## 5. Performance-Leitlinie
+## 5. Temperatur und Spielerwohlbefinden — abgestimmte Grundlagen
+
+Hitze und Kälte sollen für den Spieler **spürbare, nachvollziehbare körperliche Folgen** haben, ohne dass bloß normales Sommerwetter automatisch schwerwiegende Gesundheitsschäden auslöst.
+
+- **Hohe Temperaturen:** Erhöhter Flüssigkeitsbedarf bzw. schnellerer Durst. Ungeeignete, zu warme Kleidung und direkte Sonneneinstrahlung erhöhen die Hitzebelastung.
+- **Niedrige Temperaturen:** Bei längerer oder starker Kälteeinwirkung besteht ein Risiko für Unterkühlung. Geeignete Kleidung und Schutzräume sollen vorbeugen.
+- **Kleidung und Umgebung:** Temperatur, Wetter, Sonnenexposition und die gewählte Kleidung sollen gemeinsam berücksichtigt werden; passende Ausrüstung und Verhalten helfen dem Spieler.
+- **Gesundheit:** Folgen sollen grundsätzlich abgestuft sein und von der tatsächlichen Belastung abhängen; das Ausmaß unmittelbarer Gesundheitsschäden, konkrete Statuswerte und Warnsignale bleiben zur späteren Abstimmung offen.
+- **Technische Umsetzung:** Eine performancebewusste, nachvollziehbare Näherung reicht aus; es ist keine vollständige Simulation menschlicher Thermoregulation erforderlich.
+
+**Noch nicht entschieden:** Konkrete Schwellenwerte, Zeitdauern, Flüssigkeitsverbrauch, UI-Anzeigen und Auswirkungen auf Ausdauer oder Lebenspunkte. Auch Temperatureffekte auf Ressourcen und Maschinen sind nicht festgelegt.
+
+## 6. Performance-Leitlinie
 
 Die **Daten eines Himmelskörpers** bilden die stabile Ausgangslage. **Lokale Bedingungen** werden bei Bedarf für eine Region, eine Position oder ein aktives Objekt abgeleitet. Nicht jede entfernte Region benötigt in jedem Simulationsschritt eine hochaufgelöste Berechnung.
 
@@ -62,12 +74,12 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 - Statische strukturelle Prüfungen für Bauwerke und dynamische Physik primär bei Bewegung, Schäden oder Einsturz.
 - Kontinuierlich wirkende Übergänge zwischen Oberfläche, Atmosphäre und Weltraum ohne notwendigen Anspruch auf vollständige Mehrkörper-Himmelsmechanik.
 
-## 6. Offene Entscheidungen
+## 7. Offene Entscheidungen
 
 1. Welche Höhen- und Tauchbedingungen erfordern zusätzliche Atemtechnik auf New Terra?
 2. Welche physikalischen Eigenschaften sollen tatsächlich von Planet zu Planet variieren und welche nur lokal?
 3. Welchen Grad an realistischem Flug-/Orbitalverhalten soll die Raumfahrt erfordern?
-4. Welche Auswirkungen von Temperatur, Sauerstoff, Druck und Strahlung sind spielrelevant?
+4. Welche konkreten Schwellenwerte und abgestuften Auswirkungen erhalten Hitzebelastung, Durst und Unterkühlung; welche Auswirkungen von Sauerstoff, Druck und Strahlung sind zusätzlich spielrelevant?
 5. Welche Mindestanforderungen gelten für Druck- und Sauerstoffsysteme in unterirdischen oder geschlossenen Basen?
 6. Wie schnell sollen die festgelegten 24 planetaren Stunden in Echtzeit vergehen (Spielzeitfaktor)?
 7. Wie lang ist ein New-Terra-Jahr, welche konkreten Temperatur-/Wettergrenzen gelten regional und wie schnell laufen die Jahreszeiten in Echtzeit ab?
