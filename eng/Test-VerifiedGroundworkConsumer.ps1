@@ -7,6 +7,7 @@ param(
     [switch]$D3D12Smoke,
     [switch]$TerrainSmoke,
     [switch]$WalkableSmoke,
+    [switch]$PlanetSmoke,
     [switch]$SaveSmoke,
     [switch]$PrototypeSmoke,
     [switch]$PrototypeSaveSmoke
@@ -258,6 +259,7 @@ try {
         if ($D3D12Smoke) { Invoke-HostSmoke $assembly '--d3d12-smoke' 'PASS: WYU D3D12 Windows startup and shutdown.' }
         if ($TerrainSmoke) { Invoke-HostSmoke $assembly '--terrain-smoke' 'PASS: WYU D3D12 terrain presentation and native shutdown.' }
         if ($WalkableSmoke) { Invoke-HostSmoke $assembly '--walkable-smoke' 'PASS: WYU walkable route and native shutdown.' -TimeoutSeconds 130 }
+        if ($PlanetSmoke) { Invoke-HostSmoke $assembly '--planet-smoke' 'PASS: WYU WP08 planet route and native shutdown.' -TimeoutSeconds 130 }
         if ($PrototypeSmoke) { Invoke-HostSmoke $assembly '--prototype-smoke' 'PASS: WYU WP07 rescue beacon route and native shutdown.' -TimeoutSeconds 130 }
         if ($SaveSmoke) { Invoke-SaveSmoke $assembly $work }
         if ($PrototypeSaveSmoke) { Invoke-PrototypeSaveSmoke $assembly $work }
