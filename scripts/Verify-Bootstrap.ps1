@@ -18,11 +18,15 @@ try {
     Assert-True (Test-Path 'WorldsYetUnseen.slnx') 'WYU solution is missing.'
     [xml] $solution = Get-Content 'WorldsYetUnseen.slnx' -Raw
     $projects = @($solution.SelectNodes('//Project') | ForEach-Object { $_.GetAttribute('Path') })
-    Assert-True (($projects.Count -eq 1) -and ($projects[0] -eq 'src/WorldsYetUnseen.Client/WorldsYetUnseen.Client.csproj')) 'Unexpected WYU project graph.'
+    $clientProject = 'src/WorldsYetUnseen.Client/WorldsYetUnseen.Client.csproj'
+    $gameplayProject = 'src/WorldsYetUnseen.Gameplay/WorldsYetUnseen.Gameplay.csproj'
+    $gameplayTests = 'tests/WorldsYetUnseen.Gameplay.Tests/WorldsYetUnseen.Gameplay.Tests.csproj'
+    Assert-True ($projects.Count -eq 3 -and $projects -ccontains $clientProject -and
+        $projects -ccontains $gameplayProject -and $projects -ccontains $gameplayTests) 'Unexpected WYU project graph.'
     [xml] $props = Get-Content 'Directory.Build.props' -Raw
     $version = $props.SelectSingleNode('//PropertyGroup/Version')
     Assert-True (($null -ne $version) -and ($version.InnerText -eq '0.1.0')) 'Source version must be 0.1.0.'
-    [xml] $project = Get-Content $projects[0] -Raw
+    [xml] $project = Get-Content $clientProject -Raw
     $refs = @($project.SelectNodes('//ProjectReference'))
     Assert-True ($refs.Count -eq 0) 'The WYU host must not use source ProjectReference dependencies.'
     $packages = @($project.SelectNodes('//PackageReference'))
@@ -70,6 +74,7 @@ try {
     Assert-True ((Get-FileHash -LiteralPath $lockPath -Algorithm SHA256).Hash -eq $lockHash) 'Locked restore changed the NuGet lockfile.'
     Invoke-Native 'dotnet' @('build', 'WorldsYetUnseen.slnx', '-c', 'Release', '--no-restore')
     Write-Host 'PASS: WYU structure, exact NuGet pins, locked restore and Release build.' -ForegroundColor Green
+    Invoke-Native 'dotnet' @('run', '--project', $gameplayTests, '-c', 'Release', '--no-build', '--no-restore')
 } finally {
     Pop-Location
 }

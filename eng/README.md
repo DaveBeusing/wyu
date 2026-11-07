@@ -24,6 +24,16 @@ CI validates the producer run and immutable release metadata, checks the
 archive asset hashes and commit, then invokes `Test-VerifiedGroundworkConsumer.ps1`.
 The script checks every package hash, rejects missing, tampered, and
 incompatible packages, then restores and builds with a fresh cache from an
-external feed. Headless startup, controlled-fault and save recovery tests run on every
-PR and `master` push. See [Windows host verification](../docs/build-bootstrap.md)
+external feed. The portable WP07 rule tests, headless startup, controlled-fault
+and save recovery tests run on every PR and `master` push. See
+[Windows host verification](../docs/build-bootstrap.md)
 for the clean-checkout command and interactive Windows and D3D12 smoke options.
+
+Run the portable rule tests by themselves with the pinned .NET SDK:
+
+```powershell
+dotnet run --project tests/WorldsYetUnseen.Gameplay.Tests -c Release
+```
+
+The test executable uses the BCL and the WYU gameplay project. It needs no
+Groundwork feed or Windows desktop.
