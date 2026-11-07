@@ -3,7 +3,7 @@
 Build and run from a clean WYU checkout on Windows with the .NET 10 SDK,
 PowerShell 7, and GitHub CLI. The engine is supplied by the immutable
 Groundwork NuGet archive. WYU pins all ten packages at
-`0.1.0-dev.42411077659.1` and commits the SDK-generated lockfile.
+`0.1.0-dev.42417550607.1` and commits the SDK-generated lockfile.
 The renderer runs on Windows x64 and requires a D3D12 hardware adapter.
 
 Download the archive to a new temporary directory and run the verification
@@ -12,13 +12,13 @@ gate from the WYU repository root.
 ```powershell
 $archive = Join-Path ([IO.Path]::GetTempPath()) ('wyu-archive-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $archive | Out-Null
-gh release download archive-groundwork-0.1.0-dev.42411077659.1-immutable `
+gh release download archive-groundwork-0.1.0-dev.42417550607.1-immutable `
   --repo DaveBeusing/Groundwork --dir $archive
 if ($LASTEXITCODE -ne 0) { throw 'Groundwork archive download failed.' }
 ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $archive `
-  -ExpectedManifestSha256 EE49C1228ED2D7D1DDD579F851119DEB8949F70AFD8579E05CC5084F0F283623 `
-  -ExpectedSourceCommit 141a62ab6b22246d21cc48d74f45397cf902c910 `
-  -ExpectedVersion 0.1.0-dev.42411077659.1
+  -ExpectedManifestSha256 1FA434525FFF4382D4C7485C8A8F32F1EB68D929A59A773152078B8A901AEAFB `
+  -ExpectedSourceCommit ae494c51eead61feb032ccdfdfed1089c04dc04a `
+  -ExpectedVersion 0.1.0-dev.42417550607.1
 ```
 
 The gate checks package provenance, stages a temporary external NuGet feed,
@@ -37,6 +37,15 @@ at 145° and then back to the 35° starting point. It also shows whether
 the route is waiting for terrain coverage. This mode uses a fresh session.
 Add `-PlanetSmoke` to the verified consumer command to drive both legs
 on NVIDIA with Debug Layer and DRED and verify native shutdown.
+
+Run `--flight [slot-directory]` for the guided WP09 mission. Space starts
+the flight and Esc closes the session. The default slot is the WP09
+directory under local application data. The host saves the grounded craft
+before departure and after touchdown and restores the landed checkpoint
+on the next launch. Add `-FlightSmoke` to the verified consumer command to
+fly the mission twice on NVIDIA with Debug Layer and DRED. Each run uses a
+fresh slot and a separate reload process. The gate compares the mission
+trace, landed pose and edit overlay across processes.
 
 ```powershell
 dotnet ./artifacts/bin/WorldsYetUnseen.Client/release/WorldsYetUnseen.Client.dll --d3d12
