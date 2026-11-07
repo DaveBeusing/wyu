@@ -4,10 +4,12 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
-        var saveSmoke = args is [ "--save-smoke-init" or "--save-smoke-interrupt" or "--save-smoke-resume", _, _ ];
+        var saveSmoke = args is ["--save-smoke-init" or "--save-smoke-interrupt" or "--save-smoke-resume" or
+            "--prototype-save-init" or "--prototype-save-before-publish" or "--prototype-save-after-publish" or
+            "--prototype-save-finish" or "--prototype-save-verify", _, _];
         HostMode? mode = args switch
         {
-            [] or ["--prototype"] => HostMode.Prototype,
+            [] or ["--prototype"] or ["--prototype", _] => HostMode.Prototype,
             ["--prototype-smoke"] => HostMode.PrototypeSmoke,
             ["--d3d12"] => HostMode.D3D12,
             ["--d3d12-smoke"] => HostMode.D3D12Smoke,
@@ -23,7 +25,7 @@ internal static class Program
         };
         if (mode is null && !saveSmoke)
         {
-            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--prototype | --prototype-smoke | --d3d12 | --d3d12-smoke | --terrain | --terrain-smoke | --walkable | --walkable-smoke | --save-world [slot-directory] | --window-smoke | --headless-smoke | --fault-smoke]");
+            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--prototype [slot-directory] | --prototype-smoke | --d3d12 | --d3d12-smoke | --terrain | --terrain-smoke | --walkable | --walkable-smoke | --save-world [slot-directory] | --window-smoke | --headless-smoke | --fault-smoke]");
             return 2;
         }
 

@@ -5,13 +5,13 @@ using WorldsYetUnseen.Gameplay;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class PrototypeSession(WalkableScene scene)
+internal sealed class PrototypeSession(WalkableScene scene, PrototypeProgress initialProgress = default)
 {
     private PrototypeProgress? _pending;
     private string? _notice;
     private PrototypeTarget _lastTarget;
 
-    internal PrototypeProgress Progress { get; private set; }
+    internal PrototypeProgress Progress { get; private set; } = initialProgress;
     internal bool Paused { get; set; }
     internal string Caption { get; private set; } = "WYU | Find stone and build the rescue beacon";
 
@@ -96,8 +96,6 @@ internal sealed class PrototypeSession(WalkableScene scene)
 
     private string Describe(PrototypeTarget target, float yaw)
     {
-        if (Paused)
-            return "WYU | Paused | Esc resume | Close window to quit";
         if (Progress.BeaconOnline)
             return "WYU | Rescue beacon online | Objective complete | Esc pause";
 

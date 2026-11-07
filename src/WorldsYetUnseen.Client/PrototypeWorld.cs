@@ -21,6 +21,9 @@ internal static class PrototypeWorld
     internal static readonly Vector3 PadAnchor = new(-17.5f, 5, 9.5f);
     internal static ReadOnlySpan<Deposit> Deposits => OrderedDeposits;
 
+    internal static ISaveTerrainGenerator? ResolveGenerator(uint id, uint version) =>
+        id == Recipe.GeneratorId && version == Recipe.GeneratorVersion ? Generator : null;
+
     internal static (int X, int Y, int Z) DepositCell(Deposit deposit) => deposit switch
     {
         Deposit.West => (-10, 4, 7),
@@ -60,12 +63,16 @@ internal static class PrototypeWorld
         return TerrainOverlay.CreateSnapshot(Recipe, coordinate, Recipe.GeneratorVersion, [], Generator);
     }
 
-    internal static TerrainChunkDelta[] EffectiveTerrain(PrototypeProgress progress)
+    internal static TerrainChunkDelta[] EffectiveTerrain(PrototypeProgress progress) => Terrain(progress, includeModules: true);
+
+    internal static TerrainChunkDelta[] SavedTerrain(PrototypeProgress progress) => Terrain(progress, includeModules: false);
+
+    private static TerrainChunkDelta[] Terrain(PrototypeProgress progress, bool includeModules)
     {
         // All sockets are in chunk -2. Each deposit is in a distinct chunk to its east.
         // Traversal in this order produces canonical signed chunk and cell ordering.
         var changes = new List<TerrainChunkDelta>(4);
-        if (progress.InstalledModules > 0)
+        if (includeModules && progress.InstalledModules > 0)
         {
             var chunk = ChunkOf(ModuleCell(BeaconModule.Foundation));
             Span<TerrainCellDelta> sockets = stackalloc TerrainCellDelta[3];
@@ -160,12 +167,12 @@ internal static class PrototypeWorld
         return null;
     }
 
-    private static ChunkCoordinate ChunkOf((int X, int Y, int Z) cell) =>
+    internal static ChunkCoordinate ChunkOf((int X, int Y, int Z) cell) =>
         new(FloorChunk(cell.X), FloorChunk(cell.Y), FloorChunk(cell.Z));
 
     private static int FloorChunk(int cell) => (int)Math.Floor((double)cell / Size);
 
-    private static ushort LocalIndex((int X, int Y, int Z) cell, ChunkCoordinate chunk) =>
+    internal static ushort LocalIndex((int X, int Y, int Z) cell, ChunkCoordinate chunk) =>
         (ushort)(cell.X - chunk.X * Size + Size * (cell.Y - chunk.Y * Size + Size * (cell.Z - chunk.Z * Size)));
 
     private readonly record struct RayHit((int X, int Y, int Z) Cell, double Distance, VoxelOccupancy Occupancy);
@@ -205,7 +212,7 @@ internal static class PrototypeWorld
     {
         public void Generate(SaveWorldRecipe recipe, ChunkCoordinate coordinate, Span<byte> cells)
         {
-            if (recipe != Recipe)
+            if (recipe.GeneratorId != Recipe.GeneratorId || recipe.GeneratorVersion != Recipe.GeneratorVersion)
                 throw new ArgumentException("The saved recipe does not identify the prototype generator.", nameof(recipe));
 
             WalkableTerrain.GenerateSurface(recipe.Seed, coordinate, cells);

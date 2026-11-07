@@ -111,5 +111,5 @@ jobs:
               $archive.artifactZipSha256 -ine $env:GROUNDWORK_EXPECTED_ARTIFACT_ZIP_SHA256) {
             throw 'Archive provenance record does not match pinned producer.'
           }
-          & ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $env:GROUNDWORK_ARTIFACT_DIR -ExpectedManifestSha256 $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256 -ExpectedSourceCommit $env:GROUNDWORK_EXPECTED_HEAD_SHA -ExpectedVersion $env:GROUNDWORK_EXPECTED_VERSION -SaveSmoke
+          & ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $env:GROUNDWORK_ARTIFACT_DIR -ExpectedManifestSha256 $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256 -ExpectedSourceCommit $env:GROUNDWORK_EXPECTED_HEAD_SHA -ExpectedVersion $env:GROUNDWORK_EXPECTED_VERSION -SaveSmoke -PrototypeSaveSmoke
           if ($LASTEXITCODE -ne 0) { throw 'Verified consumer gate failed.' }
