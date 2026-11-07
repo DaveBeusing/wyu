@@ -149,9 +149,9 @@ Die Auswirkungen großer Höhen orientieren sich grundsätzlich an erdähnlicher
 - **Spieler:** Der Spieler selbst kann gefährdet werden, insbesondere bei ungeschütztem Aufenthalt im Freien. Art, Dauer und Ausmaß der Auswirkungen werden später ausgearbeitet; direkte Strahlungsschäden sind noch nicht als einziges Wirkmodell festgelegt.
 - **Umwelt auf New Terra:** Solarstürme beeinflussen auch die planetare Umgebung. Welche atmosphärischen, ökologischen oder anderen Umweltfolgen konkret auftreten, wird später entschieden.
 
-**Dramaturgie:** Die schweren Solarstürme bleiben ausdrücklich ein **spätes Spielthema**; der erdähnliche Schutz und die ruhige frühe Erkundungsphase gelten weiter. Bereits geplante unterirdische bzw. berggeschützte Basen können später einen Vorteil bieten, ohne dass er dem Spieler früh erklärt wird.
+**Dramaturgie und Grundschutz:** Die schweren Solarstürme bleiben ausdrücklich ein **spätes Spielthema**; der erdähnliche Schutz und die ruhige frühe Erkundungsphase gelten weiter. **Eine ausreichend vorbereitete und geschützte Basis oder eine geeignet unterirdisch angelegte Basis soll als Zufluchtsort während der Stürme genügen.** Dazu sind nicht zwingend spezielle Schutzanzüge erforderlich. Der mögliche Vorteil unterirdischer Bauweise wird dem Spieler anfangs nicht ausdrücklich verraten. Welche baulichen Voraussetzungen einen ausreichenden Schutz ausmachen, bleibt Teil des späteren Konstruktionskonzepts.
 
-**Abgrenzung:** Die drei Wirkungsbereiche sind beschlossen, nicht jedoch konkrete physikalische Mechanismen, Auslöser, Stärke, Häufigkeit, Warnsysteme, genaue Schadensmodelle oder Schutzwerte. Das spätere Detaildesign soll die beobachteten Folgen möglichst plausibel mit dem gewählten Weltmodell sowie mit Performance und Spielbarkeit vereinbaren.
+**Abgrenzung:** Die drei Wirkungsbereiche sind beschlossen. **Wann spezielle Schutzanzüge oder besonders widerstandsfähige Technik verfügbar und notwendig werden, wird erst im Technologiebaum ausgearbeitet.** Konkrete physikalische Mechanismen, Auslöser, Stärke, Häufigkeit, Warnsysteme, genaue Schadensmodelle oder Schutzwerte bleiben ebenfalls offen. Das spätere Detaildesign soll die beobachteten Folgen möglichst plausibel mit dem gewählten Weltmodell sowie mit Performance und Spielbarkeit vereinbaren.
 
 ## 12. Performance-Leitlinie
 
@@ -174,7 +174,7 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 6. Wie schnell sollen die festgelegten 24 planetaren Stunden in Echtzeit vergehen (Spielzeitfaktor)?
 7. Wie lang ist ein New-Terra-Jahr, welche konkreten Temperatur-/Wettergrenzen gelten regional und wie schnell laufen die Jahreszeiten in Echtzeit ab?
 8. Wie werden die qualitativ beschriebenen Kleidungseigenschaften später in Ausrüstungsslots, Werte, Darstellung und Balancing überführt?
-9. Welche konkreten Mechanismen, Schäden, Warnsysteme und Schutzmaßnahmen erhalten die **bereits festgelegten** drei Wirkungsbereiche der späten Solarstürme (Technik, Spieler, Umwelt), und wie werden sie plausibel modelliert?
+9. Welche konkreten Mechanismen, Schäden und Warnsysteme erhalten die **bereits festgelegten** drei Wirkungsbereiche der späten Solarstürme (Technik, Spieler, Umwelt)? Die Anforderungen an ausreichend geschützte Basen werden im Konstruktionskonzept, Schutzanzüge und robuste Technik im Technologiebaum weiter ausgearbeitet.
 10. Welche Simulationsbudgets, Genauigkeiten und Skalierungsgrenzen werden erst nach Prototypen festgelegt?
 
 **Abgrenzung:** Außer der festgelegten erdähnlichen Oberflächengravitation von rund 1 g und dem 24-Stunden-Sonnentag bleiben die konkreten Zahlen für den Startplaneten offen. Dieses Dokument legt weder eine vollständige Liste aller Himmelskörper noch eine endgültige Simulationsarchitektur fest. Die Vorschläge werden schrittweise mit dem Spielkonzept abgestimmt.
