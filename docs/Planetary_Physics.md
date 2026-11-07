@@ -108,7 +108,22 @@ Die Auswirkungen großer Höhen orientieren sich grundsätzlich an erdähnlicher
 
 **Bewusst offen:** Exakte Höhenbereiche, Luftdruckkurve, Stärke und Dauer der Akklimatisierung, möglicher Rückgang bei Aufenthalt in tieferen Lagen, Symptome, UI-Hinweise und konkrete Leistungs- bzw. Gesundheitseffekte.
 
-## 9. Performance-Leitlinie
+## 9. Aktive Lebenserhaltung in Raumschiffen und Raumstationen — abgestimmte Grundlagen
+
+**Verbindliche Designentscheidung:** Raumschiffe und Raumstationen besitzen eine **aktive Lebenserhaltung**, nicht nur einen vereinfachten „bewohnbar“-Schalter. Ein bewohnbarer Innenraum muss mit einer geeigneten Atemluftversorgung, ausreichendem Kabinendruck und der notwendigen Energieversorgung betrieben werden.
+
+- **Atemluft:** Eine begrenzte Versorgung mit atembarem Gas ist erforderlich; Sauerstoff kann gespeichert und transportiert werden (siehe Abschnitt 7).
+- **Druck:** Atembarkeit und ausreichender Umgebungsdruck sind getrennte Bedingungen. Ein Sauerstofftank allein macht einen drucklosen Raum nicht bewohnbar.
+- **Energie:** Die aktiven Lebenserhaltungssysteme benötigen Energie. Ausfälle sollen grundsätzlich relevante Folgen haben; Zeitverlauf und Notfallreserven sind noch offen.
+- **Technische Systeme als Spielmechanik:** Versorgung, Überwachung, Nachfüllen und langfristiger Betrieb sollen Teil des späteren technischen Fortschritts werden.
+- **Geschlossene Basen:** Eine Übertragung dieses Prinzips auf luftdichte planetare Räume und Unterwasseranlagen wird geprüft, ist aber in ihrer konkreten Ausgestaltung noch nicht beschlossen.
+- **Performance:** Die Simulation darf mit Zuständen und Bilanzen für abgeschlossene Bereiche arbeiten; eine vollständige Partikelsimulation der Luft in jedem Raum ist nicht erforderlich.
+
+**Vorgeschlagene, noch nicht festgelegte Vertiefungen:** Luftaufbereitung und CO₂-Entfernung, Leckagen und Druckverlust, Luftschleusen, thermische Regelung, Reserven und Notversorgung, zusammenhängende bzw. getrennte Raumvolumina.
+
+**Bewusst offen:** Exakte Sauerstoff- und Energieverbräuche, Druckschwellen, Luftgemische, Komponenten, Bauvorschriften, Ausfallverhalten, technische Implementierung und detaillierte Regeln für Basen.
+
+## 10. Performance-Leitlinie
 
 Die **Daten eines Himmelskörpers** bilden die stabile Ausgangslage. **Lokale Bedingungen** werden bei Bedarf für eine Region, eine Position oder ein aktives Objekt abgeleitet. Nicht jede entfernte Region benötigt in jedem Simulationsschritt eine hochaufgelöste Berechnung.
 
@@ -119,13 +134,13 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 - Statische strukturelle Prüfungen für Bauwerke und dynamische Physik primär bei Bewegung, Schäden oder Einsturz.
 - Kontinuierlich wirkende Übergänge zwischen Oberfläche, Atmosphäre und Weltraum ohne notwendigen Anspruch auf vollständige Mehrkörper-Himmelsmechanik.
 
-## 10. Offene Entscheidungen
+## 11. Offene Entscheidungen
 
 1. Welche genauen Höhenbereiche, Auswirkungen und Akklimatisierungszeiten gelten auf New Terra, und welche Tauchzeiten, Tiefengrenzen, Atemgas- und Druckschutzausrüstungen werden später definiert?
 2. Welche physikalischen Eigenschaften sollen tatsächlich von Planet zu Planet variieren und welche nur lokal?
 3. Welchen Grad an realistischem Flug-/Orbitalverhalten soll die Raumfahrt erfordern?
 4. Welche konkreten Schwellenwerte und abgestuften Auswirkungen erhalten Hitzebelastung, Durst und Unterkühlung; welche Auswirkungen von Sauerstoff, Druck und Strahlung sind zusätzlich spielrelevant?
-5. Welche Mindestanforderungen gelten für Druck- und Sauerstoffsysteme in unterirdischen oder geschlossenen Basen?
+5. Welche Mindestanforderungen gelten für die bereits festgelegte aktive Lebenserhaltung in Raumschiffen und Stationen (Druck, Luftaufbereitung, Energie, Notfallbetrieb), und wie werden diese Systeme auf unterirdische oder geschlossene Basen übertragen?
 6. Wie schnell sollen die festgelegten 24 planetaren Stunden in Echtzeit vergehen (Spielzeitfaktor)?
 7. Wie lang ist ein New-Terra-Jahr, welche konkreten Temperatur-/Wettergrenzen gelten regional und wie schnell laufen die Jahreszeiten in Echtzeit ab?
 8. Wie werden die qualitativ beschriebenen Kleidungseigenschaften später in Ausrüstungsslots, Werte, Darstellung und Balancing überführt?
