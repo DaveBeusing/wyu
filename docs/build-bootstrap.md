@@ -105,9 +105,12 @@ count and the action in focus. Use **WASD** to move, the **mouse** to aim,
 play and navigate menus while paused. Pause or switch away from the window
 to release mouse look.
 
-Follow the directions to the three deposits and mine each one. Return to
-the marked pad, focus its interaction point and build the foundation, mast
-and signal head. Focus the pad again and press **E** to send the signal.
+Follow the directions to the three deposits and mine each one. After the
+last deposit, **Next: build at cyan pad** gives the direction and distance
+back to the build site. Aim at the floating diamond near the cyan posts.
+When the prompt appears, press **E** for each of the
+foundation, mast and signal head. Aim at the same diamond and press **E**
+when the prompt changes to **send rescue signal**.
 Use **Save** in the pause menu and wait for the confirmed generation.
 **Continue** restores your position, inventory, mined terrain, built
 modules and signal state. The default slot is

@@ -363,7 +363,8 @@ internal static class GameHost
             var interact = false;
             if (prototypeRoute is not null)
             {
-                (x, z, yaw, pitch, interact) = prototypeRoute.NextInput(walkable!, prototype!.Progress, drawable && prototype.Ready);
+                (x, z, yaw, pitch, interact) = prototypeRoute.NextInput(walkable!, prototype!.Progress,
+                    drawable && prototype.Ready, prototype.Caption);
             }
             else
             {
@@ -382,7 +383,7 @@ internal static class GameHost
                 }
             }
             walkable!.Advance(x, z, tick.Tick, drawable: drawable);
-            prototype!.Advance(yaw, pitch, interact, drawable, showObjective: caption is not null);
+            prototype!.Advance(yaw, pitch, interact, drawable, showObjective: caption is not null || prototypeRoute is not null);
             if (menu is not null)
             {
                 prototypeSave!.Advance();
