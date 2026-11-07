@@ -3,7 +3,7 @@
 Build and run from a clean WYU checkout on Windows with the .NET 10 SDK,
 PowerShell 7, and GitHub CLI. The engine is supplied by the immutable
 Groundwork NuGet archive. WYU pins all ten packages at
-`0.1.0-dev.42417550607.1` and commits the SDK-generated lockfile.
+`0.1.0-dev.42420693798.1` and commits the SDK-generated lockfile.
 The renderer runs on Windows x64 and requires a D3D12 hardware adapter.
 
 Download the archive to a new temporary directory and run the verification
@@ -12,13 +12,13 @@ gate from the WYU repository root.
 ```powershell
 $archive = Join-Path ([IO.Path]::GetTempPath()) ('wyu-archive-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $archive | Out-Null
-gh release download archive-groundwork-0.1.0-dev.42417550607.1-immutable `
+gh release download archive-groundwork-0.1.0-dev.42420693798.1-immutable `
   --repo DaveBeusing/Groundwork --dir $archive
 if ($LASTEXITCODE -ne 0) { throw 'Groundwork archive download failed.' }
 ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $archive `
-  -ExpectedManifestSha256 1FA434525FFF4382D4C7485C8A8F32F1EB68D929A59A773152078B8A901AEAFB `
-  -ExpectedSourceCommit ae494c51eead61feb032ccdfdfed1089c04dc04a `
-  -ExpectedVersion 0.1.0-dev.42417550607.1
+  -ExpectedManifestSha256 1F313B6C086B6C68A738210A4A2D8378941EC43BB217CE9B7357170F67DC3FBD `
+  -ExpectedSourceCommit 565dd78c580419d7f0678337f443c894256cc1af `
+  -ExpectedVersion 0.1.0-dev.42420693798.1
 ```
 
 The gate checks package provenance, stages a temporary external NuGet feed,
@@ -42,7 +42,9 @@ Run `--flight [slot-directory]` for the guided WP09 mission. Space starts
 the flight and Esc closes the session. The default slot is the WP09
 directory under local application data. The host saves the grounded craft
 before departure and after touchdown and restores the landed checkpoint
-on the next launch. Add `-FlightSmoke` to the verified consumer command to
+on the next launch. In the near view the landing site is marked directly
+on the terrain by an amber diamond with a dark outline. Add `-FlightSmoke`
+to the verified consumer command to
 fly the mission twice on NVIDIA with Debug Layer and DRED. Each run uses a
 fresh slot and a separate reload process. The gate compares the mission
 trace, landed pose and edit overlay across processes.

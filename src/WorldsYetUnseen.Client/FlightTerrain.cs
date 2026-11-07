@@ -8,7 +8,6 @@ namespace WorldsYetUnseen.Client;
 
 internal sealed class FlightTerrain(FlightLandingSite site)
 {
-    private static readonly Vector4 Tint = new(0.42f, 0.55f, 0.44f, 1);
     private static readonly Vector4 Sky = new(0.09f, 0.15f, 0.25f, 1);
     private readonly PlanetTerrainCoordinator _terrain = new();
     private PlanetTerrainPlan? _activePlan;
@@ -76,8 +75,10 @@ internal sealed class FlightTerrain(FlightLandingSite site)
         if (_candidate is null && _terrain.TryPreparePresentation(Camera(position), out var candidate))
         {
             _candidate = candidate;
+            var sampleColor = candidate.Stamp.View == PlanetTerrainView.Near
+                ? FlightLandingPalette.Near : FlightLandingPalette.Far;
             var result = renderer.TrySubmitPlanetTerrain(candidate, ++_sequence, forward, Vector3.UnitY,
-                MathF.PI / 3, 0.08f, 220, Tint, Sky);
+                MathF.PI / 3, 0.08f, 220, Vector4.One, Sky, sampleColor);
             if (result != MeshReplacementSubmissionResult.Accepted)
             {
                 candidate.Dispose();
@@ -93,7 +94,7 @@ internal sealed class FlightTerrain(FlightLandingSite site)
             {
                 _lastCameraTick = tick;
                 var result = renderer.TrySubmitPlanetCamera(active!, ++_sequence, forward, Vector3.UnitY,
-                    MathF.PI / 3, 0.08f, 220, Tint, Sky);
+                    MathF.PI / 3, 0.08f, 220, Vector4.One, Sky);
                 if (result is not (RenderSubmissionResult.Accepted or RenderSubmissionResult.Replaced or RenderSubmissionResult.Closed))
                     throw new InvalidOperationException($"Flight camera submission failed ({result}).");
                 if (final && result != RenderSubmissionResult.Closed)
