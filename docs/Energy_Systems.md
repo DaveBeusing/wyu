@@ -23,7 +23,7 @@ Die Reihenfolge der drei konkret benannten Quellen ist damit im Grundsatz: **Ver
 
 **Verbindlich:** Einfache, wiederaufladbare **Batterien sind früh im Technologieverlauf vorgesehen**, sobald die Grundlagen der elektrischen Stromerzeugung und -nutzung vorhanden sind. Sie ermöglichen es, erzeugten Strom zwischenzuspeichern und später für Verbraucher der Basis bereitzustellen.
 
-- Batterien werden durch vorhandene Stromerzeuger geladen und können die Versorgung zeitweise übernehmen, wenn die Erzeugung ausfällt oder geringer ist als der Verbrauch.
+- **Automatische Batterieübernahme:** Batterien werden durch vorhandene Stromerzeuger geladen und springen ohne manuelle Zuschaltung ein, sobald die laufende Erzeugung die Nachfrage nicht mehr deckt oder ausfällt. Die Übernahme ist eine Grundfunktion, keine erst später freizuschaltende Steuerung.
 - Energiespeicherung ist begrenzt: Batterien sind keine unbegrenzte oder eigenständige Energiequelle. Energie muss zunächst erzeugt werden.
 - Die Herstellung setzt passende technologische Grundlagen voraus; die konkrete Freischaltung im Technikbaum bleibt offen.
 - Speicherkapazitäten, Lade-/Entladeleistung, Umwandlungsverluste, Alterung, Materialien und Herstellungsrezepte werden später festgelegt.
