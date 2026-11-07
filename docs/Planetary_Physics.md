@@ -21,6 +21,7 @@ Die Physik in **Worlds Yet Unseen (WYU)** soll **glaubwürdig, konsistent und re
 
 - **Oberflächengravitation:** Rund **1 g = 9,81 m/s²** unter typischen Oberflächenbedingungen, entsprechend der Erde. Bewegung, Springen und Fallen fühlen sich deshalb zunächst vertraut an. Die Schwerkraftrichtung zeigt zur Planetenmitte; mit wachsender Entfernung vom Planetenzentrum darf ihre Stärke plausibel abnehmen.
 - **Tageslänge:** **24 Stunden planetare Ortszeit** je vollständigem Tag-Nacht-Zyklus (erdähnlicher Sonnentag). **Noch offen:** Wie viele Minuten oder Stunden realer Spielzeit einem solchen Tag entsprechen; die Zeitkompression wird später anhand von Gameplay, Erkundung und Performance abgestimmt. Die planetare Tageslänge und die Echtzeit-zu-Spielzeit-Skalierung sind getrennte Parameter.
+- **Jahreszeiten:** New Terra besitzt einen jahreszeitlichen Zyklus mit regional unterschiedlichen Auswirkungen auf Tageslichtdauer, Temperatur, Wetter, Vegetation und Umwelt. Jahreszeiten entstehen plausibel aus planetarer Achsneigung und Umlauf um den Stern; konkrete Jahreslänge, Achsneigung, Intensität und Zeitkompression bleiben noch offen.
 - **Atembare Grundatmosphäre:** Der Spieler benötigt bei normaler Erkundung an Land weder Atemmaske noch Sauerstofftank.
 - **Unter Wasser:** Freies Atmen ist nicht möglich; Tauchzeit und später geeignete Atemtechnik bzw. Lebenserhaltung werden relevant.
 - **Große Höhen:** Durch sinkenden Luftdruck nimmt auch der Sauerstoff-Partialdruck ab. Ab bestimmten Höhen können Atemprobleme auftreten; konkrete Schwellen und Spielmechaniken bleiben offen.
@@ -46,7 +47,7 @@ Die Physik in **Worlds Yet Unseen (WYU)** soll **glaubwürdig, konsistent und re
 
 - Temperatur, Wind, Niederschlag, Feuchte, Nebel und Wolken.
 - Lokaler Luftdruck und Luftdichte, insbesondere abhängig von der Höhe.
-- Unterschiede durch Biome, Topografie, Wasserflächen, Tageszeit und mögliche Jahreszeiten.
+- Unterschiede durch Biome, Topografie, Wasserflächen, Tageszeit und **auf New Terra verbindlich vorhandene Jahreszeiten**.
 - Gewöhnliche Stürme und Unwetter unabhängig vom deutlich späteren Solarsturm-Thema.
 - Lokale Auswirkungen auf Sicht, Bewegung, Bau, Energiebedarf und Technik.
 
@@ -69,6 +70,7 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 4. Welche Auswirkungen von Temperatur, Sauerstoff, Druck und Strahlung sind spielrelevant?
 5. Welche Mindestanforderungen gelten für Druck- und Sauerstoffsysteme in unterirdischen oder geschlossenen Basen?
 6. Wie schnell sollen die festgelegten 24 planetaren Stunden in Echtzeit vergehen (Spielzeitfaktor)?
-7. Welche Simulationsbudgets, Genauigkeiten und Skalierungsgrenzen werden erst nach Prototypen festgelegt?
+7. Wie lang ist ein New-Terra-Jahr, wie ausgeprägt sind die Jahreszeiten und wie schnell laufen sie in Echtzeit ab?
+8. Welche Simulationsbudgets, Genauigkeiten und Skalierungsgrenzen werden erst nach Prototypen festgelegt?
 
 **Abgrenzung:** Außer der festgelegten erdähnlichen Oberflächengravitation von rund 1 g und dem 24-Stunden-Sonnentag bleiben die konkreten Zahlen für den Startplaneten offen. Dieses Dokument legt weder eine vollständige Liste aller Himmelskörper noch eine endgültige Simulationsarchitektur fest. Die Vorschläge werden schrittweise mit dem Spielkonzept abgestimmt.
