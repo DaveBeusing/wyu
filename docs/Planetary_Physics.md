@@ -116,6 +116,7 @@ Die Auswirkungen großer Höhen orientieren sich grundsätzlich an erdähnlicher
 - **Druck:** Atembarkeit und ausreichender Umgebungsdruck sind getrennte Bedingungen. Ein Sauerstofftank allein macht einen drucklosen Raum nicht bewohnbar.
 - **Energie:** Die aktiven Lebenserhaltungssysteme benötigen Energie. Ausfälle sollen grundsätzlich relevante Folgen haben; Zeitverlauf und Notfallreserven sind noch offen.
 - **Technische Systeme als Spielmechanik:** Versorgung, Überwachung, Nachfüllen und langfristiger Betrieb sollen Teil des späteren technischen Fortschritts werden.
+- **Spielerinformation und Steuerung:** Kritische Versorgungszustände, etwa fehlender Sauerstoff, sollen für den Spieler im HUD erkennbar sein. Später sind eigene technische Steuerungsabläufe und Schaltkreise als mögliche Umsetzung für Überwachung und Automatisierung vorgesehen; die konkreten Regeln gehören in ein separates Systemkonzept.
 - **Modularer Bau und Druckzonen:** Raumschiffe werden wie Basen aus frei kombinierbaren Bauteilen errichtet; grundsätzlich sollen isolierbare Druckzonen möglich sein. Die konkrete Erkennung, Abdichtung und Simulation solcher Räume sowie Türen und Luftschleusen werden ausdrücklich erst im gemeinsamen Konstruktionskonzept ausgearbeitet.
 - **Druckverlust bei Beschädigung:** Sowohl schleichender als auch schneller oder plötzlicher Druckverlust soll grundsätzlich möglich sein. Welcher Verlauf eintritt, hängt insbesondere von Größe und Art der Öffnung, Beschädigung und betroffenen Druckzone ab. **Keine pauschale Vorgabe „immer schleichend“ oder „immer abrupt“.** Leckberechnung, Schadensmodell, Druckausgleich und Reaktion modular gebauter Schiffsräume werden erst im späteren Konstruktions- und Physikkonzept festgelegt.
 - **Geschlossene Basen:** Die Übertragung der Lebenserhaltung auf luftdichte planetare Räume und Unterwasseranlagen ist als spätere Ausarbeitung vorgesehen; konkrete Regeln sind offen.
@@ -138,7 +139,15 @@ Die Auswirkungen großer Höhen orientieren sich grundsätzlich an erdähnlicher
 
 **Noch offen:** Konkrete Herstellungs- und Recyclingprozesse (etwa Elektrolyse), Wirkungsgrade, Stofflisten, Verbrauchs- und Verlustmengen, Tankgrößen, Wartungsintervalle und Störfallmodelle.
 
-## 11. Performance-Leitlinie
+## 11. Strahlungsschutz und späte Solarstürme auf New Terra
+
+**Verbindliche Grundlage:** New Terra hat unter normalen Bedingungen einen erdähnlichen natürlichen Schutz durch Atmosphäre und planetaren Magnetfeldeinfluss. Die gewöhnliche Strahlungsumgebung an der bewohnbaren Oberfläche soll zunächst kein ständiges Überlebensrisiko darstellen.
+
+**Spätes Spielthema:** Im späteren Spiel treten außergewöhnlich starke Solarstürme auf. Sie sollen trotz der gewöhnlichen Schutzwirkung des Planeten **spürbare Auswirkungen** haben und können insbesondere für Technik, Infrastruktur und langfristige Schutzstrategien relevant werden. Der schützende Charakter von New Terra entfällt dadurch nicht grundsätzlich; Art, Stärke, Häufigkeit und konkrete Wirkmechanismen der außergewöhnlichen Ereignisse sind noch offen. Vor allem frühes Gameplay bleibt frei von existenziellen Solarsturm-Gefahren.
+
+**Abgrenzung:** Ob starke Solarstürme primär elektrische/elektromagnetische Störungen, unmittelbare gesundheitliche Strahlenbelastung an der Oberfläche, atmosphärische Effekte oder Kombinationen auslösen, wird später festgelegt. Realitätsnähe und physikalische Plausibilität sind mit Performance und Dramaturgie abzustimmen.
+
+## 12. Performance-Leitlinie
 
 Die **Daten eines Himmelskörpers** bilden die stabile Ausgangslage. **Lokale Bedingungen** werden bei Bedarf für eine Region, eine Position oder ein aktives Objekt abgeleitet. Nicht jede entfernte Region benötigt in jedem Simulationsschritt eine hochaufgelöste Berechnung.
 
@@ -149,7 +158,7 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 - Statische strukturelle Prüfungen für Bauwerke und dynamische Physik primär bei Bewegung, Schäden oder Einsturz.
 - Kontinuierlich wirkende Übergänge zwischen Oberfläche, Atmosphäre und Weltraum ohne notwendigen Anspruch auf vollständige Mehrkörper-Himmelsmechanik.
 
-## 12. Offene Entscheidungen
+## 13. Offene Entscheidungen
 
 1. Welche genauen Höhenbereiche, Auswirkungen und Akklimatisierungszeiten gelten auf New Terra, und welche Tauchzeiten, Tiefengrenzen, Atemgas- und Druckschutzausrüstungen werden später definiert?
 2. Welche physikalischen Eigenschaften sollen tatsächlich von Planet zu Planet variieren und welche nur lokal?
@@ -159,6 +168,7 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 6. Wie schnell sollen die festgelegten 24 planetaren Stunden in Echtzeit vergehen (Spielzeitfaktor)?
 7. Wie lang ist ein New-Terra-Jahr, welche konkreten Temperatur-/Wettergrenzen gelten regional und wie schnell laufen die Jahreszeiten in Echtzeit ab?
 8. Wie werden die qualitativ beschriebenen Kleidungseigenschaften später in Ausrüstungsslots, Werte, Darstellung und Balancing überführt?
-9. Welche Simulationsbudgets, Genauigkeiten und Skalierungsgrenzen werden erst nach Prototypen festgelegt?
+9. Welche Auswirkungen sollen die außergewöhnlich starken späten Solarstürme trotz des natürlichen Schutzes von New Terra konkret haben (Technik, Umwelt, Gesundheit), und wie werden diese plausibel modelliert?
+10. Welche Simulationsbudgets, Genauigkeiten und Skalierungsgrenzen werden erst nach Prototypen festgelegt?
 
 **Abgrenzung:** Außer der festgelegten erdähnlichen Oberflächengravitation von rund 1 g und dem 24-Stunden-Sonnentag bleiben die konkreten Zahlen für den Startplaneten offen. Dieses Dokument legt weder eine vollständige Liste aller Himmelskörper noch eine endgültige Simulationsarchitektur fest. Die Vorschläge werden schrittweise mit dem Spielkonzept abgestimmt.
