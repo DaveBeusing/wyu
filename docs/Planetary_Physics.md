@@ -15,7 +15,19 @@ Die Physik in **Worlds Yet Unseen (WYU)** soll **glaubwürdig, konsistent und re
 - Freie Voxel-Geländeveränderung und unterirdischer Bau müssen bei späteren technischen Konzepten berücksichtigt werden.
 - **Gefährliche Solarstürme bleiben ein spätes Spielthema** und werden nicht als früher Überlebensdruck eingeführt.
 
-## 2. Vorgeschlagene Eigenschaften je Himmelskörper (noch nicht final)
+## 2. Startplanet: New Terra — vereinbarte Grundlagen
+
+**Name:** New Terra. Der Startplanet ist grundsätzlich erdähnlich und in den üblichen, bewohnbaren Oberflächenregionen ohne künstliche Atemversorgung begehbar.
+
+- **Atembare Grundatmosphäre:** Der Spieler benötigt bei normaler Erkundung an Land weder Atemmaske noch Sauerstofftank.
+- **Unter Wasser:** Freies Atmen ist nicht möglich; Tauchzeit und später geeignete Atemtechnik bzw. Lebenserhaltung werden relevant.
+- **Große Höhen:** Durch sinkenden Luftdruck nimmt auch der Sauerstoff-Partialdruck ab. Ab bestimmten Höhen können Atemprobleme auftreten; konkrete Schwellen und Spielmechaniken bleiben offen.
+- **Regionaler Charakter:** Sauerstoffmangel ist auf solche physikalisch begründeten Bedingungen begrenzt und kein genereller Überlebenszwang im frühen Spiel.
+- **Offen:** Zahlen für Oberfläche, Atmosphärenzusammensetzung, Gravitation, Tageslänge und genaue Höhenstufen; keine willkürlichen Grenzwerte ohne spätere Abstimmung.
+
+**Wichtige Unterscheidung:** Bei einer gut durchmischten Atmosphäre muss der Sauerstoff-*Anteil* mit der Höhe nicht deutlich abnehmen. Relevant für die Atmung ist vor allem der abnehmende **Partialdruck** infolge sinkenden Gesamtdrucks.
+
+## 3. Vorgeschlagene Eigenschaften je Himmelskörper (noch nicht final)
 
 | Gruppe | Mögliche Parameter | Beabsichtigte Wirkung |
 | --- | --- | --- |
@@ -28,7 +40,7 @@ Die Physik in **Worlds Yet Unseen (WYU)** soll **glaubwürdig, konsistent und re
 
 **Fachliche Konsistenz:** Schwerkraft an der Oberfläche ergibt sich aus Masse und Radius und sollte nicht unabhängig davon beliebig konfiguriert werden. Für die Atembarkeit zählt nicht allein der Sauerstoff-Prozentanteil, sondern insbesondere sein Partialdruck im Zusammenhang mit dem Gesamtdruck.
 
-## 3. Vorgeschlagene örtlich und zeitlich variable Bedingungen (noch nicht final)
+## 4. Vorgeschlagene örtlich und zeitlich variable Bedingungen (noch nicht final)
 
 - Temperatur, Wind, Niederschlag, Feuchte, Nebel und Wolken.
 - Lokaler Luftdruck und Luftdichte, insbesondere abhängig von der Höhe.
@@ -36,7 +48,7 @@ Die Physik in **Worlds Yet Unseen (WYU)** soll **glaubwürdig, konsistent und re
 - Gewöhnliche Stürme und Unwetter unabhängig vom deutlich späteren Solarsturm-Thema.
 - Lokale Auswirkungen auf Sicht, Bewegung, Bau, Energiebedarf und Technik.
 
-## 4. Performance-Leitlinie
+## 5. Performance-Leitlinie
 
 Die **Daten eines Himmelskörpers** bilden die stabile Ausgangslage. **Lokale Bedingungen** werden bei Bedarf für eine Region, eine Position oder ein aktives Objekt abgeleitet. Nicht jede entfernte Region benötigt in jedem Simulationsschritt eine hochaufgelöste Berechnung.
 
@@ -47,9 +59,9 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 - Statische strukturelle Prüfungen für Bauwerke und dynamische Physik primär bei Bewegung, Schäden oder Einsturz.
 - Kontinuierlich wirkende Übergänge zwischen Oberfläche, Atmosphäre und Weltraum ohne notwendigen Anspruch auf vollständige Mehrkörper-Himmelsmechanik.
 
-## 5. Offene Entscheidungen
+## 6. Offene Entscheidungen
 
-1. Ist der Startplanet anfangs in seinen wichtigsten Regionen ohne Atemgerät bewohnbar?
+1. Welche Höhen- und Tauchbedingungen erfordern zusätzliche Atemtechnik auf New Terra?
 2. Welche physikalischen Eigenschaften sollen tatsächlich von Planet zu Planet variieren und welche nur lokal?
 3. Welchen Grad an realistischem Flug-/Orbitalverhalten soll die Raumfahrt erfordern?
 4. Welche Auswirkungen von Temperatur, Sauerstoff, Druck und Strahlung sind spielrelevant?
