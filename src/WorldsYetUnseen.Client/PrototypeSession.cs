@@ -108,7 +108,7 @@ internal sealed class PrototypeSession(WalkableScene scene, PrototypeProgress in
             : target.IsPad ? "E: send rescue signal"
             : Guidance(yaw);
         var suffix = _notice is not null && _pending is null
-            ? $" | {_notice}" : " | WASD move / arrows aim / E interact / Esc pause";
+            ? $" | {_notice}" : " | WASD move / mouse aim / E interact / Esc pause";
         return $"Rescue beacon | Stone {Progress.Stone} | Deposits {collected}/3 | {action}{suffix}";
     }
 
@@ -116,7 +116,7 @@ internal sealed class PrototypeSession(WalkableScene scene, PrototypeProgress in
     {
         var eye = PrototypeWorld.Eye(scene.Pose);
         var waypoint = PrototypeWorld.PadAnchor;
-        var objective = Progress.NextModule is null ? "Activate beacon" : "Return to beacon pad";
+        var objective = Progress.NextModule is null ? "Activate beacon" : "Return to cyan beacon pad";
         var nearest = float.PositiveInfinity;
         foreach (var deposit in PrototypeWorld.Deposits)
         {
@@ -128,7 +128,7 @@ internal sealed class PrototypeSession(WalkableScene scene, PrototypeProgress in
                 continue;
             nearest = distance;
             waypoint = center;
-            objective = $"Find {deposit.ToString().ToLowerInvariant()} deposit";
+            objective = $"Find {deposit.ToString().ToLowerInvariant()} deposit (gold)";
         }
 
         var offset = waypoint - eye;

@@ -3,7 +3,7 @@
 Build and run from a clean WYU checkout on Windows with the .NET 10 SDK,
 PowerShell 7, and GitHub CLI. The engine is supplied by the immutable
 Groundwork NuGet archive. WYU pins all ten packages at
-`0.1.0-dev.42303559178.1` and commits the SDK-generated lockfile.
+`0.1.0-dev.42367247347.1` and commits the SDK-generated lockfile.
 The renderer runs on Windows x64 and requires a D3D12 hardware adapter.
 
 Download the archive to a new temporary directory and run the verification
@@ -12,13 +12,13 @@ gate from the WYU repository root.
 ```powershell
 $archive = Join-Path ([IO.Path]::GetTempPath()) ('wyu-archive-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $archive | Out-Null
-gh release download archive-groundwork-0.1.0-dev.42303559178.1-immutable `
+gh release download archive-groundwork-0.1.0-dev.42367247347.1-immutable `
   --repo DaveBeusing/Groundwork --dir $archive
 if ($LASTEXITCODE -ne 0) { throw 'Groundwork archive download failed.' }
 ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $archive `
-  -ExpectedManifestSha256 D82D42F2271A5A885E18937B7B0124854268EB3CDDFD1820FCBF84EBE50580E8 `
-  -ExpectedSourceCommit 5ab62bbbee7498a178b75a246804709a63238e07 `
-  -ExpectedVersion 0.1.0-dev.42303559178.1
+  -ExpectedManifestSha256 0BBD6B3C94BF6EAB3E7D9D798374D50EA962BA1D9585BE9670F29DC8DA3D26A5 `
+  -ExpectedSourceCommit 5f3f7bd5c7e2e59cef898d4bea8842afa123e905 `
+  -ExpectedVersion 0.1.0-dev.42367247347.1
 ```
 
 The gate checks package provenance, stages a temporary external NuGet feed,
@@ -28,8 +28,8 @@ on an interactive Windows desktop to open and close a real window under the
 same gate. Add `-D3D12Smoke` to verify hardware adapter selection, first
 cube presentation and native window close. The D3D12 smoke requests Debug
 Layer and DRED. Windows Graphics Tools enables the debug layer and live-object
-report. Start the renderer interactively with `--d3d12` and close the window to
-stop. Starting without an argument opens the renderer-free host.
+report. Start the cube interactively with `--d3d12` and close the window to
+stop. Starting without an argument opens the WP07 prototype.
 
 ```powershell
 dotnet ./artifacts/bin/WorldsYetUnseen.Client/release/WorldsYetUnseen.Client.dll --d3d12
@@ -100,8 +100,10 @@ Launch the Windows client without arguments or use `--prototype`. The
 window title displays the start menu, with **New Game** for an empty slot
 or **Continue** for a valid checkpoint. Navigate with **Up/Down** and
 **Enter**. During play, the title shows the objective, stone, deposit
-count and the action in focus. Use **WASD** to move, **Left/Right** to turn,
-**Up/Down** to aim, **E** to interact and **Esc** to pause or resume.
+count and the action in focus. Use **WASD** to move, the **mouse** to aim,
+**E** to interact and **Esc** to pause or resume. The arrows also aim during
+play and navigate menus while paused. Pause or switch away from the window
+to release mouse look.
 
 Follow the directions to the three deposits and mine each one. Return to
 the marked pad, focus its interaction point and build the foundation, mast
@@ -125,3 +127,17 @@ Add `-PrototypeSaveSmoke` for the headless WP07 checkpoint suite. It
 terminates Windows writers before and after atomic publication, then uses
 fresh processes to verify the mining, construction and completed objective
 checkpoints. The verified-consumer CI runs this suite.
+
+### Test world palette
+
+Keep ordinary terrain matte, with brighter top faces and darker side
+faces so the shape reads from eye height. Use warm gold for every mineable
+deposit and reserve cool cyan for the pad posts. The built beacon uses
+distinct module colors so the player can see what was installed.
+
+Use the same palette in every test seed. Pair each accent with a silhouette,
+an in-range interaction prompt or both. Deposits protrude above the ground,
+the pad has two posts, and the beacon grows upward one module at a time.
+Test new colors from the reference spawn and from a close oblique angle.
+The scripted route checks that the highlighted seam face disappears when
+its deposit is mined.

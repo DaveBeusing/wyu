@@ -3,13 +3,14 @@ using Groundwork.Core;
 using Groundwork.Persistence;
 using Groundwork.Rendering;
 using Groundwork.Voxels;
+using WorldsYetUnseen.Gameplay;
 
 namespace WorldsYetUnseen.Client;
 
 // The host serializes coordinator calls. Workers only use their reserved inputs and Core lease.
 internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? initialPose = null,
     ReadOnlySpan<TerrainChunkDelta> terrain = default, WalkableScene.ChunkSnapshotFactory? snapshot = null,
-    RegionBounds? bounds = null)
+    RegionBounds? bounds = null, bool colorPrototype = false)
 {
     private const int Unit = VoxelCollision.UnitsPerVoxel;
     private static readonly ChunkCoordinate WestEdge = new(-4, 0, 0);
@@ -190,7 +191,8 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
         var forward = pitch is { } angle
             ? PrototypeWorld.Direction(yaw, angle)
             : new Vector3(MathF.Cos(yaw), -0.12f, MathF.Sin(yaw));
-        return new RenderScene(Matrix4x4.Identity, new Vector4(0.30f, 0.74f, 0.47f, 1),
+        var tint = colorPrototype ? Vector4.One : new Vector4(0.30f, 0.74f, 0.47f, 1);
+        return new RenderScene(Matrix4x4.Identity, tint,
             Matrix4x4.CreateLookAt(eye, eye + forward, Vector3.UnitY), MathF.PI / 3, 0.05f, 40);
     }
 
@@ -350,17 +352,35 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
     {
         var instances = new RenderMeshInstance[read.MeshCount];
         var identities = new (ChunkCoordinate Coordinate, ulong Identity)[read.MeshCount];
+        var coloredDeposits = DepositMask.None;
         for (var i = 0; i < instances.Length; i++)
         {
             var coordinate = read.GetMeshCoordinate(i);
             if (!read.TryGetLoadIdentity(coordinate, out var identity))
                 throw new InvalidOperationException($"Published mesh {coordinate} has no occupancy identity.");
 
-            instances[i] = new(RenderMesh.Create(read.GetMeshPositions(i), read.GetMeshIndices(i)), coordinate.GetOrigin());
+            var positions = read.GetMeshPositions(i);
+            var indices = read.GetMeshIndices(i);
+            RenderMesh mesh;
+            if (colorPrototype)
+            {
+                mesh = PrototypePalette.CreateMesh(coordinate, positions, indices, out var meshDeposits);
+                coloredDeposits |= meshDeposits;
+            }
+            else
+                mesh = RenderMesh.Create(positions, indices);
+            instances[i] = new(mesh, coordinate.GetOrigin());
             identities[i] = (coordinate, identity);
         }
-        _coverage.Add(RendererGeneration(read.Generation), new Coverage(identities));
+        _coverage.Add(RendererGeneration(read.Generation), new Coverage(identities, coloredDeposits));
         return new RenderMeshRegion(instances);
+    }
+
+    internal DepositMask ReadPresentedDepositColors()
+    {
+        var generation = _renderer?.ReadMeshReplacement().LastPresentedGeneration;
+        return generation is { } presented && _coverage.TryGetValue(presented, out var coverage)
+            ? coverage.ColoredDeposits : DepositMask.None;
     }
 
     private ulong RendererGeneration(ulong generation) => checked(_generationOffset + generation);
@@ -413,7 +433,7 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
     private sealed record PendingLoad(RegionLoadWork Work, Task<ChunkSnapshot?> Task);
     private sealed record PendingMesh(RegionMeshWork Work, Task<RegionMeshResult?> Task);
 
-    private sealed record Coverage((ChunkCoordinate Coordinate, ulong Identity)[] Identities);
+    private sealed record Coverage((ChunkCoordinate Coordinate, ulong Identity)[] Identities, DepositMask ColoredDeposits);
 
     private sealed class PresentedOccupancy(RegionReadLease active, Coverage presented, RegionBounds world) : IVoxelOccupancy
     {
