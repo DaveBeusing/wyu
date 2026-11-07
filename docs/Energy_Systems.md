@@ -19,28 +19,37 @@ Die Energieversorgung wächst mit dem technologischen Fortschritt von **einfache
 
 Die Reihenfolge der drei konkret benannten Quellen ist damit im Grundsatz: **Verbrennung zuerst; Solar und Wind nach passenden technischen Voraussetzungen.** Exakte Freischaltstufen und Rezepte sind nicht festgelegt.
 
-## 3. Versorgungssicherheit und Umweltbezug
+## 3. Frühe Energiespeicherung — abgestimmte Grundlage
+
+**Verbindlich:** Einfache, wiederaufladbare **Batterien sind früh im Technologieverlauf vorgesehen**, sobald die Grundlagen der elektrischen Stromerzeugung und -nutzung vorhanden sind. Sie ermöglichen es, erzeugten Strom zwischenzuspeichern und später für Verbraucher der Basis bereitzustellen.
+
+- Batterien werden durch vorhandene Stromerzeuger geladen und können die Versorgung zeitweise übernehmen, wenn die Erzeugung ausfällt oder geringer ist als der Verbrauch.
+- Energiespeicherung ist begrenzt: Batterien sind keine unbegrenzte oder eigenständige Energiequelle. Energie muss zunächst erzeugt werden.
+- Die Herstellung setzt passende technologische Grundlagen voraus; die konkrete Freischaltung im Technikbaum bleibt offen.
+- Speicherkapazitäten, Lade-/Entladeleistung, Umwandlungsverluste, Alterung, Materialien und Herstellungsrezepte werden später festgelegt.
+
+## 4. Versorgungssicherheit und Umweltbezug
 
 - **Verbrennung** ist grundsätzlich planbar, solange Brennstoffvorräte und funktionsfähige Anlagen vorhanden sind.
 - **Solarenergie** hängt später unter anderem von Tageszeit, Sonneneinstrahlung, Wolken und saisonalen Bedingungen ab.
 - **Windkraft** hängt von den örtlichen und zeitlichen Windverhältnissen ab.
-- Unterschiedliche Quellen können einander ergänzen; konkrete Wirkungsgrade, Ausfallverhalten, Verkabelung und Speichersysteme sind noch zu entscheiden.
+- Unterschiedliche Quellen können einander ergänzen; einfache Batterien zur Zwischenspeicherung sind früh vorgesehen. Konkrete Wirkungsgrade, Ausfallverhalten, Verkabelung und Speicherwerte sind noch zu entscheiden.
 - Die späten Solarstürme sind für technische Infrastrukturen relevant. Exakte Auswirkungen auf Energieerzeuger, Netze und Schutztechniken werden separat ausgearbeitet.
 
-## 4. Technologische Einordnung
+## 5. Technologische Einordnung
 
 - **WYU** definiert Energiequellen, Rezepte, Verbrauch, Fortschrittsbedingungen und Balancing.
 - **Groundwork** soll nur allgemein wiederverwendbare Grundlagen für Simulations- und Versorgungssysteme bereitstellen.
 - Das spätere Energie- und Technologiekonzept entscheidet, welche Geräte erforderlich sind, wie Energie zwischen Anlagen übertragen und gespeichert wird und welche Ressourcen verbrennbar sind.
 
-## 5. Absichtlich offene Fragen
+## 6. Absichtlich offene Fragen
 
 1. Welche brennbaren Ressourcen stehen auf New Terra zur Verfügung und wie werden sie gewonnen?
 2. Welche frühen Anwendungen benötigen Wärme, welche Elektrizität und wann wird der erste Verbrennungsgenerator technisch möglich?
 3. Welche Herstellungsschritte schalten Solar- und Windstrom frei?
-4. Wie werden elektrische Netze, Generatoren, Lasten und Speicher verbunden?
+4. Wie werden elektrische Netze, Generatoren, Lasten und die beschlossenen frühen Batterien verbunden? Welche Leistungsgrenzen, Kapazitäten und Verluste gelten?
 5. Wie sollen unterschiedliche Energiequellen skaliert, kombiniert und automatisiert werden?
 6. Welche späteren, leistungsfähigeren Energiequellen sind für Industrie und Raumfahrt vorgesehen?
 7. Welche Auswirkungen haben Wetter und die erst spät relevanten Solarstürme auf die Stromversorgung?
 
-**Nächster Entwurfsschritt:** Grundprinzipien der Energiespeicherung und eines ausfallsicheren Basisnetzes besprechen, ohne vorzeitig Komponenten, Leistungswerte oder Rezepte festzulegen.
+**Nächster Entwurfsschritt:** Grundprinzipien der Energieverteilung und eines ausfallsicheren Basisnetzes besprechen, ohne vorzeitig Komponenten, Leistungswerte oder Rezepte festzulegen.
