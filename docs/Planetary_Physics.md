@@ -143,9 +143,15 @@ Die Auswirkungen großer Höhen orientieren sich grundsätzlich an erdähnlicher
 
 **Verbindliche Grundlage:** New Terra hat unter normalen Bedingungen einen erdähnlichen natürlichen Schutz durch Atmosphäre und planetaren Magnetfeldeinfluss. Die gewöhnliche Strahlungsumgebung an der bewohnbaren Oberfläche soll zunächst kein ständiges Überlebensrisiko darstellen.
 
-**Spätes Spielthema:** Im späteren Spiel treten außergewöhnlich starke Solarstürme auf. Sie sollen trotz der gewöhnlichen Schutzwirkung des Planeten **spürbare Auswirkungen** haben und können insbesondere für Technik, Infrastruktur und langfristige Schutzstrategien relevant werden. Der schützende Charakter von New Terra entfällt dadurch nicht grundsätzlich; Art, Stärke, Häufigkeit und konkrete Wirkmechanismen der außergewöhnlichen Ereignisse sind noch offen. Vor allem frühes Gameplay bleibt frei von existenziellen Solarsturm-Gefahren.
+**Spätes Spielthema:** Im späteren Spiel treten außergewöhnlich starke Solarstürme auf. Sie haben trotz des gewöhnlichen planetaren Schutzes **verbindlich spürbare Auswirkungen in allen drei Bereichen:**
 
-**Abgrenzung:** Ob starke Solarstürme primär elektrische/elektromagnetische Störungen, unmittelbare gesundheitliche Strahlenbelastung an der Oberfläche, atmosphärische Effekte oder Kombinationen auslösen, wird später festgelegt. Realitätsnähe und physikalische Plausibilität sind mit Performance und Dramaturgie abzustimmen.
+- **Technik und Infrastruktur:** Solarstürme stellen eine reale Gefahr für technische Systeme und deren Betrieb dar. Konkrete Störungen, Schäden und Schutztechniken bleiben offen.
+- **Spieler:** Der Spieler selbst kann gefährdet werden, insbesondere bei ungeschütztem Aufenthalt im Freien. Art, Dauer und Ausmaß der Auswirkungen werden später ausgearbeitet; direkte Strahlungsschäden sind noch nicht als einziges Wirkmodell festgelegt.
+- **Umwelt auf New Terra:** Solarstürme beeinflussen auch die planetare Umgebung. Welche atmosphärischen, ökologischen oder anderen Umweltfolgen konkret auftreten, wird später entschieden.
+
+**Dramaturgie:** Die schweren Solarstürme bleiben ausdrücklich ein **spätes Spielthema**; der erdähnliche Schutz und die ruhige frühe Erkundungsphase gelten weiter. Bereits geplante unterirdische bzw. berggeschützte Basen können später einen Vorteil bieten, ohne dass er dem Spieler früh erklärt wird.
+
+**Abgrenzung:** Die drei Wirkungsbereiche sind beschlossen, nicht jedoch konkrete physikalische Mechanismen, Auslöser, Stärke, Häufigkeit, Warnsysteme, genaue Schadensmodelle oder Schutzwerte. Das spätere Detaildesign soll die beobachteten Folgen möglichst plausibel mit dem gewählten Weltmodell sowie mit Performance und Spielbarkeit vereinbaren.
 
 ## 12. Performance-Leitlinie
 
@@ -168,7 +174,7 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 6. Wie schnell sollen die festgelegten 24 planetaren Stunden in Echtzeit vergehen (Spielzeitfaktor)?
 7. Wie lang ist ein New-Terra-Jahr, welche konkreten Temperatur-/Wettergrenzen gelten regional und wie schnell laufen die Jahreszeiten in Echtzeit ab?
 8. Wie werden die qualitativ beschriebenen Kleidungseigenschaften später in Ausrüstungsslots, Werte, Darstellung und Balancing überführt?
-9. Welche Auswirkungen sollen die außergewöhnlich starken späten Solarstürme trotz des natürlichen Schutzes von New Terra konkret haben (Technik, Umwelt, Gesundheit), und wie werden diese plausibel modelliert?
+9. Welche konkreten Mechanismen, Schäden, Warnsysteme und Schutzmaßnahmen erhalten die **bereits festgelegten** drei Wirkungsbereiche der späten Solarstürme (Technik, Spieler, Umwelt), und wie werden sie plausibel modelliert?
 10. Welche Simulationsbudgets, Genauigkeiten und Skalierungsgrenzen werden erst nach Prototypen festgelegt?
 
 **Abgrenzung:** Außer der festgelegten erdähnlichen Oberflächengravitation von rund 1 g und dem 24-Stunden-Sonnentag bleiben die konkreten Zahlen für den Startplaneten offen. Dieses Dokument legt weder eine vollständige Liste aller Himmelskörper noch eine endgültige Simulationsarchitektur fest. Die Vorschläge werden schrittweise mit dem Spielkonzept abgestimmt.
