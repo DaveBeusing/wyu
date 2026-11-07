@@ -116,14 +116,28 @@ Die Auswirkungen großer Höhen orientieren sich grundsätzlich an erdähnlicher
 - **Druck:** Atembarkeit und ausreichender Umgebungsdruck sind getrennte Bedingungen. Ein Sauerstofftank allein macht einen drucklosen Raum nicht bewohnbar.
 - **Energie:** Die aktiven Lebenserhaltungssysteme benötigen Energie. Ausfälle sollen grundsätzlich relevante Folgen haben; Zeitverlauf und Notfallreserven sind noch offen.
 - **Technische Systeme als Spielmechanik:** Versorgung, Überwachung, Nachfüllen und langfristiger Betrieb sollen Teil des späteren technischen Fortschritts werden.
-- **Geschlossene Basen:** Eine Übertragung dieses Prinzips auf luftdichte planetare Räume und Unterwasseranlagen wird geprüft, ist aber in ihrer konkreten Ausgestaltung noch nicht beschlossen.
+- **Modularer Bau und Druckzonen:** Raumschiffe werden wie Basen aus frei kombinierbaren Bauteilen errichtet; grundsätzlich sollen isolierbare Druckzonen möglich sein. Die konkrete Erkennung, Abdichtung und Simulation solcher Räume sowie Türen und Luftschleusen werden ausdrücklich erst im gemeinsamen Konstruktionskonzept ausgearbeitet.
+- **Geschlossene Basen:** Die Übertragung der Lebenserhaltung auf luftdichte planetare Räume und Unterwasseranlagen ist als spätere Ausarbeitung vorgesehen; konkrete Regeln sind offen.
 - **Performance:** Die Simulation darf mit Zuständen und Bilanzen für abgeschlossene Bereiche arbeiten; eine vollständige Partikelsimulation der Luft in jedem Raum ist nicht erforderlich.
 
 **Vorgeschlagene, noch nicht festgelegte Vertiefungen:** Luftaufbereitung und CO₂-Entfernung, Leckagen und Druckverlust, Luftschleusen, thermische Regelung, Reserven und Notversorgung, zusammenhängende bzw. getrennte Raumvolumina.
 
 **Bewusst offen:** Exakte Sauerstoff- und Energieverbräuche, Druckschwellen, Luftgemische, Komponenten, Bauvorschriften, Ausfallverhalten, technische Implementierung und detaillierte Regeln für Basen.
 
-## 10. Performance-Leitlinie
+## 10. Luftaufbereitung und Ressourcenkreislauf — abgestimmte Grundlagen
+
+**Verbindliche Designentscheidung: Die Lebenserhaltung verwendet einen weitgehend geschlossenen, aber niemals vollkommen verlustfreien Ressourcenkreislauf.** Atemluft und geeignete Ressourcen sollen wiederaufbereitet werden können, wodurch lang andauernder Betrieb von Raumschiffen und Stationen möglich wird. Dennoch bleiben Nachschub, Energie und Instandhaltung notwendig.
+
+- **Sauerstoff:** Er ist eine begrenzte Ressource. Technische Systeme können Atemsauerstoff bereitstellen bzw. wiedergewinnen; eine vollständige Rückgewinnung ohne externe Stoff- oder Energiezufuhr wird nicht vorausgesetzt.
+- **CO₂-Management:** In geschlossenen bewohnten Bereichen muss ausgeatmetes Kohlendioxid kontrolliert entfernt oder durch geeignete Prozesse weiterverarbeitet werden.
+- **Wasser- und weitere Stoffkreisläufe:** Ein Recycling dieser Ressourcen ist eine passende technische Entwicklungsrichtung. Konkrete Prozesse werden später definiert.
+- **Unvollständige Rückgewinnung:** Verluste und mögliche Verbrauchsmaterialien sorgen dafür, dass selbst fortgeschrittene Systeme gelegentlich aufgefüllt und gewartet werden müssen.
+- **Energiebedarf:** Aufbereitung, Umwälzung und Versorgung benötigen weiterhin Energie; auch ein weitgehend geschlossener Stoffkreislauf ist kein energiefreies System.
+- **Performance:** Abstrakte Ressourcen- und Stoffbilanzen je relevantem, abgeschlossenem Bereich genügen zunächst; detaillierte chemische und strömungsmechanische Simulationen sind nicht gefordert.
+
+**Noch offen:** Konkrete Herstellungs- und Recyclingprozesse (etwa Elektrolyse), Wirkungsgrade, Stofflisten, Verbrauchs- und Verlustmengen, Tankgrößen, Wartungsintervalle und Störfallmodelle.
+
+## 11. Performance-Leitlinie
 
 Die **Daten eines Himmelskörpers** bilden die stabile Ausgangslage. **Lokale Bedingungen** werden bei Bedarf für eine Region, eine Position oder ein aktives Objekt abgeleitet. Nicht jede entfernte Region benötigt in jedem Simulationsschritt eine hochaufgelöste Berechnung.
 
@@ -134,13 +148,13 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 - Statische strukturelle Prüfungen für Bauwerke und dynamische Physik primär bei Bewegung, Schäden oder Einsturz.
 - Kontinuierlich wirkende Übergänge zwischen Oberfläche, Atmosphäre und Weltraum ohne notwendigen Anspruch auf vollständige Mehrkörper-Himmelsmechanik.
 
-## 11. Offene Entscheidungen
+## 12. Offene Entscheidungen
 
 1. Welche genauen Höhenbereiche, Auswirkungen und Akklimatisierungszeiten gelten auf New Terra, und welche Tauchzeiten, Tiefengrenzen, Atemgas- und Druckschutzausrüstungen werden später definiert?
 2. Welche physikalischen Eigenschaften sollen tatsächlich von Planet zu Planet variieren und welche nur lokal?
 3. Welchen Grad an realistischem Flug-/Orbitalverhalten soll die Raumfahrt erfordern?
 4. Welche konkreten Schwellenwerte und abgestuften Auswirkungen erhalten Hitzebelastung, Durst und Unterkühlung; welche Auswirkungen von Sauerstoff, Druck und Strahlung sind zusätzlich spielrelevant?
-5. Welche Mindestanforderungen gelten für die bereits festgelegte aktive Lebenserhaltung in Raumschiffen und Stationen (Druck, Luftaufbereitung, Energie, Notfallbetrieb), und wie werden diese Systeme auf unterirdische oder geschlossene Basen übertragen?
+5. Wie werden aktive Lebenserhaltung und der beschlossene, nicht verlustfreie Recyclingkreislauf konkret umgesetzt (Luftaufbereitung, Verluste, Nachschub, Energie, Notfallbetrieb)? Wie werden die modularen Druckzonen später im Konstruktionssystem definiert?
 6. Wie schnell sollen die festgelegten 24 planetaren Stunden in Echtzeit vergehen (Spielzeitfaktor)?
 7. Wie lang ist ein New-Terra-Jahr, welche konkreten Temperatur-/Wettergrenzen gelten regional und wie schnell laufen die Jahreszeiten in Echtzeit ab?
 8. Wie werden die qualitativ beschriebenen Kleidungseigenschaften später in Ausrüstungsslots, Werte, Darstellung und Balancing überführt?
