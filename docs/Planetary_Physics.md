@@ -117,6 +117,7 @@ Die Auswirkungen großer Höhen orientieren sich grundsätzlich an erdähnlicher
 - **Energie:** Die aktiven Lebenserhaltungssysteme benötigen Energie. Ausfälle sollen grundsätzlich relevante Folgen haben; Zeitverlauf und Notfallreserven sind noch offen.
 - **Technische Systeme als Spielmechanik:** Versorgung, Überwachung, Nachfüllen und langfristiger Betrieb sollen Teil des späteren technischen Fortschritts werden.
 - **Modularer Bau und Druckzonen:** Raumschiffe werden wie Basen aus frei kombinierbaren Bauteilen errichtet; grundsätzlich sollen isolierbare Druckzonen möglich sein. Die konkrete Erkennung, Abdichtung und Simulation solcher Räume sowie Türen und Luftschleusen werden ausdrücklich erst im gemeinsamen Konstruktionskonzept ausgearbeitet.
+- **Druckverlust bei Beschädigung:** Sowohl schleichender als auch schneller oder plötzlicher Druckverlust soll grundsätzlich möglich sein. Welcher Verlauf eintritt, hängt insbesondere von Größe und Art der Öffnung, Beschädigung und betroffenen Druckzone ab. **Keine pauschale Vorgabe „immer schleichend“ oder „immer abrupt“.** Leckberechnung, Schadensmodell, Druckausgleich und Reaktion modular gebauter Schiffsräume werden erst im späteren Konstruktions- und Physikkonzept festgelegt.
 - **Geschlossene Basen:** Die Übertragung der Lebenserhaltung auf luftdichte planetare Räume und Unterwasseranlagen ist als spätere Ausarbeitung vorgesehen; konkrete Regeln sind offen.
 - **Performance:** Die Simulation darf mit Zuständen und Bilanzen für abgeschlossene Bereiche arbeiten; eine vollständige Partikelsimulation der Luft in jedem Raum ist nicht erforderlich.
 
@@ -154,7 +155,7 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 2. Welche physikalischen Eigenschaften sollen tatsächlich von Planet zu Planet variieren und welche nur lokal?
 3. Welchen Grad an realistischem Flug-/Orbitalverhalten soll die Raumfahrt erfordern?
 4. Welche konkreten Schwellenwerte und abgestuften Auswirkungen erhalten Hitzebelastung, Durst und Unterkühlung; welche Auswirkungen von Sauerstoff, Druck und Strahlung sind zusätzlich spielrelevant?
-5. Wie werden aktive Lebenserhaltung und der beschlossene, nicht verlustfreie Recyclingkreislauf konkret umgesetzt (Luftaufbereitung, Verluste, Nachschub, Energie, Notfallbetrieb)? Wie werden die modularen Druckzonen später im Konstruktionssystem definiert?
+5. Wie werden aktive Lebenserhaltung und der beschlossene, nicht verlustfreie Recyclingkreislauf konkret umgesetzt (Luftaufbereitung, Verluste, Nachschub, Energie, Notfallbetrieb)? Wie werden modulare Druckzonen, Öffnungen, Leckgrößen und schleichender bzw. schneller Druckverlust später im Konstruktionssystem berechnet?
 6. Wie schnell sollen die festgelegten 24 planetaren Stunden in Echtzeit vergehen (Spielzeitfaktor)?
 7. Wie lang ist ein New-Terra-Jahr, welche konkreten Temperatur-/Wettergrenzen gelten regional und wie schnell laufen die Jahreszeiten in Echtzeit ab?
 8. Wie werden die qualitativ beschriebenen Kleidungseigenschaften später in Ausrüstungsslots, Werte, Darstellung und Balancing überführt?
