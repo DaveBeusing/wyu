@@ -6,6 +6,33 @@ Groundwork NuGet archive. WYU pins all ten packages at
 `0.1.0-dev.42420693798.1` and commits the SDK-generated lockfile.
 The renderer runs on Windows x64 and requires a D3D12 hardware adapter.
 
+## Offline alpha installer rehearsal
+
+The installer build requires .NET SDK `10.0.403` and ISCC from the
+reviewed [Inno Setup 6.7.3 distribution](https://github.com/jrsoftware/issrc/releases/tag/is-6_7_3).
+Verify the compiler download signature and SHA-256
+`9C73C3BAE7ED48D44112A0F48E66742C00090BDB5BEF71D9D3C056C66E97B732`
+before installing the build tool. The verified consumer gate below
+accepts `-InstallerCompiler <path-to-ISCC.exe> -InstallerOutputDirectory <new-directory>`.
+It builds from a clean checkout, uses the separate Windows x64 locks
+and produces a self-contained setup executable and installer manifest.
+
+Run the rehearsal on an interactive Windows 11 x64 desktop with an
+unelevated account and a profile without an existing WYU Alpha install.
+Supply the approved manifest hash independently of the installer folder.
+
+```powershell
+./eng/Test-OfflineInstaller.ps1 -InstallerDirectory $installerDirectory `
+  -ExpectedManifestSha256 $approvedInstallerManifestHash
+```
+
+The script verifies installed hashes, starts the app from its Start menu
+shortcut, checks that it loaded the bundled runtime, repairs a missing
+program file by reinstalling, then uninstalls and checks test data hashes.
+The installer generated here is an unsigned engineering rehearsal.
+Release signing and qualification on a freshly provisioned system are
+separate acceptance gates.
+
 Download the archive to a new temporary directory and run the verification
 gate from the WYU repository root.
 

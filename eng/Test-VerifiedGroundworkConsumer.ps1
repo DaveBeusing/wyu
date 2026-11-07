@@ -11,10 +11,19 @@ param(
     [switch]$FlightSmoke,
     [switch]$SaveSmoke,
     [switch]$PrototypeSmoke,
-    [switch]$PrototypeSaveSmoke
+    [switch]$PrototypeSaveSmoke,
+    [string]$InstallerCompiler,
+    [string]$InstallerOutputDirectory
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ([bool]$InstallerCompiler -ne [bool]$InstallerOutputDirectory) {
+    throw 'Specify InstallerCompiler and InstallerOutputDirectory together.'
+}
+if ($InstallerCompiler) {
+    $InstallerCompiler = (Resolve-Path -LiteralPath $InstallerCompiler).Path
+    $InstallerOutputDirectory = [IO.Path]::GetFullPath($InstallerOutputDirectory)
+}
 if ($ExpectedManifestSha256 -notmatch '^[a-fA-F0-9]{64}$' -or $ExpectedSourceCommit -notmatch '^[a-fA-F0-9]{40}$') {
     throw 'Expected manifest and source SHA values must be complete.'
 }
@@ -293,6 +302,12 @@ try {
         if ($PrototypeSmoke) { Invoke-HostSmoke $assembly '--prototype-smoke' 'PASS: WYU WP07 rescue beacon route and native shutdown.' -TimeoutSeconds 130 }
         if ($SaveSmoke) { Invoke-SaveSmoke $assembly $work }
         if ($PrototypeSaveSmoke) { Invoke-PrototypeSaveSmoke $assembly $work }
+        if ($InstallerCompiler) {
+            & (Join-Path $PSScriptRoot 'Build-OfflineInstaller.ps1') -Compiler $InstallerCompiler `
+                -OutputDirectory $InstallerOutputDirectory -WorkDirectory $work -GroundworkVersion $ExpectedVersion `
+                -GroundworkCommit $ExpectedSourceCommit -GroundworkManifestHash $ExpectedManifestSha256 `
+                -GroundworkLicense (Join-Path $artifactRoot 'LICENSE')
+        }
         Write-Host "PASS: WYU consumed $($expectedIds.Count) verified Groundwork $ExpectedVersion packages with a fresh locked restore."
         $global:LASTEXITCODE = 0
     } finally { Pop-Location }
