@@ -19,6 +19,8 @@ internal static class PrototypeWorld
     internal static readonly SaveWorldRecipe Recipe = new(2, 1, 0x57505537, WalkableTerrain.Recipe.Bounds);
     internal static readonly VoxelPose Spawn = WalkableTerrain.Spawn;
     internal static readonly Vector3 PadAnchor = new(-17.5f, 5, 9.5f);
+    internal static readonly (int X, int Y, int Z) FirstPadPost = (-20, 4, 8);
+    internal static readonly (int X, int Y, int Z) SecondPadPost = (-20, 4, 10);
     internal static ReadOnlySpan<Deposit> Deposits => OrderedDeposits;
 
     internal static ISaveTerrainGenerator? ResolveGenerator(uint id, uint version) =>
@@ -224,12 +226,10 @@ internal static class PrototypeWorld
             }
 
             // A pair of posts marks the west approach without filling any build socket.
-            (int X, int Y, int Z) firstPost = (-20, 4, 8);
-            (int X, int Y, int Z) secondPost = (-20, 4, 10);
-            if (ChunkOf(firstPost) == coordinate)
+            if (ChunkOf(FirstPadPost) == coordinate)
             {
-                cells[LocalIndex(firstPost, coordinate)] = 1;
-                cells[LocalIndex(secondPost, coordinate)] = 1;
+                cells[LocalIndex(FirstPadPost, coordinate)] = 1;
+                cells[LocalIndex(SecondPadPost, coordinate)] = 1;
             }
         }
     }

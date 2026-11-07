@@ -89,7 +89,8 @@ internal static class GameHost
         {
             HostMode.Walkable or HostMode.WalkableSmoke => new WalkableScene(runtime.RuntimeOwnership),
             HostMode.PrototypeSmoke => new WalkableScene(runtime.RuntimeOwnership,
-                PrototypeWorld.Spawn, snapshot: PrototypeWorld.Snapshot, bounds: PrototypeWorld.Recipe.Bounds),
+                PrototypeWorld.Spawn, snapshot: PrototypeWorld.Snapshot, bounds: PrototypeWorld.Recipe.Bounds,
+                colorPrototype: true),
             _ => null
         };
         var stopReason = HostStopReason.StartupFault;
@@ -135,7 +136,7 @@ internal static class GameHost
                         var checkpoint = prototypeSave.Checkpoint;
                         walkable = new WalkableScene(runtime.RuntimeOwnership, checkpoint?.Pose ?? PrototypeWorld.Spawn,
                             checkpoint is { } selected ? PrototypeWorld.EffectiveTerrain(selected.Progress) : [],
-                            snapshot: PrototypeWorld.Snapshot, bounds: PrototypeWorld.Recipe.Bounds);
+                            snapshot: PrototypeWorld.Snapshot, bounds: PrototypeWorld.Recipe.Bounds, colorPrototype: true);
                     }
                 }
                 if ((mode == HostMode.WindowSmoke || IsDesktopSmoke(mode)) &&
@@ -215,6 +216,8 @@ internal static class GameHost
         var menu = prototypeSave is null ? null : new PrototypeMenu(prototypeSave);
         var prototypeRoute = mode == HostMode.PrototypeSmoke ? new PrototypeRouteSmoke() : null;
         var caption = mode == HostMode.Prototype ? new PrototypeCaption() : null;
+        using var mouseLook = mode == HostMode.Prototype && input is IHostWindowStateSource windowState
+            ? new PrototypeMouseLook(windowState) : null;
         var yaw = 0f;
         var pitch = -0.20f;
         ulong routeCompletionTick = 0;
@@ -362,14 +365,19 @@ internal static class GameHost
             {
                 (x, z, yaw, pitch, interact) = prototypeRoute.NextInput(walkable!, prototype!.Progress, drawable && prototype.Ready);
             }
-            else if (!input.TransitionLoss)
+            else
             {
-                if (drawable && !prototype!.Paused && !PrototypeMenu.Pressed(input, InputControl.Escape))
+                var playInput = drawable && !prototype!.Paused && !input.TransitionLoss &&
+                    !PrototypeMenu.Pressed(input, InputControl.Escape);
+                mouseLook?.Update(playInput && !input.Events.Any(static e => e.Kind == InputEventKind.FocusCleared),
+                    ref yaw, ref pitch);
+                if (playInput)
                 {
                     (x, z) = ReadWalkableInput(input, ref yaw);
                     var held = input.HeldControls;
                     var tilt = (held.Contains(InputControl.Up) ? 1 : 0) - (held.Contains(InputControl.Down) ? 1 : 0);
-                    pitch = Math.Clamp(pitch + tilt * (MathF.PI / 90), -1.4f, 1.4f);
+                    pitch = Math.Clamp(pitch + tilt * (MathF.PI / 90), -PrototypeMouseLook.MaximumPitch,
+                        PrototypeMouseLook.MaximumPitch);
                     interact = PrototypeMenu.Pressed(input, InputControl.E);
                 }
             }

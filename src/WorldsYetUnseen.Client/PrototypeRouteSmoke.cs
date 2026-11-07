@@ -140,6 +140,8 @@ internal sealed class PrototypeRouteSmoke
                     _ => Deposit.East
                 };
                 Require(target.Deposit == deposit, $"visible {deposit} deposit did not focus");
+                Require((scene.ReadPresentedDepositColors() & PrototypeWorld.DepositBit(deposit)) != 0,
+                    $"the presented region did not color the {deposit} deposit");
                 if (deposit == Deposit.Seam)
                     VerifySeam(read, occupied: true);
                 Require(progress.Mine(deposit, out _expectedProgress) == ActionResult.Applied,
@@ -147,6 +149,8 @@ internal sealed class PrototypeRouteSmoke
                 break;
             case Check.ClearedSeam:
                 VerifySeam(read, occupied: false);
+                Require((scene.ReadPresentedDepositColors() & DepositMask.Seam) == 0,
+                    "the presented region retained the removed seam deposit color");
                 _step++;
                 return (0, 0, yaw, pitch, false);
             case Check.UnloadedSeam:
