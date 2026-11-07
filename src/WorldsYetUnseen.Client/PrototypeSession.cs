@@ -100,6 +100,9 @@ internal sealed class PrototypeSession(WalkableScene scene, PrototypeProgress in
             return "WYU | Rescue beacon online | Objective complete | Esc pause";
 
         var collected = BitOperations.PopCount((uint)Progress.MinedDeposits);
+        if (collected == PrototypeWorld.Deposits.Length)
+            return DescribeBeacon(target, yaw);
+
         var action = _pending is not null ? "Updating terrain"
             : scene.TerrainChangePending ? "Waiting for terrain"
             : target.Deposit is not null ? "E: mine stone"
@@ -115,8 +118,8 @@ internal sealed class PrototypeSession(WalkableScene scene, PrototypeProgress in
     private string Guidance(float yaw)
     {
         var eye = PrototypeWorld.Eye(scene.Pose);
-        var waypoint = PrototypeWorld.PadAnchor;
-        var objective = Progress.NextModule is null ? "Activate beacon" : "Return to cyan beacon pad";
+        var waypoint = eye;
+        var objective = "Find a gold deposit";
         var nearest = float.PositiveInfinity;
         foreach (var deposit in PrototypeWorld.Deposits)
         {
@@ -131,12 +134,26 @@ internal sealed class PrototypeSession(WalkableScene scene, PrototypeProgress in
             objective = $"Find {deposit.ToString().ToLowerInvariant()} deposit (gold)";
         }
 
-        var offset = waypoint - eye;
+        return $"{objective}: {DirectionTo(waypoint - eye, yaw)}";
+    }
+
+    private string DescribeBeacon(PrototypeTarget target, float yaw)
+    {
+        var objective = Progress.NextModule is null ? "Next: activate rescue beacon" : "Next: build at cyan pad";
+        var action = _pending is not null || scene.TerrainChangePending ? "Updating terrain"
+            : target.IsPad && Progress.NextModule is { } module ? $"E: build {ModuleName(module)} (1 stone)"
+            : target.IsPad ? "E: send rescue signal"
+            : $"{DirectionTo(PrototypeWorld.PadAnchor - PrototypeWorld.Eye(scene.Pose), yaw)} | Aim at the floating diamond";
+        return $"{objective} | {action} | {_notice ?? $"Stone {Progress.Stone}"}";
+    }
+
+    private static string DirectionTo(Vector3 offset, float yaw)
+    {
         var bearing = MathF.IEEERemainder(MathF.Atan2(offset.Z, offset.X) - yaw, MathF.Tau);
         var direction = MathF.Abs(bearing) < MathF.PI / 8 ? "ahead" :
             MathF.Abs(bearing) > 7 * MathF.PI / 8 ? "behind" : bearing > 0 ? "right" : "left";
         var range = MathF.Round(MathF.Sqrt(offset.X * offset.X + offset.Z * offset.Z));
-        return $"{objective}: {direction}, {range:0} vox";
+        return $"{direction}, {range:0} vox";
     }
 
     private static string ModuleName(BeaconModule module) =>

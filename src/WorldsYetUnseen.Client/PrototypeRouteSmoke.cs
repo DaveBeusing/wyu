@@ -53,7 +53,7 @@ internal sealed class PrototypeRouteSmoke
     internal bool Completed => _step == Route.Length;
 
     internal (int X, int Z, float Yaw, float Pitch, bool Interact) NextInput(
-        WalkableScene scene, PrototypeProgress progress, bool ready)
+        WalkableScene scene, PrototypeProgress progress, bool ready, string caption)
     {
         if (Completed)
             return default;
@@ -90,6 +90,20 @@ internal sealed class PrototypeRouteSmoke
         if (_interactionIssued)
         {
             Require(progress == _expectedProgress, $"unexpected rule result after {step.Check}");
+            if (step.Check == Check.MineEast)
+            {
+                Require(caption.StartsWith("Next: build at cyan pad", StringComparison.Ordinal) &&
+                    caption.Contains("Aim at the floating diamond", StringComparison.Ordinal),
+                    "mining the last deposit did not show the build site and the aiming cue");
+                Console.WriteLine($"WP07 mining-to-building guidance: {caption}");
+            }
+            if (step.Check == Check.BuildSignalHead)
+                Require(caption.StartsWith("Next: activate rescue beacon", StringComparison.Ordinal) &&
+                    caption.Contains("E: send rescue signal", StringComparison.Ordinal),
+                    "completed construction did not show the activation prompt");
+            if (step.Check == Check.Activate)
+                Require(caption.Contains("Rescue beacon online", StringComparison.Ordinal),
+                    "activation did not confirm completion in the objective display");
             var changesTerrain = step.Check is Check.MineWest or Check.MineSeam or Check.MineEast
                 or Check.BuildFoundation or Check.BuildMast or Check.BuildSignalHead;
             Require(changesTerrain == _sawPendingTerrain, $"unexpected terrain staging after {step.Check}");
@@ -120,6 +134,13 @@ internal sealed class PrototypeRouteSmoke
         }
 
         var target = PrototypeWorld.Target(read, pose, yaw, pitch);
+        if (step.Check is Check.BuildFoundation or Check.Activate)
+        {
+            var anchor = PrototypeWorld.PadAnchor;
+            Require(scene.HasPresentedPadMarker() &&
+                read.GetCell((int)MathF.Floor(anchor.X), (int)MathF.Floor(anchor.Y), (int)MathF.Floor(anchor.Z)) == VoxelOccupancy.Air,
+                "the aiming diamond was missing from the presented region or changed collision");
+        }
         _expectedProgress = progress;
         switch (step.Check)
         {
