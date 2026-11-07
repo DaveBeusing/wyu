@@ -19,6 +19,9 @@ internal static class Program
             ["--walkable-smoke"] => HostMode.WalkableSmoke,
             ["--planet"] => HostMode.Planet,
             ["--planet-smoke"] => HostMode.PlanetSmoke,
+            ["--flight"] or ["--flight", _] => HostMode.Flight,
+            ["--flight-smoke", _] => HostMode.FlightSmoke,
+            ["--flight-reload-smoke", _] => HostMode.FlightReloadSmoke,
             ["--save-world"] or ["--save-world", _] => HostMode.SaveWorld,
             ["--window-smoke"] => HostMode.WindowSmoke,
             ["--headless-smoke"] => HostMode.HeadlessSmoke,
@@ -27,7 +30,7 @@ internal static class Program
         };
         if (mode is null && !saveSmoke)
         {
-            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--prototype [slot-directory] | --prototype-smoke | --d3d12 | --d3d12-smoke | --terrain | --terrain-smoke | --walkable | --walkable-smoke | --planet | --planet-smoke | --save-world [slot-directory] | --window-smoke | --headless-smoke | --fault-smoke]");
+            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--prototype [slot-directory] | --prototype-smoke | --d3d12 | --d3d12-smoke | --terrain | --terrain-smoke | --walkable | --walkable-smoke | --planet | --planet-smoke | --flight [slot-directory] | --flight-smoke slot-directory | --flight-reload-smoke slot-directory | --save-world [slot-directory] | --window-smoke | --headless-smoke | --fault-smoke]");
             return 2;
         }
 
@@ -35,7 +38,8 @@ internal static class Program
         if (saveSmoke)
             cancellation.CancelAfter(TimeSpan.FromSeconds(45));
         else if (!GameHost.IsInteractive(mode!.Value))
-            cancellation.CancelAfter(TimeSpan.FromSeconds(mode is HostMode.WalkableSmoke or HostMode.PrototypeSmoke or HostMode.PlanetSmoke ? 120 : 15));
+            cancellation.CancelAfter(TimeSpan.FromSeconds(mode is HostMode.FlightSmoke ? 150 :
+                mode is HostMode.WalkableSmoke or HostMode.PrototypeSmoke or HostMode.PlanetSmoke ? 120 : 15));
 
         Console.CancelKeyPress += Cancel;
         try

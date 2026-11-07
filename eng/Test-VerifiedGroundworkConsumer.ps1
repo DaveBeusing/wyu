@@ -8,6 +8,7 @@ param(
     [switch]$TerrainSmoke,
     [switch]$WalkableSmoke,
     [switch]$PlanetSmoke,
+    [switch]$FlightSmoke,
     [switch]$SaveSmoke,
     [switch]$PrototypeSmoke,
     [switch]$PrototypeSaveSmoke
@@ -72,7 +73,8 @@ function Start-HostSmoke([string]$Assembly, [string]$Mode, [string[]]$Arguments)
     [System.Diagnostics.Process]::Start($start)
 }
 
-function Invoke-HostSmoke([string]$Assembly, [string]$Mode, [string]$PassLine, [int]$TimeoutSeconds = 30, [string[]]$Arguments = @()) {
+function Invoke-HostSmoke([string]$Assembly, [string]$Mode, [string]$PassLine, [int]$TimeoutSeconds = 30,
+        [string[]]$Arguments = @(), [switch]$Capture) {
     $process = Start-HostSmoke $Assembly $Mode $Arguments
     try {
         $stdout = $process.StandardOutput.ReadToEndAsync()
@@ -88,7 +90,34 @@ function Invoke-HostSmoke([string]$Assembly, [string]$Mode, [string]$PassLine, [
         if ($process.ExitCode -ne 0 -or ($output -split '\r?\n') -cnotcontains $PassLine) {
             throw "WYU $Mode failed with exit $($process.ExitCode). $errors"
         }
+        if ($Capture) { return $output -split '\r?\n' }
     } finally { $process.Dispose() }
+}
+
+function Invoke-FlightSmoke([string]$Assembly, [string]$Work) {
+    $expectedTrace = 'WP09 trace v1 ticks=4332 sha256=7157DA3B7F3DB7C5B303BD4E28AEBE3A86A7D15156BAF431EE1278F3810CD230'
+    $baseline = $null
+    foreach ($run in 1, 2) {
+        $slot = Join-Path $Work "flight-$run"
+        $flight = @(Invoke-HostSmoke $Assembly '--flight-smoke' 'PASS: WYU WP09 flight mission and native shutdown.' `
+            -TimeoutSeconds 160 -Arguments @($slot) -Capture)
+        $reload = @(Invoke-HostSmoke $Assembly '--flight-reload-smoke' 'PASS: WYU WP09 landing checkpoint reload and native shutdown.' `
+            -Arguments @($slot) -Capture)
+        $saved = @($flight | Where-Object { $_ -cmatch '^WP09 saved generation=2 ' })
+        $restored = @($reload | Where-Object { $_ -cmatch '^WP09 restored generation=2 ' })
+        if ($saved.Count -ne 1 -or $restored.Count -ne 1 -or $saved[0].Replace('WP09 saved ', 'WP09 restored ') -cne $restored[0]) {
+            throw "Flight $run reload did not reproduce the committed pose and canonical edits."
+        }
+
+        $checkpoints = @($flight | Where-Object { $_ -cmatch '^WP09 (checkpoint|orbit|trace|saved) ' })
+        if ($checkpoints.Count -ne 12 -or $checkpoints -cnotcontains $expectedTrace) {
+            throw "Flight $run did not match the pinned mission input trace."
+        }
+        $semanticTrace = $checkpoints -join "`n"
+        if ($null -eq $baseline) { $baseline = $semanticTrace }
+        elseif ($baseline -cne $semanticTrace) { throw 'WP09 semantic checkpoints differed between runs.' }
+    }
+    Write-Host 'PASS: Two WP09 flight traces and both fresh-process landing reloads matched.'
 }
 
 function Stop-HostAtSaveMarker([string]$Assembly, [string]$Mode, [string[]]$Arguments,
@@ -260,6 +289,7 @@ try {
         if ($TerrainSmoke) { Invoke-HostSmoke $assembly '--terrain-smoke' 'PASS: WYU D3D12 terrain presentation and native shutdown.' }
         if ($WalkableSmoke) { Invoke-HostSmoke $assembly '--walkable-smoke' 'PASS: WYU walkable route and native shutdown.' -TimeoutSeconds 130 }
         if ($PlanetSmoke) { Invoke-HostSmoke $assembly '--planet-smoke' 'PASS: WYU WP08 planet route and native shutdown.' -TimeoutSeconds 130 }
+        if ($FlightSmoke) { Invoke-FlightSmoke $assembly $work }
         if ($PrototypeSmoke) { Invoke-HostSmoke $assembly '--prototype-smoke' 'PASS: WYU WP07 rescue beacon route and native shutdown.' -TimeoutSeconds 130 }
         if ($SaveSmoke) { Invoke-SaveSmoke $assembly $work }
         if ($PrototypeSaveSmoke) { Invoke-PrototypeSaveSmoke $assembly $work }
