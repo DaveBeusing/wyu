@@ -19,11 +19,12 @@ Die Physik in **Worlds Yet Unseen (WYU)** soll **glaubwürdig, konsistent und re
 
 **Name:** New Terra. Der Startplanet ist grundsätzlich erdähnlich und in den üblichen, bewohnbaren Oberflächenregionen ohne künstliche Atemversorgung begehbar.
 
+- **Oberflächengravitation:** Rund **1 g = 9,81 m/s²** unter typischen Oberflächenbedingungen, entsprechend der Erde. Bewegung, Springen und Fallen fühlen sich deshalb zunächst vertraut an. Die Schwerkraftrichtung zeigt zur Planetenmitte; mit wachsender Entfernung vom Planetenzentrum darf ihre Stärke plausibel abnehmen.
 - **Atembare Grundatmosphäre:** Der Spieler benötigt bei normaler Erkundung an Land weder Atemmaske noch Sauerstofftank.
 - **Unter Wasser:** Freies Atmen ist nicht möglich; Tauchzeit und später geeignete Atemtechnik bzw. Lebenserhaltung werden relevant.
 - **Große Höhen:** Durch sinkenden Luftdruck nimmt auch der Sauerstoff-Partialdruck ab. Ab bestimmten Höhen können Atemprobleme auftreten; konkrete Schwellen und Spielmechaniken bleiben offen.
 - **Regionaler Charakter:** Sauerstoffmangel ist auf solche physikalisch begründeten Bedingungen begrenzt und kein genereller Überlebenszwang im frühen Spiel.
-- **Offen:** Zahlen für Oberfläche, Atmosphärenzusammensetzung, Gravitation, Tageslänge und genaue Höhenstufen; keine willkürlichen Grenzwerte ohne spätere Abstimmung.
+- **Offen:** Konkreter Planetenradius und -masse (so aufeinander abzustimmen, dass ungefähr 1 g an der Oberfläche entsteht), Atmosphärenzusammensetzung, Tageslänge und genaue Höhenstufen; keine willkürlichen Grenzwerte ohne spätere Abstimmung.
 
 **Wichtige Unterscheidung:** Bei einer gut durchmischten Atmosphäre muss der Sauerstoff-*Anteil* mit der Höhe nicht deutlich abnehmen. Relevant für die Atmung ist vor allem der abnehmende **Partialdruck** infolge sinkenden Gesamtdrucks.
 
@@ -68,4 +69,4 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 5. Welche Mindestanforderungen gelten für Druck- und Sauerstoffsysteme in unterirdischen oder geschlossenen Basen?
 6. Welche Simulationsbudgets, Genauigkeiten und Skalierungsgrenzen werden erst nach Prototypen festgelegt?
 
-**Abgrenzung:** Dieses Dokument legt keine konkreten Zahlen für den Startplaneten, keine vollständige Liste aller Himmelskörper und keine endgültige Simulationsarchitektur fest. Die Vorschläge werden schrittweise mit dem Spielkonzept abgestimmt.
+**Abgrenzung:** Außer der festgelegten erdähnlichen Oberflächengravitation von rund 1 g bleiben die konkreten Zahlen für den Startplaneten offen. Dieses Dokument legt weder eine vollständige Liste aller Himmelskörper noch eine endgültige Simulationsarchitektur fest. Die Vorschläge werden schrittweise mit dem Spielkonzept abgestimmt.
