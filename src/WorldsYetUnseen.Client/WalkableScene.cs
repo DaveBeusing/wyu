@@ -353,6 +353,7 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
         var instances = new RenderMeshInstance[read.MeshCount];
         var identities = new (ChunkCoordinate Coordinate, ulong Identity)[read.MeshCount];
         var coloredDeposits = DepositMask.None;
+        var hasPadMarker = false;
         for (var i = 0; i < instances.Length; i++)
         {
             var coordinate = read.GetMeshCoordinate(i);
@@ -366,13 +367,14 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
             {
                 mesh = PrototypePalette.CreateMesh(coordinate, positions, indices, out var meshDeposits);
                 coloredDeposits |= meshDeposits;
+                hasPadMarker |= PrototypePadMarker.TryAppend(coordinate, mesh, out mesh);
             }
             else
                 mesh = RenderMesh.Create(positions, indices);
             instances[i] = new(mesh, coordinate.GetOrigin());
             identities[i] = (coordinate, identity);
         }
-        _coverage.Add(RendererGeneration(read.Generation), new Coverage(identities, coloredDeposits));
+        _coverage.Add(RendererGeneration(read.Generation), new Coverage(identities, coloredDeposits, hasPadMarker));
         return new RenderMeshRegion(instances);
     }
 
@@ -381,6 +383,12 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
         var generation = _renderer?.ReadMeshReplacement().LastPresentedGeneration;
         return generation is { } presented && _coverage.TryGetValue(presented, out var coverage)
             ? coverage.ColoredDeposits : DepositMask.None;
+    }
+
+    internal bool HasPresentedPadMarker()
+    {
+        var generation = _renderer?.ReadMeshReplacement().LastPresentedGeneration;
+        return generation is { } presented && _coverage.TryGetValue(presented, out var coverage) && coverage.HasPadMarker;
     }
 
     private ulong RendererGeneration(ulong generation) => checked(_generationOffset + generation);
@@ -433,7 +441,7 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
     private sealed record PendingLoad(RegionLoadWork Work, Task<ChunkSnapshot?> Task);
     private sealed record PendingMesh(RegionMeshWork Work, Task<RegionMeshResult?> Task);
 
-    private sealed record Coverage((ChunkCoordinate Coordinate, ulong Identity)[] Identities, DepositMask ColoredDeposits);
+    private sealed record Coverage((ChunkCoordinate Coordinate, ulong Identity)[] Identities, DepositMask ColoredDeposits, bool HasPadMarker);
 
     private sealed class PresentedOccupancy(RegionReadLease active, Coverage presented, RegionBounds world) : IVoxelOccupancy
     {
