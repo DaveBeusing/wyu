@@ -94,7 +94,21 @@ Kleidungsstücke erhalten zunächst **qualitativ beschriebene Eigenschaften stat
 
 **Bewusst offen:** Tauchzeit, Tiefenlimits, Verbrauchsraten, Druckschadensmodell, Dekompression, Atemgasmischungen, Tankvolumen, Ausrüstungsstufen und konkrete Bau-/Fahrzeuganforderungen. Es gelten noch keine Zahlenwerte.
 
-## 8. Performance-Leitlinie
+## 8. Höhenphysik und Akklimatisierung auf New Terra — abgestimmte Grundlagen
+
+Die Auswirkungen großer Höhen orientieren sich grundsätzlich an erdähnlicher Physiologie und einer plausiblen Atmosphäre: Mit der Höhe sinkt der Gesamtdruck und damit der Sauerstoff-Partialdruck. Der Sauerstoffanteil in Prozent muss dabei nicht abnehmen.
+
+- **Normale Höhenlagen:** Im Regelfall keine Einschränkungen und keine zusätzliche Atemtechnik nötig.
+- **Hochgebirge:** Die dünnere Luft kann bei Belastung zu schnellerer Ermüdung und langsamerer Erholung führen.
+- **Extreme Höhenlagen:** Sauerstoffmangel kann zunehmend gefährlich werden; geeignete zusätzliche Sauerstoffversorgung kann notwendig sein.
+- **Fließende Übergänge:** Die Effekte ergeben sich graduell aus Umweltbedingungen, Belastung und individueller Gewöhnung, statt aus einer abrupten unsichtbaren Höhenbarriere.
+- **Akklimatisierung ist ausdrücklich vorgesehen:** Der Spieler kann sich bei längerem bzw. schrittweisem Aufenthalt an große Höhen anpassen und dadurch bestimmte Belastungen besser verkraften. Die Anpassung macht Sauerstoffmangel nicht beliebig kompensierbar und hebt die physikalischen Grenzen nicht auf.
+- **Getrennte Umwelteinflüsse:** Kälte, Wind und Wetter beeinflussen den Spieler zusätzlich und unabhängig von der Sauerstoffverfügbarkeit.
+- **Performance:** Die Auswirkungen sollen über ein nachvollziehbares vereinfachtes Zustandsmodell abgebildet werden, nicht über eine vollständige medizinische Simulation.
+
+**Bewusst offen:** Exakte Höhenbereiche, Luftdruckkurve, Stärke und Dauer der Akklimatisierung, möglicher Rückgang bei Aufenthalt in tieferen Lagen, Symptome, UI-Hinweise und konkrete Leistungs- bzw. Gesundheitseffekte.
+
+## 9. Performance-Leitlinie
 
 Die **Daten eines Himmelskörpers** bilden die stabile Ausgangslage. **Lokale Bedingungen** werden bei Bedarf für eine Region, eine Position oder ein aktives Objekt abgeleitet. Nicht jede entfernte Region benötigt in jedem Simulationsschritt eine hochaufgelöste Berechnung.
 
@@ -105,9 +119,9 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 - Statische strukturelle Prüfungen für Bauwerke und dynamische Physik primär bei Bewegung, Schäden oder Einsturz.
 - Kontinuierlich wirkende Übergänge zwischen Oberfläche, Atmosphäre und Weltraum ohne notwendigen Anspruch auf vollständige Mehrkörper-Himmelsmechanik.
 
-## 9. Offene Entscheidungen
+## 10. Offene Entscheidungen
 
-1. Bei welchen Höhen braucht der Spieler Atemtechnik, und welche Tauchzeiten, Tiefengrenzen, Atemgas- und Druckschutzausrüstungen werden später definiert?
+1. Welche genauen Höhenbereiche, Auswirkungen und Akklimatisierungszeiten gelten auf New Terra, und welche Tauchzeiten, Tiefengrenzen, Atemgas- und Druckschutzausrüstungen werden später definiert?
 2. Welche physikalischen Eigenschaften sollen tatsächlich von Planet zu Planet variieren und welche nur lokal?
 3. Welchen Grad an realistischem Flug-/Orbitalverhalten soll die Raumfahrt erfordern?
 4. Welche konkreten Schwellenwerte und abgestuften Auswirkungen erhalten Hitzebelastung, Durst und Unterkühlung; welche Auswirkungen von Sauerstoff, Druck und Strahlung sind zusätzlich spielrelevant?
