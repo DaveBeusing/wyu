@@ -2,11 +2,13 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <PlatformTarget>x64</PlatformTarget>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>WorldsYetUnseen.Client</AssemblyName>
     <RootNamespace>WorldsYetUnseen.Client</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="WorkPackage" Value="WP03" />
+    <ProjectReference Include="../WorldsYetUnseen.Gameplay/WorldsYetUnseen.Gameplay.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Groundwork.Core" Version="[0.1.0-dev.42303559178.1]" />

@@ -8,15 +8,19 @@ namespace WorldsYetUnseen.Client;
 
 // The host serializes coordinator calls. Workers only use their reserved inputs and Core lease.
 internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? initialPose = null,
-    ReadOnlySpan<TerrainChunkDelta> terrain = default)
+    ReadOnlySpan<TerrainChunkDelta> terrain = default, WalkableScene.ChunkSnapshotFactory? snapshot = null,
+    RegionBounds? bounds = null)
 {
     private const int Unit = VoxelCollision.UnitsPerVoxel;
-    private static readonly RegionBounds World = WalkableTerrain.Recipe.Bounds;
     private static readonly ChunkCoordinate WestEdge = new(-4, 0, 0);
 
+    internal delegate ChunkSnapshot ChunkSnapshotFactory(ChunkCoordinate coordinate, ReadOnlySpan<TerrainChunkDelta> terrain);
+
+    private readonly RegionBounds _world = bounds ?? WalkableTerrain.Recipe.Bounds;
+    private readonly ChunkSnapshotFactory _snapshot = snapshot ?? WalkableTerrain.Snapshot;
     private readonly List<PendingLoad> _loads = new(WalkableRegion.MaximumLoads);
     private readonly Dictionary<ulong, Coverage> _coverage = new(3);
-    private WalkableRegion _region = new(World);
+    private WalkableRegion _region = new(bounds ?? WalkableTerrain.Recipe.Bounds);
     private VoxelMotionState _motion = new(initialPose ?? WalkableTerrain.Spawn);
     private TerrainChunkDelta[] _terrain = terrain.ToArray();
     private PendingMesh? _mesh;
@@ -29,6 +33,7 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
 
     internal VoxelPose Pose => _motion.Pose;
     internal ReadOnlySpan<TerrainChunkDelta> Terrain => _terrain;
+    internal bool TerrainChangePending => _terrainReload != TerrainReload.None;
     internal RegionUsage Usage => _region.Usage;
     internal RegionUsage HighWater => _region.HighWater;
 
@@ -66,22 +71,38 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
         return read.GetCell(x, y, z);
     }
 
+    // Use this lease for interaction and collision evidence only once the corresponding mesh has presented.
+    internal RegionReadLease? TryReadPresented() => HasPresentedTerrain() ? _region.TryRead() : null;
+
     internal bool TryToggleTerrain()
     {
-        if (_stopped || _terrainReload != TerrainReload.None || _renderer is null)
+        if (!HasPresentedTerrain() || !WalkableTerrain.TryToggle(Pose, _terrain, out var terrain))
             return false;
 
-        var status = _renderer.ReadMeshReplacement();
-        if (status.LastPresentedGeneration != RendererGeneration(_region.DesiredGeneration) ||
-            !WalkableTerrain.TryToggle(Pose, _terrain, out var terrain))
+        StageTerrain(terrain);
+        return true;
+    }
+
+    internal bool TryStageTerrain(ReadOnlySpan<TerrainChunkDelta> terrain)
+    {
+        if (!HasPresentedTerrain())
             return false;
 
+        StageTerrain(terrain.ToArray());
+        return true;
+    }
+
+    private void StageTerrain(TerrainChunkDelta[] terrain)
+    {
         _terrain = terrain;
         _terrainReload = TerrainReload.Draining;
         _coverage.Clear();
         _region.Stop();
-        return true;
     }
+
+    private bool HasPresentedTerrain() => !_stopped && !TerrainChangePending && _region.DesiredGeneration != 0 &&
+        _renderer is not null &&
+        _renderer.ReadMeshReplacement().LastPresentedGeneration == RendererGeneration(_region.DesiredGeneration);
 
     internal void Advance(int deltaX, int deltaZ, ulong tick, WalkableRouteSmoke? route = null, bool drawable = true)
     {
@@ -106,7 +127,7 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
                 (deltaX, deltaZ) = route.NextMovement(ready);
 
             var motion = drawable && _coverage.TryGetValue(status.LastPresentedGeneration, out var presented)
-                ? VoxelCollision.Step(new PresentedOccupancy(read, presented), _motion, deltaX, deltaZ)
+                ? VoxelCollision.Step(new PresentedOccupancy(read, presented, _world), _motion, deltaX, deltaZ)
                 : new VoxelMotionResult(new VoxelMotionState(Pose), Grounded: false, StreamingBlocked: true);
             _motion = motion.State;
             if (route is not null)
@@ -129,14 +150,15 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
 
             // Renderer generations outlive the coordinator, including while its old mesh stays visible.
             _generationOffset = renderer.ReadMeshReplacement().DesiredGeneration;
-            _region = new WalkableRegion(World);
+            _region = new WalkableRegion(_world);
             _westIdentity = 0;
             _westFingerprint = 0;
             _terrainReload = TerrainReload.Presenting;
         }
 
         PublishAndDispatch(renderer);
-        if (renderer.ReadMeshReplacement().LastPresentedGeneration == RendererGeneration(_region.DesiredGeneration))
+        if (!_stopped && _region.DesiredGeneration != 0 &&
+            renderer.ReadMeshReplacement().LastPresentedGeneration == RendererGeneration(_region.DesiredGeneration))
             _terrainReload = TerrainReload.None;
     }
 
@@ -160,10 +182,14 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
         DispatchWorkers();
     }
 
-    internal RenderScene GetScene(float yaw)
+    internal RenderScene GetScene(float yaw, float? pitch = null)
     {
-        var eye = new Vector3((float)Pose.X / Unit, (float)Pose.Y / Unit + 1.6f, (float)Pose.Z / Unit);
-        var forward = new Vector3(MathF.Cos(yaw), -0.12f, MathF.Sin(yaw));
+        var eye = pitch is null
+            ? new Vector3((float)Pose.X / Unit, (float)Pose.Y / Unit + 1.6f, (float)Pose.Z / Unit)
+            : PrototypeWorld.Eye(Pose);
+        var forward = pitch is { } angle
+            ? PrototypeWorld.Direction(yaw, angle)
+            : new Vector3(MathF.Cos(yaw), -0.12f, MathF.Sin(yaw));
         return new RenderScene(Matrix4x4.Identity, new Vector4(0.30f, 0.74f, 0.47f, 1),
             Matrix4x4.CreateLookAt(eye, eye + forward, Vector3.UnitY), MathF.PI / 3, 0.05f, 40);
     }
@@ -360,12 +386,12 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
         return false;
     }
 
-    private static ChunkSnapshot? Generate(RegionLoadWork work, TerrainChunkDelta[] terrain)
+    private ChunkSnapshot? Generate(RegionLoadWork work, TerrainChunkDelta[] terrain)
     {
         if (work.IsCancellationRequested)
             return null;
 
-        var snapshot = WalkableTerrain.Snapshot(work.Coordinate, terrain);
+        var snapshot = _snapshot(work.Coordinate, terrain);
         return work.IsCancellationRequested ? null : snapshot;
     }
 
@@ -389,12 +415,12 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
 
     private sealed record Coverage((ChunkCoordinate Coordinate, ulong Identity)[] Identities);
 
-    private sealed class PresentedOccupancy(RegionReadLease active, Coverage presented) : IVoxelOccupancy
+    private sealed class PresentedOccupancy(RegionReadLease active, Coverage presented, RegionBounds world) : IVoxelOccupancy
     {
         public VoxelOccupancy GetCell(int x, int y, int z)
         {
             var coordinate = new ChunkCoordinate(ChunkOf(x), 0, ChunkOf(z));
-            if (!World.Contains(coordinate))
+            if (!world.Contains(coordinate))
                 return active.GetCell(x, y, z);
 
             foreach (var (presentedCoordinate, identity) in presented.Identities)

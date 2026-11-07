@@ -4,7 +4,7 @@ using Groundwork.Ecs;
 namespace WorldsYetUnseen.Client;
 
 internal sealed class WorldTickPipeline(EcsWorld world, InvalidOperationException? injectedFault, bool terrainEnabled,
-    Action<TickContext>? onPublished = null) : ITickPipeline
+    Action<TickContext>? onPublished = null, bool escapeCloses = true) : ITickPipeline
 {
     private static readonly BarrierOutcome Stopped = new(BarrierStatus.Stopped, null);
     private readonly WorldPublicationPorts _ports = world.Safety.Publication;
@@ -48,8 +48,8 @@ internal sealed class WorldTickPipeline(EcsWorld world, InvalidOperationExceptio
                         TerrainVoxelRemoved = !TerrainVoxelRemoved;
                 }
             }
-            CloseRequested |= tick.Input.HeldControls.Contains(InputControl.Escape) ||
-                tick.Input.Events.Any(static input => input.Kind == InputEventKind.Pressed && input.Control == InputControl.Escape);
+            CloseRequested |= escapeCloses && (tick.Input.HeldControls.Contains(InputControl.Escape) ||
+                tick.Input.Events.Any(static input => input.Kind == InputEventKind.Pressed && input.Control == InputControl.Escape));
             if (!CloseRequested)
                 onPublished?.Invoke(tick);
         }
