@@ -20,7 +20,7 @@ internal sealed class PrototypeSave(SaveSlot slot, IRuntimeOwnership ownership, 
     internal SaveSlotResult? LastSave { get; private set; }
 
     internal static Task<PrototypeSave> OpenAsync(string directory, IRuntimeOwnership ownership,
-        CancellationToken cancellationToken, Action? beforeResolve = null)
+        CancellationToken cancellationToken, Action? beforeResolve = null, Action<CancellationToken>? beforeLoad = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var slot = new SaveSlot(directory, (id, version) =>
@@ -37,6 +37,7 @@ internal sealed class PrototypeSave(SaveSlot slot, IRuntimeOwnership ownership, 
                 using (lease)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    beforeLoad?.Invoke(cancellationToken);
                     var result = slot.Load();
                     cancellationToken.ThrowIfCancellationRequested();
                     return new PrototypeSave(slot, ownership, result);

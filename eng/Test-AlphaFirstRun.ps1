@@ -145,7 +145,7 @@ try {
     Send-Key 13
     Wait-Title '*Controls 1/4*'
     Send-Key 27
-    Wait-Title '*Rescue beacon*'
+    Wait-Title 'Rescue beacon | Stone * | *Esc pause'
     Send-Key 27
     Wait-Title 'WYU paused*'
     if (!$process.CloseMainWindow() -or !$process.WaitForExit(20000) -or $process.ExitCode -ne 0) {
