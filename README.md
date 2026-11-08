@@ -1,23 +1,21 @@
 # Worlds Yet Unseen (WYU)
 
 Worlds Yet Unseen is a first-person planetary survival and exploration game.
-It uses a separate, independently packaged Groundwork engine.
+It uses the independently packaged Groundwork engine.
 
-The game is planned around procedurally generated spherical, destructible
-voxel worlds, seamless surface-to-orbit travel and modular construction.
-Initial platform is Windows; initial gameplay is single-player.
+## Windows single-player alpha
 
-## Windows host
+Start the installed client from the Windows Start menu or run the client
+without arguments. Choose **Start test mission** in the sidebar. Explore
+the region, mine stone, build and activate the rescue beacon, then fly
+from the planetary pad to orbit and return. **Continue** restores a
+supported checkpoint during construction or after landing.
 
-The host opens a Windows window, captures input, advances Groundwork's
-fixed-step simulation, and shuts down when the window closes. Pass `--d3d12`
-to open the WP02 D3D12 cube, or `--terrain` to open the WP04 editable two-chunk
-terrain scene. In terrain mode, press **T** to remove or restore the voxel at
-the shared chunk boundary.
+- **W/A/S/D** moves, the **mouse** aims and **E** interacts.
+- **Esc** toggles the sidebar. Use the **arrow keys** and **Enter** to select.
+- **F1** toggles observed FPS, GC and renderer counters.
 
-Pass `--walkable` to explore the WP05 region. Use **W/A/S/D** to move and
-**Left/Right** to turn. The scripted `--walkable-smoke` mode runs the fixed
-route through the streamed region and closes the window.
-
-See the [build and smoke instructions](docs/build-bootstrap.md) to run it
-from the independently archived Groundwork packages.
+The [build and verification guide](docs/build-bootstrap.md) covers the
+installer, verified packages and developer smoke modes. The
+[shared roadmap](https://github.com/DaveBeusing/Groundwork/blob/master/docs/roadmap.md) tracks milestone status.
+The [world vision](docs/World_Vision.md) describes the longer-term design.

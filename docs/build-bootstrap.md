@@ -1,4 +1,4 @@
-# Windows host, cube and terrain
+# WYU Windows alpha build and verification
 
 Build and run from a clean WYU checkout on Windows with the .NET 10 SDK,
 PowerShell 7, and GitHub CLI. The engine is supplied by the immutable
@@ -29,9 +29,8 @@ Supply the approved manifest hash independently of the installer folder.
 The script verifies installed hashes, starts the app from its Start menu
 shortcut, checks that it loaded the bundled runtime, repairs a missing
 program file by reinstalling, then uninstalls and checks test data hashes.
-The installer generated here is an unsigned engineering rehearsal.
-Release signing and qualification on a freshly provisioned system are
-separate acceptance gates.
+The WP10 alpha accepts an unsigned installer. The fresh Windows 11 offline
+run remains an open follow-up in the Groundwork handover.
 
 Download the archive to a new temporary directory and run the verification
 gate from the WYU repository root.
@@ -56,7 +55,7 @@ same gate. Add `-D3D12Smoke` to verify hardware adapter selection, first
 cube presentation and native window close. The D3D12 smoke requests Debug
 Layer and DRED. Windows Graphics Tools enables the debug layer and live-object
 report. Start the cube interactively with `--d3d12` and close the window to
-stop. Starting without an argument opens the WP07 prototype.
+stop. Starting without an argument opens the WP10 alpha sidebar.
 
 Run `--planet` for the WP08 walking route. Use WASD to walk, left/right
 arrows to turn and Esc to exit. The title bar points to the turnaround
