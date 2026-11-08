@@ -72,7 +72,7 @@ internal sealed partial class AlphaOverlay : IDisposable
                 while (PeekMessage(out var message, 0, 0, 0, 1))
                     DispatchMessage(ref message);
 
-                if (GetForegroundWindow() != owner || IsIconic(owner) != 0 || GetClientRect(owner, out var bounds) == 0)
+                if (IsIconic(owner) != 0 || GetClientRect(owner, out var bounds) == 0)
                 {
                     menu.Hide();
                     metrics.Hide();

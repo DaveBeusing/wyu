@@ -41,6 +41,11 @@ function Wait-Title([string]$Pattern, [int]$Seconds = 30) {
 
 function Send-KeyEvent([int]$Key, [bool]$Down) {
     $process.Refresh()
+    if ($Down -and ![WyuOverlayProbe]::HasFocus($process.MainWindowHandle)) {
+        if (![WyuOverlayProbe]::ClickVisibleTitle($process.MainWindowHandle)) { throw 'Cannot focus the visible WYU window.' }
+        Start-Sleep -Milliseconds 200
+        if (![WyuOverlayProbe]::HasFocus($process.MainWindowHandle)) { throw 'WYU did not receive keyboard focus.' }
+    }
     $flags = if ($Key -ge 37 -and $Key -le 40) { 0x01000001 } else { 1 }
     $message = if ($Down) { 0x100 } else { 0x101 }
     if (!$Down) { $flags = $flags -bor 0xC0000000 }

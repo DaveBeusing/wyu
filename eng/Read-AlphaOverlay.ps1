@@ -10,8 +10,33 @@ public static class WyuOverlayProbe
     [DllImport("user32.dll")] private static extern bool EnumWindows(Visitor visitor, IntPtr data);
     [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect bounds);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out Point position);
+    [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(IntPtr window, StringBuilder text, int capacity);
+
+    [StructLayout(LayoutKind.Sequential)] private struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
+
+    public static bool HasFocus(IntPtr owner) => owner != IntPtr.Zero && GetForegroundWindow() == owner;
+
+    public static bool ClickVisibleTitle(IntPtr owner)
+    {
+        if (!GetWindowRect(owner, out Rect bounds) || !GetCursorPos(out Point previous)) return false;
+        var target = new Point { X = (bounds.Left + bounds.Right) / 2, Y = bounds.Top + 16 };
+        if (WindowFromPoint(target) != owner || !SetCursorPos(target.X, target.Y)) return false;
+        try
+        {
+            mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
+            mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+            return true;
+        }
+        finally { SetCursorPos(previous.X, previous.Y); }
+    }
 
     public static string Read(IntPtr owner, string prefix)
     {
