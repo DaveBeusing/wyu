@@ -64,7 +64,9 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
 
         string Option(int index, string label, bool enabled = true) =>
             $"{(index == selected ? "> " : "")}{label}{(enabled ? "" : " (unavailable)")}";
-        string SlotStatus() => canStart ? "Empty slot" : canContinue
+        string SlotStatus() => canStart ? "Empty slot" : save.Checkpoint is { Progress.BeaconOnline: true }
+            ? "Rescue signal sent; Continue to flight"
+            : canContinue
             ? save.InitialLoad.Recovery is { } recovery
                 ? $"Recovered checkpoint {save.Generation} ({recovery.FileName})"
                 : $"Checkpoint {save.Generation}"

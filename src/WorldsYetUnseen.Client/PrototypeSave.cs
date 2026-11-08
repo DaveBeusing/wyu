@@ -14,6 +14,7 @@ internal sealed class PrototypeSave(SaveSlot slot, IRuntimeOwnership ownership, 
     internal SaveSlotResult InitialLoad { get; } = initialLoad;
     internal PrototypeCheckpoint? Checkpoint { get; private set; } = ReadInitialCheckpoint(initialLoad);
     internal ulong Generation { get; private set; } = initialLoad.Checkpoint?.Identity.Generation ?? 0;
+    internal Guid Lineage => _lineage;
     internal bool IsSaving => _active is not null;
     internal bool RetryPending => _retry is not null;
     internal SaveSlotResult? LastSave { get; private set; }

@@ -6,7 +6,7 @@ internal static class Program
     {
         var saveSmoke = args is ["--save-smoke-init" or "--save-smoke-interrupt" or "--save-smoke-resume" or
             "--prototype-save-init" or "--prototype-save-before-publish" or "--prototype-save-after-publish" or
-            "--prototype-save-finish" or "--prototype-save-verify", _, _];
+            "--prototype-save-finish" or "--prototype-save-verify" or "--prototype-save-mission-fixture", _, _];
         HostMode? mode = args switch
         {
             [] or ["--prototype"] or ["--prototype", _] or ["--prototype", _, _] => HostMode.Prototype,

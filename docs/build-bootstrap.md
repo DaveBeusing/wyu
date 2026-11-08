@@ -153,6 +153,18 @@ settings saves the rejected file beside the new one for diagnosis.
 Run `eng/Test-AlphaFirstRun.ps1 -Client <path-to-client-exe>` from an
 interactive Windows desktop to exercise the menu with isolated data.
 
+After activating the rescue beacon, press Enter to save the rescue
+checkpoint and open the guided flight at the planetary pad. Press Space
+to launch. Follow the amber pad on approach and wait for **Mission
+complete** after touchdown. Continue returns to the saved construction
+before the signal, or to the flight after the signal. Once touchdown is
+saved, Continue restores the completed mission.
+
+Run `eng/Test-AlphaMission.ps1 -Client <path-to-client-exe>` on an
+interactive D3D12-capable Windows desktop. It seeds a partially built
+beacon in an isolated slot, saves and resumes through the menu, completes
+the guided orbit, and compares the saved and restored landing.
+
 ## WP07 rescue beacon
 
 Launch the Windows client without arguments or use `--prototype`. The

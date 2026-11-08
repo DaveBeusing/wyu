@@ -47,6 +47,13 @@ internal sealed class PrototypeSaveSmoke(IRuntimeOwnership ownership)
         Save = save;
         switch (phase)
         {
+            case "--prototype-save-mission-fixture":
+                Require(save.InitialLoad.Status == SaveSlotStatus.Empty, "start from an empty mission fixture");
+                var construction = new PrototypeCheckpoint(BeaconPose, Build(Mine(partial.Progress, Deposit.East), BeaconModule.Mast));
+                await CommitAsync(save, construction, 1, ct).ConfigureAwait(false);
+                await VerifyRegionAsync(construction, ct).ConfigureAwait(false);
+                Console.WriteLine("PASS: WP10 saved a partially built beacon.");
+                break;
             case "--prototype-save-init":
                 Require(save.InitialLoad.Status == SaveSlotStatus.Empty, "start from an empty slot");
                 await CommitAsync(save, first, 1, ct).ConfigureAwait(false);
