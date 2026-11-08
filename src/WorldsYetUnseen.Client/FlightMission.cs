@@ -28,6 +28,7 @@ internal sealed class FlightMission : IDisposable
     private bool _departureSaved;
     private bool _landingSaved;
     private bool _alpha;
+    private AlphaDiagnostics? _diagnostics;
     private double _orbitAngle;
     private double _lastAngle;
     private double _minimumCoastRadius = double.PositiveInfinity;
@@ -57,11 +58,12 @@ internal sealed class FlightMission : IDisposable
         return new(new FlightLandingSite(result.Checkpoint), slot, ownership, scripted, reload);
     }
 
-    internal void EnterAlpha()
+    internal void EnterAlpha(AlphaDiagnostics? diagnostics)
     {
         if (_site.Generation > 2)
             throw new InvalidDataException("Unexpected WP10 flight checkpoint generation.");
         _alpha = true;
+        _diagnostics = diagnostics;
         _departureSaved = _site.Generation >= 1;
         _landingSaved = _site.Generation == 2;
         if (_landingSaved)
@@ -69,6 +71,7 @@ internal sealed class FlightMission : IDisposable
             _phase = FlightPhase.Landed;
             Console.WriteLine($"WP10 restored landing generation={_site.Generation} {FlightLandingSite.Describe(_state)} edits={_site.EditDigest()}");
         }
+        _diagnostics?.Enter($"Flight{_phase}");
     }
 
     internal void Tick(TickContext tick, bool drawable)
@@ -143,6 +146,7 @@ internal sealed class FlightMission : IDisposable
         {
             await _site.SaveAsync(_slot, _ownership, _state, token).ConfigureAwait(false);
             _landingSaved = true;
+            _diagnostics?.Write("landing-saved");
             Console.WriteLine($"WP09 saved generation={_site.Generation} {FlightLandingSite.Describe(_state)} edits={_site.EditDigest()}");
             Console.WriteLine($"WP09 trace v1 ticks={_missionTick} sha256={Convert.ToHexString(_trace.GetHashAndReset())}");
             Console.WriteLine($"WP09 readiness holds={_holds} peakPatches={_terrain.PeakPatches} finalFrame={snapshot.LastPresentedSequence}");
@@ -232,6 +236,7 @@ internal sealed class FlightMission : IDisposable
     private void Enter(FlightPhase phase)
     {
         _phase = phase;
+        _diagnostics?.Enter($"Flight{phase}");
         if (_scripted || _alpha)
             Console.WriteLine($"WP09 checkpoint phase={phase} mission={_missionTick} origin={_terrain.Stamp.Frame.Revision} " +
                 $"generation={_terrain.Stamp.Generation} {FlightLandingSite.Describe(_state)}");

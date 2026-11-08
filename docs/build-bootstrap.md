@@ -165,6 +165,17 @@ interactive D3D12-capable Windows desktop. It seeds a partially built
 beacon in an isolated slot, saves and resumes through the menu, completes
 the guided orbit, and compares the saved and restored landing.
 
+Startup and Direct3D 12 failures show a Windows dialog with the local
+log location when the record was saved. Logs live under
+`%LOCALAPPDATA%\WorldsYetUnseen\Logs`. WYU keeps the current and previous
+log, up to 64 KiB each. Records include the build, process and mission or
+loading phase. Closing the window during a save load cancels the load
+and waits for the owned work to settle.
+
+From an interactive Windows desktop, run
+`eng/Test-AlphaDiagnostics.ps1 -Client <path-to-client-exe> -ExpectedCommit <build-commit>`
+to check both dialogs, rotation and native close during a controlled load.
+
 ## WP07 rescue beacon
 
 Launch the Windows client without arguments or use `--prototype`. The

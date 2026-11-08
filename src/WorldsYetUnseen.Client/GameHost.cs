@@ -71,21 +71,21 @@ internal static class GameHost
             : "PASS: WYU restored committed terrain, position and inventory after interrupted save.");
     }
 
-    internal static async Task RunAsync(HostMode mode, CancellationToken cancellationToken, string? saveDirectory = null,
-        string? settingsDirectory = null)
+    internal static async Task RunAsync(HostMode mode, AlphaDiagnostics? diagnostics, string? saveDirectory,
+        string? settingsDirectory, CancellationToken cancellationToken)
     {
         if (mode == HostMode.Prototype)
             settingsDirectory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "WorldsYetUnseen", "Alpha");
-        var flightDirectory = await RunStageAsync(mode, saveDirectory, settingsDirectory, false, cancellationToken)
+        var flightDirectory = await RunStageAsync(mode, saveDirectory, settingsDirectory, false, diagnostics, cancellationToken)
             .ConfigureAwait(false);
         if (flightDirectory is not null && !cancellationToken.IsCancellationRequested)
-            await RunStageAsync(HostMode.Flight, flightDirectory, settingsDirectory, true, cancellationToken)
+            await RunStageAsync(HostMode.Flight, flightDirectory, settingsDirectory, true, diagnostics, cancellationToken)
                 .ConfigureAwait(false);
     }
 
     private static async Task<string?> RunStageAsync(HostMode mode, string? saveDirectory,
-        string? settingsDirectory, bool alphaFlight, CancellationToken cancellationToken)
+        string? settingsDirectory, bool alphaFlight, AlphaDiagnostics? alphaDiagnostics, CancellationToken hostCancellation)
     {
         var smokeClock = mode is HostMode.HeadlessSmoke or HostMode.FaultSmoke ? new SmokeClock() : null;
         TimeProvider clock = smokeClock ?? TimeProvider.System;
@@ -117,6 +117,9 @@ internal static class GameHost
         var stopReason = HostStopReason.StartupFault;
         Exception? failure = null;
         string? success = null;
+        using var stageCancellation = CancellationTokenSource.CreateLinkedTokenSource(hostCancellation);
+        var cancellationToken = stageCancellation.Token;
+        Task<bool> watchClose = Task.FromResult(false);
 
         try
         {
@@ -137,11 +140,14 @@ internal static class GameHost
                 new ComponentRegistryBuilder().Build(), new EcsLimits(16, 1, 0, 1024 * 1024, StorageBytes), storage);
             if (smokeClock is null)
             {
+                alphaDiagnostics?.Enter("WindowStartup");
                 var title = IsDesktopSmoke(mode) ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen";
                 window = new WindowsHostModule(new WindowsHostOptions(title, 960, 540, 256),
                     runtime.UiWake, runtime.RuntimeOwnership);
                 await window.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
                 await window.StartAsync(cancellationToken).ConfigureAwait(false);
+                if (IsInteractive(mode))
+                    watchClose = WatchWindowCloseAsync(window, stageCancellation);
                 if (alphaFlight && settingsDirectory is not null)
                     AlphaWindowSize.TryApply(new AlphaSettingsStore(settingsDirectory).Load().Value.Size);
                 if (mode == HostMode.Prototype)
@@ -149,9 +155,12 @@ internal static class GameHost
                     var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                         "WorldsYetUnseen");
                     saveDirectory ??= Path.Combine(data, "WP07");
+                    alphaDiagnostics?.Enter("SaveLoad");
                     new PrototypeCaption().Update("WYU | Checking save slot");
-                    prototypeSave = await PrototypeSave.OpenAsync(saveDirectory, runtime.RuntimeOwnership, cancellationToken)
+                    prototypeSave = await PrototypeSave.OpenAsync(saveDirectory, runtime.RuntimeOwnership, cancellationToken,
+                            beforeLoad: alphaDiagnostics?.BeforeSaveLoad)
                         .ConfigureAwait(false);
+                    alphaDiagnostics?.Enter("StartMenu");
                     var startMenu = new AlphaStartMenu(window, prototypeSave, new AlphaSettingsStore(settingsDirectory!));
                     startGame = await startMenu.ChooseAsync(cancellationToken).ConfigureAwait(false);
                     settings = startMenu.Settings;
@@ -170,6 +179,7 @@ internal static class GameHost
                     throw new InvalidOperationException("The Windows host did not open a usable window.");
                 if (mode is HostMode.D3D12 or HostMode.Planet or HostMode.Flight || IsDesktopSmoke(mode) || terrain is not null || walkable is not null)
                 {
+                    alphaDiagnostics?.Enter(walkable is null ? "GraphicsStartup" : "RescueTerrainLoad");
                     var diagnostics = IsDesktopSmoke(mode)
                         ? new D3D12DiagnosticsOptions(EnableDebugLayer: true, EnableDred: true)
                         : default;
@@ -180,6 +190,7 @@ internal static class GameHost
                     else if (walkable is not null)
                     {
                         var initial = await walkable.StartAsync(cancellationToken).ConfigureAwait(false);
+                        alphaDiagnostics?.Enter("GraphicsStartup");
                         renderer = D3D12Renderer.CreateWithMeshRegionReplacement(window, runtime.RuntimeOwnership, initial, diagnostics);
                     }
                     else
@@ -189,6 +200,7 @@ internal static class GameHost
                             : new D3D12Renderer(diagnostics, window, runtime.RuntimeOwnership);
                     }
                     await renderer.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
+                    alphaDiagnostics?.CheckGraphics();
                     await renderer.StartAsync(cancellationToken).ConfigureAwait(false);
                     if (walkable is not null)
                         walkable.Attach(renderer.MeshRegionReplacement
@@ -201,19 +213,23 @@ internal static class GameHost
                 stopReason = HostStopReason.RuntimeFault;
                 IInputSource input = window is not null ? window : new SmokeInput();
                 if (IsFlight(mode))
+                {
+                    alphaDiagnostics?.Enter("FlightSaveLoad");
                     flight = await FlightMission.OpenAsync(saveDirectory ?? Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WorldsYetUnseen", "WP09"),
                         runtime.RuntimeOwnership, IsFlightSmoke(mode), mode == HostMode.FlightReloadSmoke, cancellationToken)
                         .ConfigureAwait(false);
+                }
+                alphaDiagnostics?.Enter(mode == HostMode.Prototype ? "Rescue" : mode.ToString());
                 if (alphaFlight)
-                    flight!.EnterAlpha();
+                    flight!.EnterAlpha(alphaDiagnostics);
                 (success, launchFlight) = await DriveAsync(mode, context, runtime, world, input, renderer, terrain, walkable, save,
-                    prototypeSave, smokeClock, flight, settings, cancellationToken).ConfigureAwait(false);
+                    prototypeSave, smokeClock, flight, settings, hostCancellation).ConfigureAwait(false);
             }
             stopReason = mode == HostMode.FaultSmoke ? HostStopReason.RuntimeFault : HostStopReason.ExternalCancellation;
         }
         catch (OperationCanceledException) when (IsInteractive(mode) &&
-            (cancellationToken.IsCancellationRequested || runtime.State.Read().Conditions == SafetyCondition.TerminalStop) &&
+            (cancellationToken.IsCancellationRequested || runtime.State.Read().Conditions.HasFlag(SafetyCondition.TerminalStop)) &&
             runtime.Diagnostics.ReadEmergency().Primary is null)
         {
             stopReason = HostStopReason.ExternalCancellation;
@@ -221,6 +237,16 @@ internal static class GameHost
         catch (Exception error)
         {
             failure = error;
+        }
+        finally
+        {
+            await stageCancellation.CancelAsync().ConfigureAwait(false);
+            if (await watchClose.ConfigureAwait(false) ||
+                window?.Read().Phase is HostWindowPhase.Closing or HostWindowPhase.Closed)
+            {
+                launchFlight = false;
+                alphaDiagnostics?.Write("window-close");
+            }
         }
 
         try
@@ -234,6 +260,14 @@ internal static class GameHost
         }
         finally
         {
+            if (alphaDiagnostics is not null && renderer?.Read() is { } state &&
+                (state.FirstFault is not null || state.FirstCleanupFault is not null))
+            {
+                alphaDiagnostics.MarkGraphicsFailure();
+                var graphics = renderer.ReadDiagnostics();
+                alphaDiagnostics.Write("graphics-state",
+                    $"fault={state.FirstFault} cleanup={state.FirstCleanupFault} adapter={graphics.Adapter} deviceRemoval={graphics.DeviceRemoval}");
+            }
             flight?.Dispose();
         }
 
@@ -246,6 +280,20 @@ internal static class GameHost
         if (success is not null)
             Console.WriteLine(success);
         return launchFlight ? Path.Combine(saveDirectory!, $"flight-{prototypeSave!.Lineage:N}") : null;
+    }
+
+    private static async Task<bool> WatchWindowCloseAsync(WindowsHostModule window, CancellationTokenSource stage)
+    {
+        while (!stage.IsCancellationRequested)
+        {
+            if (window.Read().Phase is HostWindowPhase.Closing or HostWindowPhase.Closed)
+            {
+                await stage.CancelAsync().ConfigureAwait(false);
+                return true;
+            }
+            await Task.Delay(20, stage.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+        return false;
     }
 
     private static async Task<(string? Success, bool LaunchFlight)> DriveAsync(HostMode mode, EngineModuleContext context, RuntimeSafetyAuthority runtime,
