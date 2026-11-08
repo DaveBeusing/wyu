@@ -37,6 +37,7 @@ function Wait-Title([string]$Pattern) {
 }
 
 function Send-Key([int]$Key) {
+    Focus-AlphaWindow $process
     $handle = $process.MainWindowHandle
     $flags = if ($Key -ge 37 -and $Key -le 40) { 0x01000001 } else { 1 }
     if (![WyuAlphaTestNative]::PostMessage($handle, 0x100, $Key, $flags) -or

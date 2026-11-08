@@ -61,3 +61,12 @@ public static class WyuOverlayProbe
 function Read-AlphaOverlay([Diagnostics.Process]$Process, [string]$Panel = 'sidebar') {
     [WyuOverlayProbe]::Read($Process.MainWindowHandle, "WYU $Panel | ")
 }
+
+function Focus-AlphaWindow([Diagnostics.Process]$Process) {
+    $Process.Refresh()
+    $owner = $Process.MainWindowHandle
+    if ([WyuOverlayProbe]::HasFocus($owner)) { return }
+    if (![WyuOverlayProbe]::ClickVisibleTitle($owner)) { throw 'Cannot focus the visible WYU window.' }
+    Start-Sleep -Milliseconds 200
+    if (![WyuOverlayProbe]::HasFocus($owner)) { throw 'WYU did not receive keyboard focus.' }
+}
