@@ -1,6 +1,5 @@
 using Groundwork.Core;
 using Groundwork.Persistence;
-using Groundwork.Platform.Windows;
 
 namespace WorldsYetUnseen.Client;
 
@@ -28,40 +27,6 @@ internal sealed class PrototypeMenu(PrototypeSave save)
                 });
             return $"WYU paused | {Option(0, "Resume")} | {Option(1, "Save")} | {Option(2, "Quit")} | {status}";
         }
-    }
-
-    internal static async Task<bool> ChooseStartAsync(WindowsHostModule window, PrototypeSave save,
-        PrototypeCaption caption, CancellationToken cancellationToken)
-    {
-        var canStart = save.InitialLoad.Status == SaveSlotStatus.Empty;
-        var canContinue = save.Checkpoint is not null;
-        var selected = canStart ? 0 : canContinue ? 1 : 2;
-        while (window.Read().Phase == HostWindowPhase.Open)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var details = canStart ? "Empty slot" : canContinue
-                ? save.InitialLoad.Recovery is { } recovery
-                    ? $"Recovered generation {save.Generation}: {recovery.FileName} ({recovery.Reason})"
-                    : $"Checkpoint {save.Generation}"
-                : $"Cannot load slot: {save.InitialLoad.Status}";
-            caption.Update($"WYU | {details} | {Option(0, "New Game", canStart)} | {Option(1, "Continue", canContinue)} | {Option(2, "Quit", true)} | Arrows / Enter");
-            var input = window.Capture();
-            if (Pressed(input, InputControl.Escape))
-                return false;
-            selected = Select(input, selected);
-            if (Pressed(input, InputControl.Enter))
-            {
-                if (selected == 2)
-                    return false;
-                if ((selected == 0 && canStart) || (selected == 1 && canContinue))
-                    return true;
-            }
-            await Task.Delay(16, cancellationToken).ConfigureAwait(false);
-        }
-        return false;
-
-        string Option(int index, string text, bool enabled) =>
-            $"{(selected == index ? "> " : "")}{text}{(enabled ? "" : " (unavailable)")}";
     }
 
     internal void Handle(InputSnapshot input, PrototypeSession session, PrototypeCheckpoint checkpoint)

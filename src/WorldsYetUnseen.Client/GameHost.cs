@@ -71,7 +71,8 @@ internal static class GameHost
             : "PASS: WYU restored committed terrain, position and inventory after interrupted save.");
     }
 
-    internal static async Task RunAsync(HostMode mode, CancellationToken cancellationToken, string? saveDirectory = null)
+    internal static async Task RunAsync(HostMode mode, CancellationToken cancellationToken, string? saveDirectory = null,
+        string? settingsDirectory = null)
     {
         var smokeClock = mode is HostMode.HeadlessSmoke or HostMode.FaultSmoke ? new SmokeClock() : null;
         TimeProvider clock = smokeClock ?? TimeProvider.System;
@@ -88,6 +89,7 @@ internal static class GameHost
         TerrainScene? terrain = IsTerrain(mode) ? new TerrainScene() : null;
         WorldSave? save = null;
         PrototypeSave? prototypeSave = null;
+        var settings = AlphaSettings.Defaults;
         FlightMission? flight = null;
         var startGame = true;
         WalkableScene? walkable = mode switch
@@ -128,14 +130,16 @@ internal static class GameHost
                 await window.StartAsync(cancellationToken).ConfigureAwait(false);
                 if (mode == HostMode.Prototype)
                 {
-                    saveDirectory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "WorldsYetUnseen", "WP07");
-                    var startCaption = new PrototypeCaption();
-                    startCaption.Update("WYU | Checking save slot");
+                    var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "WorldsYetUnseen");
+                    saveDirectory ??= Path.Combine(data, "WP07");
+                    settingsDirectory ??= Path.Combine(data, "Alpha");
+                    new PrototypeCaption().Update("WYU | Checking save slot");
                     prototypeSave = await PrototypeSave.OpenAsync(saveDirectory, runtime.RuntimeOwnership, cancellationToken)
                         .ConfigureAwait(false);
-                    startGame = await PrototypeMenu.ChooseStartAsync(window, prototypeSave, startCaption, cancellationToken)
-                        .ConfigureAwait(false);
+                    var startMenu = new AlphaStartMenu(window, prototypeSave, new AlphaSettingsStore(settingsDirectory));
+                    startGame = await startMenu.ChooseAsync(cancellationToken).ConfigureAwait(false);
+                    settings = startMenu.Settings;
                     if (startGame)
                     {
                         var checkpoint = prototypeSave.Checkpoint;
@@ -185,7 +189,7 @@ internal static class GameHost
                         runtime.RuntimeOwnership, IsFlightSmoke(mode), mode == HostMode.FlightReloadSmoke, cancellationToken)
                         .ConfigureAwait(false);
                 success = await DriveAsync(mode, context, runtime, world, input, renderer, terrain, walkable, save,
-                    prototypeSave, smokeClock, flight, cancellationToken).ConfigureAwait(false);
+                    prototypeSave, smokeClock, flight, settings, cancellationToken).ConfigureAwait(false);
             }
             stopReason = mode == HostMode.FaultSmoke ? HostStopReason.RuntimeFault : HostStopReason.ExternalCancellation;
         }
@@ -227,7 +231,7 @@ internal static class GameHost
     private static async Task<string?> DriveAsync(HostMode mode, EngineModuleContext context, RuntimeSafetyAuthority runtime,
         EcsWorld world, IInputSource input, D3D12Renderer? renderer, TerrainScene? terrain,
         WalkableScene? walkable, WorldSave? save, PrototypeSave? prototypeSave, SmokeClock? smokeClock,
-        FlightMission? flight, CancellationToken cancellationToken)
+        FlightMission? flight, AlphaSettings settings, CancellationToken cancellationToken)
     {
         var injectedFault = mode == HostMode.FaultSmoke ? new InvalidOperationException("Controlled tick failure.") : null;
         var route = mode == HostMode.WalkableSmoke ? new WalkableRouteSmoke() : null;
@@ -238,7 +242,7 @@ internal static class GameHost
         var planet = mode is HostMode.Planet or HostMode.PlanetSmoke ? new PlanetRoute(mode == HostMode.PlanetSmoke) : null;
         var caption = mode == HostMode.Prototype ? new PrototypeCaption() : null;
         using var mouseLook = mode == HostMode.Prototype && input is IHostWindowStateSource windowState
-            ? new PrototypeMouseLook(windowState) : null;
+            ? new PrototypeMouseLook(windowState, settings) : null;
         var yaw = 0f;
         var pitch = -0.20f;
         ulong routeCompletionTick = 0;
@@ -422,10 +426,10 @@ internal static class GameHost
             }
             else
             {
-                var playInput = drawable && !prototype!.Paused && !input.TransitionLoss &&
+                var playInput = drawable && (mouseLook?.Focused ?? true) && !prototype!.Paused && !input.TransitionLoss &&
+                    !input.Events.Any(static e => e.Kind == InputEventKind.FocusCleared) &&
                     !PrototypeMenu.Pressed(input, InputControl.Escape);
-                mouseLook?.Update(playInput && !input.Events.Any(static e => e.Kind == InputEventKind.FocusCleared),
-                    ref yaw, ref pitch);
+                mouseLook?.Update(playInput, ref yaw, ref pitch);
                 if (playInput)
                 {
                     (x, z) = ReadWalkableInput(input, ref yaw);

@@ -9,7 +9,7 @@ internal static class Program
             "--prototype-save-finish" or "--prototype-save-verify", _, _];
         HostMode? mode = args switch
         {
-            [] or ["--prototype"] or ["--prototype", _] => HostMode.Prototype,
+            [] or ["--prototype"] or ["--prototype", _] or ["--prototype", _, _] => HostMode.Prototype,
             ["--prototype-smoke"] => HostMode.PrototypeSmoke,
             ["--d3d12"] => HostMode.D3D12,
             ["--d3d12-smoke"] => HostMode.D3D12Smoke,
@@ -30,7 +30,7 @@ internal static class Program
         };
         if (mode is null && !saveSmoke)
         {
-            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--prototype [slot-directory] | --prototype-smoke | --d3d12 | --d3d12-smoke | --terrain | --terrain-smoke | --walkable | --walkable-smoke | --planet | --planet-smoke | --flight [slot-directory] | --flight-smoke slot-directory | --flight-reload-smoke slot-directory | --save-world [slot-directory] | --window-smoke | --headless-smoke | --fault-smoke]");
+            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--prototype [slot-directory [settings-directory]] | --prototype-smoke | --d3d12 | --d3d12-smoke | --terrain | --terrain-smoke | --walkable | --walkable-smoke | --planet | --planet-smoke | --flight [slot-directory] | --flight-smoke slot-directory | --flight-reload-smoke slot-directory | --save-world [slot-directory] | --window-smoke | --headless-smoke | --fault-smoke]");
             return 2;
         }
 
@@ -47,7 +47,8 @@ internal static class Program
             if (saveSmoke)
                 await GameHost.RunSaveSmokeAsync(args[0], args[1], args[2], cancellation.Token).ConfigureAwait(false);
             else
-                await GameHost.RunAsync(mode!.Value, cancellation.Token, args.Length == 2 ? args[1] : null).ConfigureAwait(false);
+                await GameHost.RunAsync(mode!.Value, cancellation.Token, args.Length >= 2 ? args[1] : null,
+                    args.Length == 3 ? args[2] : null).ConfigureAwait(false);
             return 0;
         }
         catch (Exception failure)

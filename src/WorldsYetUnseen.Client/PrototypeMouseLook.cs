@@ -5,7 +5,7 @@ using Groundwork.Core;
 namespace WorldsYetUnseen.Client;
 
 /// <summary>Relative mouse look for the foreground prototype window.</summary>
-internal sealed partial class PrototypeMouseLook(IHostWindowStateSource windowState) : IDisposable
+internal sealed partial class PrototypeMouseLook(IHostWindowStateSource windowState, AlphaSettings settings) : IDisposable
 {
     internal const float MaximumPitch = 1.4f;
     private const float RadiansPerPixel = 0.0025f;
@@ -21,6 +21,7 @@ internal sealed partial class PrototypeMouseLook(IHostWindowStateSource windowSt
     private nint _activeWindow;
     private ClientArea _activeArea;
     private ulong _activeRevision;
+    internal bool Focused => windowState.Read().Focused;
 
     internal void Update(bool enabled, ref float yaw, ref float pitch)
     {
@@ -64,8 +65,10 @@ internal sealed partial class PrototypeMouseLook(IHostWindowStateSource windowSt
             return;
         }
 
-        yaw = MathF.IEEERemainder(yaw + (pointer.X - center.X) * RadiansPerPixel, MathF.Tau);
-        pitch = Math.Clamp(pitch - (pointer.Y - center.Y) * RadiansPerPixel, -MaximumPitch, MaximumPitch);
+        var scale = RadiansPerPixel * (settings.Sensitivity / 100f);
+        yaw = MathF.IEEERemainder(yaw + (pointer.X - center.X) * scale, MathF.Tau);
+        var vertical = (pointer.Y - center.Y) * scale;
+        pitch = Math.Clamp(pitch + (settings.InvertVertical ? vertical : -vertical), -MaximumPitch, MaximumPitch);
     }
 
     public void Dispose() => Release();

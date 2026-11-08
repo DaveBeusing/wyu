@@ -139,6 +139,20 @@ writes on Windows. The headless smoke kills the writer process after the
 pending save has been flushed and checks that a fresh process can still
 load the last committed terrain edit, player pose, and inventory.
 
+## WP10 alpha entry
+
+Launch the client without arguments. Use the arrow keys and Enter in the
+window title menu. **Controls** replays the introduction. Enter advances
+each page and Esc skips it. In **Settings**, Left and Right edit the
+selected value. Reset stages the defaults, Apply saves them, and Cancel
+or Esc discards the draft.
+
+Settings live in `%LOCALAPPDATA%\WorldsYetUnseen\Alpha\settings.json`.
+An invalid file is kept when the client starts with defaults. Applying
+settings saves the rejected file beside the new one for diagnosis.
+Run `eng/Test-AlphaFirstRun.ps1 -Client <path-to-client-exe>` from an
+interactive Windows desktop to exercise the menu with isolated data.
+
 ## WP07 rescue beacon
 
 Launch the Windows client without arguments or use `--prototype`. The
