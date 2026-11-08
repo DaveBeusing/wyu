@@ -13,15 +13,19 @@ internal sealed partial class AlphaOverlay : IDisposable
     private const uint OverlayStyle = 0x080800A0; // No activate, layered, tool window, transparent.
     private readonly ManualResetEventSlim _stop = new();
     private readonly Thread _thread;
+    private readonly nint _owner;
     private volatile string? _menu;
     private volatile string? _performance;
 
-    internal AlphaOverlay()
+    internal AlphaOverlay(bool activateOwner)
     {
         using var process = Process.GetCurrentProcess();
         var owner = process.MainWindowHandle;
         if (owner == 0)
             throw new InvalidOperationException("The game window is not available for the alpha overlay.");
+        _owner = owner;
+        if (activateOwner)
+            _ = SetForegroundWindow(owner);
 
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _thread = new Thread(() => Run(owner, ready)) { IsBackground = true, Name = "WYU overlays" };
@@ -39,6 +43,9 @@ internal sealed partial class AlphaOverlay : IDisposable
 
     internal string? Menu { set => _menu = value; }
     internal string? Performance { set => _performance = value; }
+
+    internal bool AllowFocusHandoff() =>
+        GetForegroundWindow() == _owner && AllowSetForegroundWindow((uint)Environment.ProcessId) != 0;
 
     public void Dispose()
     {
@@ -194,6 +201,10 @@ internal sealed partial class AlphaOverlay : IDisposable
     private static partial int ShowWindow(nint window, int command);
     [LibraryImport("user32.dll")]
     private static partial nint GetForegroundWindow();
+    [LibraryImport("user32.dll")]
+    private static partial int AllowSetForegroundWindow(uint processId);
+    [LibraryImport("user32.dll")]
+    private static partial int SetForegroundWindow(nint window);
     [LibraryImport("user32.dll")]
     private static partial int IsIconic(nint window);
     [LibraryImport("user32.dll")]

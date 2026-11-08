@@ -77,15 +77,17 @@ internal static class GameHost
         if (mode == HostMode.Prototype)
             settingsDirectory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "WorldsYetUnseen", "Alpha");
-        var flightDirectory = await RunStageAsync(mode, saveDirectory, settingsDirectory, false, diagnostics, cancellationToken)
+        var (flightDirectory, restoreFocus) = await RunStageAsync(mode, saveDirectory, settingsDirectory,
+            false, false, diagnostics, cancellationToken)
             .ConfigureAwait(false);
         if (flightDirectory is not null && !cancellationToken.IsCancellationRequested)
-            await RunStageAsync(HostMode.Flight, flightDirectory, settingsDirectory, true, diagnostics, cancellationToken)
+            await RunStageAsync(HostMode.Flight, flightDirectory, settingsDirectory, true, restoreFocus, diagnostics, cancellationToken)
                 .ConfigureAwait(false);
     }
 
-    private static async Task<string?> RunStageAsync(HostMode mode, string? saveDirectory,
-        string? settingsDirectory, bool alphaFlight, AlphaDiagnostics? alphaDiagnostics, CancellationToken hostCancellation)
+    private static async Task<(string? FlightDirectory, bool RestoreFocus)> RunStageAsync(HostMode mode, string? saveDirectory,
+        string? settingsDirectory, bool alphaFlight, bool restoreFocus, AlphaDiagnostics? alphaDiagnostics,
+        CancellationToken hostCancellation)
     {
         var smokeClock = mode is HostMode.HeadlessSmoke or HostMode.FaultSmoke ? new SmokeClock() : null;
         TimeProvider clock = smokeClock ?? TimeProvider.System;
@@ -108,6 +110,7 @@ internal static class GameHost
         FlightMission? flight = null;
         var startGame = true;
         var launchFlight = false;
+        var handoffFocus = false;
         WalkableScene? walkable = mode switch
         {
             HostMode.Walkable or HostMode.WalkableSmoke => new WalkableScene(runtime.RuntimeOwnership),
@@ -152,7 +155,7 @@ internal static class GameHost
                     watchClose = WatchWindowCloseAsync(window, stageCancellation);
                 if (mode == HostMode.Prototype || alphaFlight)
                 {
-                    overlay = new AlphaOverlay();
+                    overlay = new AlphaOverlay(restoreFocus);
                     performance = new AlphaPerformance(overlay);
                 }
                 if (alphaFlight && settingsDirectory is not null)
@@ -250,6 +253,7 @@ internal static class GameHost
         }
         finally
         {
+            handoffFocus = launchFlight && overlay?.AllowFocusHandoff() == true;
             overlay?.Dispose();
             await stageCancellation.CancelAsync().ConfigureAwait(false);
             if (await watchClose.ConfigureAwait(false) ||
@@ -290,7 +294,7 @@ internal static class GameHost
                 requireNvidia: mode == HostMode.PlanetSmoke || IsFlightSmoke(mode));
         if (success is not null)
             Console.WriteLine(success);
-        return launchFlight ? Path.Combine(saveDirectory!, $"flight-{prototypeSave!.Lineage:N}") : null;
+        return (launchFlight ? Path.Combine(saveDirectory!, $"flight-{prototypeSave!.Lineage:N}") : null, handoffFocus);
     }
 
     private static async Task<bool> WatchWindowCloseAsync(WindowsHostModule window, CancellationTokenSource stage)
