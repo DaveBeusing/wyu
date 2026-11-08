@@ -142,7 +142,11 @@ load the last committed terrain edit, player pose, and inventory.
 ## WP10 alpha entry
 
 Launch the client without arguments. Use the arrow keys and Enter in the
-window title menu. **Controls** replays the introduction. Enter advances
+left sidebar. Esc toggles the sidebar at startup and opens or closes
+the pause menu during the rescue and flight. F1 toggles the performance
+panel at the top left. It shows observed presentation FPS, GC collection
+counts and heap size, and replaced or skipped frames. **Controls**
+replays the introduction. Enter advances
 each page and Esc skips it. In **Settings**, Left and Right edit the
 selected value. Reset stages the defaults, Apply saves them, and Cancel
 or Esc discards the draft.
