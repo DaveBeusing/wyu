@@ -74,6 +74,19 @@ internal static class GameHost
     internal static async Task RunAsync(HostMode mode, CancellationToken cancellationToken, string? saveDirectory = null,
         string? settingsDirectory = null)
     {
+        if (mode == HostMode.Prototype)
+            settingsDirectory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WorldsYetUnseen", "Alpha");
+        var flightDirectory = await RunStageAsync(mode, saveDirectory, settingsDirectory, false, cancellationToken)
+            .ConfigureAwait(false);
+        if (flightDirectory is not null && !cancellationToken.IsCancellationRequested)
+            await RunStageAsync(HostMode.Flight, flightDirectory, settingsDirectory, true, cancellationToken)
+                .ConfigureAwait(false);
+    }
+
+    private static async Task<string?> RunStageAsync(HostMode mode, string? saveDirectory,
+        string? settingsDirectory, bool alphaFlight, CancellationToken cancellationToken)
+    {
         var smokeClock = mode is HostMode.HeadlessSmoke or HostMode.FaultSmoke ? new SmokeClock() : null;
         TimeProvider clock = smokeClock ?? TimeProvider.System;
         var timing = new RuntimeTimingLimits(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
@@ -92,6 +105,7 @@ internal static class GameHost
         var settings = AlphaSettings.Defaults;
         FlightMission? flight = null;
         var startGame = true;
+        var launchFlight = false;
         WalkableScene? walkable = mode switch
         {
             HostMode.Walkable or HostMode.WalkableSmoke => new WalkableScene(runtime.RuntimeOwnership),
@@ -128,18 +142,21 @@ internal static class GameHost
                     runtime.UiWake, runtime.RuntimeOwnership);
                 await window.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
                 await window.StartAsync(cancellationToken).ConfigureAwait(false);
+                if (alphaFlight && settingsDirectory is not null)
+                    AlphaWindowSize.TryApply(new AlphaSettingsStore(settingsDirectory).Load().Value.Size);
                 if (mode == HostMode.Prototype)
                 {
                     var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                         "WorldsYetUnseen");
                     saveDirectory ??= Path.Combine(data, "WP07");
-                    settingsDirectory ??= Path.Combine(data, "Alpha");
                     new PrototypeCaption().Update("WYU | Checking save slot");
                     prototypeSave = await PrototypeSave.OpenAsync(saveDirectory, runtime.RuntimeOwnership, cancellationToken)
                         .ConfigureAwait(false);
-                    var startMenu = new AlphaStartMenu(window, prototypeSave, new AlphaSettingsStore(settingsDirectory));
+                    var startMenu = new AlphaStartMenu(window, prototypeSave, new AlphaSettingsStore(settingsDirectory!));
                     startGame = await startMenu.ChooseAsync(cancellationToken).ConfigureAwait(false);
                     settings = startMenu.Settings;
+                    launchFlight = startGame && prototypeSave.Checkpoint is { Progress.BeaconOnline: true };
+                    startGame &= !launchFlight;
                     if (startGame)
                     {
                         var checkpoint = prototypeSave.Checkpoint;
@@ -188,7 +205,9 @@ internal static class GameHost
                         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WorldsYetUnseen", "WP09"),
                         runtime.RuntimeOwnership, IsFlightSmoke(mode), mode == HostMode.FlightReloadSmoke, cancellationToken)
                         .ConfigureAwait(false);
-                success = await DriveAsync(mode, context, runtime, world, input, renderer, terrain, walkable, save,
+                if (alphaFlight)
+                    flight!.EnterAlpha();
+                (success, launchFlight) = await DriveAsync(mode, context, runtime, world, input, renderer, terrain, walkable, save,
                     prototypeSave, smokeClock, flight, settings, cancellationToken).ConfigureAwait(false);
             }
             stopReason = mode == HostMode.FaultSmoke ? HostStopReason.RuntimeFault : HostStopReason.ExternalCancellation;
@@ -226,9 +245,10 @@ internal static class GameHost
                 requireNvidia: mode == HostMode.PlanetSmoke || IsFlightSmoke(mode));
         if (success is not null)
             Console.WriteLine(success);
+        return launchFlight ? Path.Combine(saveDirectory!, $"flight-{prototypeSave!.Lineage:N}") : null;
     }
 
-    private static async Task<string?> DriveAsync(HostMode mode, EngineModuleContext context, RuntimeSafetyAuthority runtime,
+    private static async Task<(string? Success, bool LaunchFlight)> DriveAsync(HostMode mode, EngineModuleContext context, RuntimeSafetyAuthority runtime,
         EcsWorld world, IInputSource input, D3D12Renderer? renderer, TerrainScene? terrain,
         WalkableScene? walkable, WorldSave? save, PrototypeSave? prototypeSave, SmokeClock? smokeClock,
         FlightMission? flight, AlphaSettings settings, CancellationToken cancellationToken)
@@ -245,6 +265,9 @@ internal static class GameHost
             ? new PrototypeMouseLook(windowState, settings) : null;
         var yaw = 0f;
         var pitch = -0.20f;
+        var launchPending = false;
+        var launchFailed = false;
+        var launchFlight = false;
         ulong routeCompletionTick = 0;
         var pipeline = new WorldTickPipeline(world, injectedFault, terrain is not null,
             flight is not null ? AdvanceFlight : planet is not null ? AdvancePlanet : walkable is null ? null : AdvanceWalkable,
@@ -266,9 +289,14 @@ internal static class GameHost
                 // The coordinator lets an owned barrier settle before handling console cancellation.
                 var iteration = await simulation.AdvanceAsync(CancellationToken.None).ConfigureAwait(false);
                 if (iteration.State == SimulationState.Stopped || pipeline.CloseRequested || menu is { QuitRequested: true })
+                {
+                    launchFlight = false;
+                    break;
+                }
+                if (launchFlight)
                     break;
                 if (caption is not null)
-                    caption.Update(prototype!.Paused ? menu!.Caption : prototype.Caption);
+                    caption.Update(PrototypeStatus());
                 if (!nativeCloseSent && planet is not null)
                 {
                     var rendered = renderer!.Read();
@@ -338,7 +366,7 @@ internal static class GameHost
                 runtime.Diagnostics.ReadEmergency().Primary is not
                     { Classification: FaultClass.UnknownCritical, Subsystem: FaultSubsystem.Simulation, Context: { Tick: 2, Phase: TickPhase.Base } })
                 throw new InvalidOperationException("The controlled fault did not fence the runtime at the expected tick.", failure);
-            return "PASS: WYU controlled fault shutdown.";
+            return ("PASS: WYU controlled fault shutdown.", false);
         }
         finally
         {
@@ -355,14 +383,14 @@ internal static class GameHost
             worldConditions.HasFlag(SafetyCondition.TerminalStop) && !runtimeConditions.HasFlag(SafetyCondition.TerminalStop))
             throw new InvalidOperationException($"Groundwork stopped the world unexpectedly ({worldConditions}).");
         if (IsInteractive(mode))
-            return null;
+            return (null, launchFlight);
 
         cancellationToken.ThrowIfCancellationRequested();
         if (IsDesktopSmoke(mode))
         {
             if (!nativeCloseSent || !runtimeConditions.HasFlag(SafetyCondition.TerminalStop))
                 throw new InvalidOperationException("The D3D12 smoke did not present and observe native close.");
-            return mode switch
+            return (mode switch
             {
                 HostMode.TerrainSmoke => "PASS: WYU D3D12 terrain presentation and native shutdown.",
                 HostMode.WalkableSmoke => "PASS: WYU walkable route and native shutdown.",
@@ -371,13 +399,25 @@ internal static class GameHost
                 HostMode.FlightSmoke => "PASS: WYU WP09 flight mission and native shutdown.",
                 HostMode.FlightReloadSmoke => "PASS: WYU WP09 landing checkpoint reload and native shutdown.",
                 _ => "PASS: WYU D3D12 Windows startup and shutdown.",
-            };
+            }, false);
         }
 
         if (mode == HostMode.HeadlessSmoke && (pipeline.PublishedTick != 3 || !pipeline.CloseRequested) || mode == HostMode.FaultSmoke)
             throw new InvalidOperationException("The WYU smoke did not complete the expected input sequence.");
         VerifySmokePublication(world, pipeline, simulation);
-        return mode == HostMode.WindowSmoke ? "PASS: WYU Windows startup and shutdown." : "PASS: WYU headless startup and shutdown.";
+        return (mode == HostMode.WindowSmoke ? "PASS: WYU Windows startup and shutdown." : "PASS: WYU headless startup and shutdown.", false);
+
+        string PrototypeStatus()
+        {
+            if (prototype!.Paused)
+                return menu!.Caption;
+            if (!prototype.Progress.BeaconOnline)
+                return prototype.Caption;
+            if (launchPending || prototypeSave!.IsSaving)
+                return "WYU | Saving rescue checkpoint";
+            return launchFailed ? "WYU | Rescue save incomplete | Enter to retry"
+                : "WYU | Rescue beacon online | Enter for guided flight | Esc pause";
+        }
 
         void AdvancePlanet(TickContext tick) =>
             planet!.Tick(tick, renderer!.Read().Surface == RenderSurfaceState.Drawable);
@@ -445,7 +485,24 @@ internal static class GameHost
             if (menu is not null)
             {
                 prototypeSave!.Advance();
-                menu.Handle(input, prototype, new PrototypeCheckpoint(walkable.Pose, prototype.Progress));
+                var checkpoint = new PrototypeCheckpoint(walkable.Pose, prototype.Progress);
+                if (launchPending && !prototypeSave.IsSaving)
+                {
+                    launchPending = false;
+                    launchFlight = prototypeSave.Checkpoint is { Progress.BeaconOnline: true };
+                    launchFailed = !launchFlight;
+                }
+                if (!prototype.Paused && prototype.Progress.BeaconOnline && !prototypeSave.IsSaving &&
+                    PrototypeMenu.Pressed(input, InputControl.Enter))
+                {
+                    launchFlight = prototypeSave.Checkpoint is { Progress.BeaconOnline: true };
+                    if (!launchFlight)
+                    {
+                        launchPending = prototype.Ready && prototypeSave.RequestSave(checkpoint);
+                        launchFailed = !launchPending;
+                    }
+                }
+                menu.Handle(input, prototype, checkpoint);
             }
             if (prototypeRoute is { Completed: true } && routeCompletionTick == 0)
                 routeCompletionTick = tick.Tick;

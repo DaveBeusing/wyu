@@ -27,6 +27,7 @@ internal sealed class FlightMission : IDisposable
     private bool _startRequested;
     private bool _departureSaved;
     private bool _landingSaved;
+    private bool _alpha;
     private double _orbitAngle;
     private double _lastAngle;
     private double _minimumCoastRadius = double.PositiveInfinity;
@@ -54,6 +55,20 @@ internal sealed class FlightMission : IDisposable
             throw new InvalidOperationException($"Unexpected planetary slot state ({result.Status}).", result.Error);
 
         return new(new FlightLandingSite(result.Checkpoint), slot, ownership, scripted, reload);
+    }
+
+    internal void EnterAlpha()
+    {
+        if (_site.Generation > 2)
+            throw new InvalidDataException("Unexpected WP10 flight checkpoint generation.");
+        _alpha = true;
+        _departureSaved = _site.Generation >= 1;
+        _landingSaved = _site.Generation == 2;
+        if (_landingSaved)
+        {
+            _phase = FlightPhase.Landed;
+            Console.WriteLine($"WP10 restored landing generation={_site.Generation} {FlightLandingSite.Describe(_state)} edits={_site.EditDigest()}");
+        }
     }
 
     internal void Tick(TickContext tick, bool drawable)
@@ -105,8 +120,7 @@ internal sealed class FlightMission : IDisposable
         var finished = _reload || _phase == FlightPhase.Landed;
         _terrain.Present(renderer, _state.Position, tick, _missionTick, _scripted, finished);
         if (!_scripted)
-            _caption.Update($"WYU WP09 | {_phase} | Altitude {Length(_state.Position) - FlightLandingSite.Radius:F1} m | " +
-                (_phase == FlightPhase.Ready ? "Space to begin guided flight · Esc to exit" : "Guided flight · Esc to exit"));
+            UpdateCaption(snapshot);
 
         if (!_terrain.Ready)
             return false;
@@ -134,6 +148,23 @@ internal sealed class FlightMission : IDisposable
             Console.WriteLine($"WP09 readiness holds={_holds} peakPatches={_terrain.PeakPatches} finalFrame={snapshot.LastPresentedSequence}");
         }
         return _scripted;
+    }
+
+    private void UpdateCaption(RendererSnapshot snapshot)
+    {
+        if (_alpha && _landingSaved)
+        {
+            _caption.Update(_terrain.FinalPresented(snapshot) ? "WYU | Mission complete | Landing saved | Esc to exit"
+                : "WYU | Restoring the landing view");
+            return;
+        }
+
+        var hint = _phase == FlightPhase.Ready
+            ? _alpha ? "Space to launch · Follow the amber pad on approach · Esc to exit"
+                : "Space to begin guided flight · Esc to exit"
+            : _alpha && _phase == FlightPhase.Landed ? "Saving landing checkpoint" : "Guided flight · Esc to exit";
+        _caption.Update($"WYU {(_alpha ? "WP10" : "WP09")} | {_phase} | " +
+            $"Altitude {Length(_state.Position) - FlightLandingSite.Radius:F1} m | {hint}");
     }
 
     public void Dispose()
@@ -201,7 +232,7 @@ internal sealed class FlightMission : IDisposable
     private void Enter(FlightPhase phase)
     {
         _phase = phase;
-        if (_scripted)
+        if (_scripted || _alpha)
             Console.WriteLine($"WP09 checkpoint phase={phase} mission={_missionTick} origin={_terrain.Stamp.Frame.Revision} " +
                 $"generation={_terrain.Stamp.Generation} {FlightLandingSite.Describe(_state)}");
     }
