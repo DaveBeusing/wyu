@@ -141,7 +141,7 @@ Jede Stufe soll **neue Handlungs- und Konstruktionsmöglichkeiten** freischalten
 - **WYU** verantwortet Spielregeln, Inhalte, Lore, Balancing, spezifische Bau- und Progressionsmechaniken.
 - **Groundwork** liefert generische, unabhängig wiederverwendbare Engine-Funktionen; keine WYU-spezifische Lore in Engine-Verträge übernehmen.
 - Bereits vorhandene technische Prototypen, Fenster, Szenen oder Terrain-Funktionen sind **nicht automatisch die vollständige Implementierung dieses Designkonzepts**.
-- Designgrundsätze aus diesem Dokument sollen künftige Arbeitspakete und die Fortschreibung der [technischen Roadmap](Roadmap.html) informieren; sie ersetzen keine Architekturentscheidungen oder testbaren Anforderungen.
+- Designgrundsätze aus diesem Dokument sollen künftige Arbeitspakete und die Fortschreibung der [technischen Roadmap](https://github.com/DaveBeusing/Groundwork/blob/master/docs/roadmap.md) informieren; sie ersetzen keine Architekturentscheidungen oder testbaren Anforderungen.
 
 ## 11. Absichtlich offene Fragen
 
