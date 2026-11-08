@@ -4,6 +4,7 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Read-AlphaOverlay.ps1')
 if (![Environment]::UserInteractive) { throw 'Use an interactive Windows desktop.' }
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -67,7 +68,7 @@ try {
         Start-Sleep -Milliseconds 150
         $client.Refresh()
         if ($client.HasExited -or $clock.Elapsed.TotalSeconds -ge 30) { throw 'Start menu entry did not open the app.' }
-    } until ($client.MainWindowTitle -like 'WYU | * | Arrows / Enter')
+    } until ((Read-AlphaOverlay $client) -like 'WYU | * | Arrows / Enter')
     $coreclr = @($client.Modules | Where-Object ModuleName -eq 'coreclr.dll')
     if ($coreclr.Count -ne 1 -or $coreclr[0].FileName -ine (Join-Path $app 'coreclr.dll')) {
         throw 'Start menu launch did not use the bundled .NET runtime.'

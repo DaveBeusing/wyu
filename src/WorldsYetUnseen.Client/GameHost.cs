@@ -102,6 +102,8 @@ internal static class GameHost
         TerrainScene? terrain = IsTerrain(mode) ? new TerrainScene() : null;
         WorldSave? save = null;
         PrototypeSave? prototypeSave = null;
+        AlphaOverlay? overlay = null;
+        AlphaPerformance? performance = null;
         var settings = AlphaSettings.Defaults;
         FlightMission? flight = null;
         var startGame = true;
@@ -148,6 +150,11 @@ internal static class GameHost
                 await window.StartAsync(cancellationToken).ConfigureAwait(false);
                 if (IsInteractive(mode))
                     watchClose = WatchWindowCloseAsync(window, stageCancellation);
+                if (mode == HostMode.Prototype || alphaFlight)
+                {
+                    overlay = new AlphaOverlay();
+                    performance = new AlphaPerformance(overlay);
+                }
                 if (alphaFlight && settingsDirectory is not null)
                     AlphaWindowSize.TryApply(new AlphaSettingsStore(settingsDirectory).Load().Value.Size);
                 if (mode == HostMode.Prototype)
@@ -160,9 +167,12 @@ internal static class GameHost
                     prototypeSave = await PrototypeSave.OpenAsync(saveDirectory, runtime.RuntimeOwnership, cancellationToken,
                             beforeLoad: alphaDiagnostics?.BeforeSaveLoad)
                         .ConfigureAwait(false);
+                    new PrototypeCaption().Update("Worlds Yet Unseen");
                     alphaDiagnostics?.Enter("StartMenu");
-                    var startMenu = new AlphaStartMenu(window, prototypeSave, new AlphaSettingsStore(settingsDirectory!));
+                    var startMenu = new AlphaStartMenu(window, prototypeSave, new AlphaSettingsStore(settingsDirectory!),
+                        overlay!, performance!);
                     startGame = await startMenu.ChooseAsync(cancellationToken).ConfigureAwait(false);
+                    overlay!.Menu = null;
                     settings = startMenu.Settings;
                     launchFlight = startGame && prototypeSave.Checkpoint is { Progress.BeaconOnline: true };
                     startGame &= !launchFlight;
@@ -224,7 +234,7 @@ internal static class GameHost
                 if (alphaFlight)
                     flight!.EnterAlpha(alphaDiagnostics);
                 (success, launchFlight) = await DriveAsync(mode, context, runtime, world, input, renderer, terrain, walkable, save,
-                    prototypeSave, smokeClock, flight, settings, hostCancellation).ConfigureAwait(false);
+                    prototypeSave, smokeClock, flight, settings, overlay, performance, hostCancellation).ConfigureAwait(false);
             }
             stopReason = mode == HostMode.FaultSmoke ? HostStopReason.RuntimeFault : HostStopReason.ExternalCancellation;
         }
@@ -240,6 +250,7 @@ internal static class GameHost
         }
         finally
         {
+            overlay?.Dispose();
             await stageCancellation.CancelAsync().ConfigureAwait(false);
             if (await watchClose.ConfigureAwait(false) ||
                 window?.Read().Phase is HostWindowPhase.Closing or HostWindowPhase.Closed)
@@ -299,7 +310,8 @@ internal static class GameHost
     private static async Task<(string? Success, bool LaunchFlight)> DriveAsync(HostMode mode, EngineModuleContext context, RuntimeSafetyAuthority runtime,
         EcsWorld world, IInputSource input, D3D12Renderer? renderer, TerrainScene? terrain,
         WalkableScene? walkable, WorldSave? save, PrototypeSave? prototypeSave, SmokeClock? smokeClock,
-        FlightMission? flight, AlphaSettings settings, CancellationToken cancellationToken)
+        FlightMission? flight, AlphaSettings settings, AlphaOverlay? overlay, AlphaPerformance? performance,
+        CancellationToken cancellationToken)
     {
         var injectedFault = mode == HostMode.FaultSmoke ? new InvalidOperationException("Controlled tick failure.") : null;
         var route = mode == HostMode.WalkableSmoke ? new WalkableRouteSmoke() : null;
@@ -316,10 +328,13 @@ internal static class GameHost
         var launchPending = false;
         var launchFailed = false;
         var launchFlight = false;
+        var flightPaused = false;
+        var flightExitSelected = false;
+        var flightExitRequested = false;
         ulong routeCompletionTick = 0;
         var pipeline = new WorldTickPipeline(world, injectedFault, terrain is not null,
             flight is not null ? AdvanceFlight : planet is not null ? AdvancePlanet : walkable is null ? null : AdvanceWalkable,
-            escapeCloses: prototype is null);
+            escapeCloses: prototype is null && overlay is null);
         var simulation = new FixedStepSimulation(context, input, pipeline, world.Safety.State, runtime.SimulationWake);
         var scene = renderer is null || planet is not null || flight is not null ? null : new SceneSubmission(renderer, terrain is not null,
             walkable is null ? null : () => walkable.GetScene(route?.CameraYaw ?? yaw, prototype is null ? null : pitch));
@@ -336,7 +351,8 @@ internal static class GameHost
             {
                 // The coordinator lets an owned barrier settle before handling console cancellation.
                 var iteration = await simulation.AdvanceAsync(CancellationToken.None).ConfigureAwait(false);
-                if (iteration.State == SimulationState.Stopped || pipeline.CloseRequested || menu is { QuitRequested: true })
+                if (iteration.State == SimulationState.Stopped || pipeline.CloseRequested ||
+                    menu is { QuitRequested: true } || flightExitRequested)
                 {
                     launchFlight = false;
                     break;
@@ -344,7 +360,11 @@ internal static class GameHost
                 if (launchFlight)
                     break;
                 if (caption is not null)
+                {
                     caption.Update(PrototypeStatus());
+                    overlay!.Menu = prototype!.Paused ? menu!.Caption : null;
+                }
+                performance?.Update(renderer?.Read());
                 if (!nativeCloseSent && planet is not null)
                 {
                     var rendered = renderer!.Read();
@@ -458,7 +478,7 @@ internal static class GameHost
         string PrototypeStatus()
         {
             if (prototype!.Paused)
-                return menu!.Caption;
+                return "Worlds Yet Unseen";
             if (!prototype.Progress.BeaconOnline)
                 return prototype.Caption;
             if (launchPending || prototypeSave!.IsSaving)
@@ -470,8 +490,36 @@ internal static class GameHost
         void AdvancePlanet(TickContext tick) =>
             planet!.Tick(tick, renderer!.Read().Surface == RenderSurfaceState.Drawable);
 
-        void AdvanceFlight(TickContext tick) =>
+        void AdvanceFlight(TickContext tick)
+        {
+            if (overlay is not null)
+            {
+                performance!.Handle(tick.Input);
+                if (PrototypeMenu.Pressed(tick.Input, InputControl.Escape))
+                {
+                    flightPaused = !flightPaused;
+                    flightExitSelected = false;
+                }
+                else if (flightPaused)
+                {
+                    if (PrototypeMenu.Pressed(tick.Input, InputControl.Up) ||
+                        PrototypeMenu.Pressed(tick.Input, InputControl.Down))
+                        flightExitSelected = !flightExitSelected;
+                    if (PrototypeMenu.Pressed(tick.Input, InputControl.Enter))
+                    {
+                        flightExitRequested = flightExitSelected;
+                        flightPaused = false;
+                    }
+                }
+                overlay.Menu = flightPaused
+                    ? flightExitSelected ? "WYU paused | Resume | > Exit | Esc resume"
+                        : "WYU paused | > Resume | Exit | Esc resume"
+                    : null;
+                if (flightPaused || flightExitRequested)
+                    return;
+            }
             flight!.Tick(tick, renderer!.Read().Surface == RenderSurfaceState.Drawable);
+        }
 
         void AdvanceWalkable(TickContext tick)
         {
@@ -504,6 +552,7 @@ internal static class GameHost
         void AdvancePrototype(TickContext tick, bool drawable)
         {
             var input = tick.Input;
+            performance?.Handle(input);
             var x = 0;
             var z = 0;
             var interact = false;

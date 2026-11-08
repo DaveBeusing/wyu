@@ -5,7 +5,8 @@ using static WorldsYetUnseen.Client.PrototypeMenu;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave save, AlphaSettingsStore store)
+internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave save, AlphaSettingsStore store,
+    AlphaOverlay overlay, AlphaPerformance performance)
 {
     private static readonly string[] Guidance =
     [
@@ -15,7 +16,6 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
         "Esc opens Pause. Select Save to keep progress. Continue resumes it from this menu."
     ];
 
-    private readonly PrototypeCaption _caption = new();
     private string? _notice;
     internal AlphaSettings Settings { get; private set; } = AlphaSettings.Defaults;
 
@@ -32,13 +32,21 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
         var canStart = save.InitialLoad.Status == SaveSlotStatus.Empty;
         var canContinue = save.Checkpoint is not null;
         var selected = canStart ? 0 : canContinue ? 1 : 2;
+        var visible = true;
         while (IsOpen)
         {
-            _caption.Update($"WYU | {Option(0, "Start test mission", canStart)} | {Option(1, "Continue", canContinue)} | " +
-                $"{Option(2, "Settings")} | {Option(3, "Controls")} | {Option(4, "Exit")} | {_notice ?? SlotStatus()} | Arrows / Enter");
+            overlay.Menu = visible
+                ? $"WYU | {Option(0, "Start test mission", canStart)} | {Option(1, "Continue", canContinue)} | " +
+                  $"{Option(2, "Settings")} | {Option(3, "Controls")} | {Option(4, "Exit")} | {_notice ?? SlotStatus()} | Arrows / Enter"
+                : null;
             var input = await ReadAsync(cancellationToken).ConfigureAwait(false);
             if (Pressed(input, InputControl.Escape))
-                return false;
+            {
+                visible = !visible;
+                continue;
+            }
+            if (!visible)
+                continue;
             selected = Navigate(input, selected, 5);
             if (!Pressed(input, InputControl.Enter))
                 continue;
@@ -78,14 +86,17 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
     private async Task<InputSnapshot> ReadAsync(CancellationToken cancellationToken)
     {
         await Task.Delay(16, cancellationToken).ConfigureAwait(false);
-        return window.Capture();
+        var input = window.Capture();
+        performance.Handle(input);
+        performance.Update(null);
+        return input;
     }
 
     private async Task ShowGuidanceAsync(CancellationToken cancellationToken)
     {
         for (var page = 0; IsOpen && page < Guidance.Length;)
         {
-            _caption.Update($"WYU | Controls {page + 1}/{Guidance.Length} | {Guidance[page]} | Enter next / Esc skip");
+            overlay.Menu = $"WYU | Controls {page + 1}/{Guidance.Length} | {Guidance[page]} | Enter next / Esc skip";
             var input = await ReadAsync(cancellationToken).ConfigureAwait(false);
             if (Pressed(input, InputControl.Escape))
                 return;
@@ -108,7 +119,7 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
                 "Apply", "Cancel", "Reset"
             ];
             labels[row] = "> " + labels[row];
-            _caption.Update($"WYU Settings | {string.Join(" | ", labels)} | {error ?? "Arrows edit / Enter / Esc"}");
+            overlay.Menu = $"WYU Settings | {string.Join(" | ", labels)} | {error ?? "Arrows edit / Enter / Esc"}";
             var input = await ReadAsync(cancellationToken).ConfigureAwait(false);
             if (Pressed(input, InputControl.Escape))
                 return;

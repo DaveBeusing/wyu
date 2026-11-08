@@ -158,15 +158,16 @@ internal sealed class FlightMission : IDisposable
     {
         if (_alpha && _landingSaved)
         {
-            _caption.Update(_terrain.FinalPresented(snapshot) ? "WYU | Mission complete | Landing saved | Esc to exit"
+            _caption.Update(_terrain.FinalPresented(snapshot) ? "WYU | Mission complete | Landing saved | Esc menu"
                 : "WYU | Restoring the landing view");
             return;
         }
 
         var hint = _phase == FlightPhase.Ready
-            ? _alpha ? "Space to launch · Follow the amber pad on approach · Esc to exit"
+            ? _alpha ? "Space to launch · Follow the amber pad on approach · Esc menu"
                 : "Space to begin guided flight · Esc to exit"
-            : _alpha && _phase == FlightPhase.Landed ? "Saving landing checkpoint" : "Guided flight · Esc to exit";
+            : _alpha && _phase == FlightPhase.Landed ? "Saving landing checkpoint"
+                : _alpha ? "Guided flight · Esc menu" : "Guided flight · Esc to exit";
         _caption.Update($"WYU {(_alpha ? "WP10" : "WP09")} | {_phase} | " +
             $"Altitude {Length(_state.Position) - FlightLandingSite.Radius:F1} m | {hint}");
     }

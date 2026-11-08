@@ -5,6 +5,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Read-AlphaOverlay.ps1')
 $clientPath = (Resolve-Path -LiteralPath $Client).Path
 $fixture = New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) "wyu-alpha-$([guid]::NewGuid().ToString('N'))")
 $slot = Join-Path $fixture.FullName 'slot'
@@ -29,7 +30,7 @@ function Wait-Title([string]$Pattern) {
     do {
         $process.Refresh()
         if ($process.HasExited) { throw "Client exited with code $($process.ExitCode) waiting for '$Pattern'." }
-        if ($process.MainWindowTitle -like $Pattern) { return }
+        if ((Read-AlphaOverlay $process) -like $Pattern -or $process.MainWindowTitle -like $Pattern) { return }
         Start-Sleep -Milliseconds 50
     } while ($clock.Elapsed.TotalSeconds -lt 30)
     throw "Expected '$Pattern', saw '$($process.MainWindowTitle)'."
@@ -52,14 +53,26 @@ function Get-ClientWidth {
 }
 
 function Stop-Client {
-    Send-Key 27
-    if (!$process.WaitForExit(20000) -or $process.ExitCode -ne 0) { throw 'Client did not exit cleanly.' }
+    if (!$process.CloseMainWindow() -or !$process.WaitForExit(20000) -or $process.ExitCode -ne 0) {
+        throw 'Client did not exit cleanly.'
+    }
 }
 
 try {
     $arguments = @('--prototype', "`"$slot`"", "`"$settings`"")
     $process = Start-Process -FilePath $clientPath -ArgumentList $arguments -PassThru
     Wait-Title '*Start test mission*Empty slot*'
+    if ($process.MainWindowTitle -like '*Start test mission*') { throw 'Menu leaked into the title bar.' }
+    Send-Key 27
+    if (Read-AlphaOverlay $process) { throw 'Escape did not hide the sidebar.' }
+    Send-Key 27
+    Wait-Title '*Start test mission*Empty slot*'
+    Send-Key 112
+    if ((Read-AlphaOverlay $process 'performance') -notlike '*FPS (observed)*GC collections*') {
+        throw 'F1 did not show the FPS and GC overlay.'
+    }
+    Send-Key 112
+    if (Read-AlphaOverlay $process 'performance') { throw 'F1 did not hide the performance overlay.' }
     if ((Get-ClientWidth) -ne 960) { throw "Unexpected default client width $(Get-ClientWidth)." }
     Send-Key 40
     Send-Key 40
@@ -148,10 +161,25 @@ try {
     Wait-Title 'Rescue beacon | Stone * | *Esc pause'
     Send-Key 27
     Wait-Title 'WYU paused*'
+    Send-Key 27
+    Wait-Title 'Rescue beacon | Stone * | *Esc pause'
+    if (Read-AlphaOverlay $process) { throw 'Escape did not close the pause sidebar.' }
+    Send-Key 112
+    $sampleClock = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $process.Refresh()
+        $metrics = Read-AlphaOverlay $process 'performance'
+        if ($metrics -match 'FPS \(observed\): [1-9]\d*[.,]\d') { break }
+        Start-Sleep -Milliseconds 100
+    } while ($sampleClock.Elapsed.TotalSeconds -lt 10)
+    if ($metrics -notmatch 'FPS \(observed\): [1-9]\d*[.,]\d') { throw "No live FPS sample: $metrics" }
+    Send-Key 112
+    if (Read-AlphaOverlay $process 'performance') { throw 'F1 did not hide the in-game metrics.' }
     if (!$process.CloseMainWindow() -or !$process.WaitForExit(20000) -or $process.ExitCode -ne 0) {
         throw 'Client did not exit cleanly from the paused mission.'
     }
     Write-Host 'PASS: Skipping first-run guidance opened the rescue mission and the pause menu worked.'
+    Write-Host 'PASS: ESC sidebar and F1 performance toggles worked, with a live FPS sample in the rescue scene.'
 }
 finally {
     if ($null -ne $process -and !$process.HasExited) {

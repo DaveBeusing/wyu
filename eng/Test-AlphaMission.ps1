@@ -2,6 +2,7 @@ param([Parameter(Mandatory)][string]$Client)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Read-AlphaOverlay.ps1')
 $clientPath = (Resolve-Path -LiteralPath $Client).Path
 $id = [guid]::NewGuid().ToString('N')
 $work = Join-Path ([IO.Path]::GetTempPath()) "wyu-mission-$id"
@@ -32,7 +33,7 @@ function Wait-Title([string]$Pattern, [int]$Seconds = 30) {
     do {
         $process.Refresh()
         if ($process.HasExited) { throw "Client exited with code $($process.ExitCode) waiting for '$Pattern'." }
-        if ($process.MainWindowTitle -like $Pattern) { return }
+        if ((Read-AlphaOverlay $process) -like $Pattern -or $process.MainWindowTitle -like $Pattern) { return }
         Start-Sleep -Milliseconds 10
     } while ($clock.Elapsed.TotalSeconds -lt $Seconds)
     throw "Expected '$Pattern', saw '$($process.MainWindowTitle)'."
@@ -58,6 +59,14 @@ function Wait-Exit {
     if (!$process.WaitForExit(20000) -or $process.ExitCode -ne 0) {
         throw "Client did not exit cleanly. Inspect logs in $work."
     }
+}
+
+function Exit-Flight {
+    Send-Key 27
+    Wait-Title 'WYU paused*'
+    Send-Key 40
+    Send-Key 13
+    Wait-Exit
 }
 
 try {
@@ -91,11 +100,13 @@ try {
     Wait-Title '*Rescue beacon online*Enter for guided flight*'
     Send-Key 13
     Wait-Title 'WYU WP10 | Ready*Space to launch*'
+    Send-Key 27
+    Wait-Title 'WYU paused*'
+    Send-Key 27
     Send-Key 32
     Wait-Title 'WYU WP10 | Orbit*' 45
     Wait-Title '*Mission complete*Landing saved*' 130
-    Send-Key 27
-    Wait-Exit
+    Exit-Flight
 
     $flightDir = @(Get-ChildItem -LiteralPath $slot -Directory -Filter 'flight-*')
     if ($flightDir.Count -ne 1) { throw 'Expected exactly one flight domain linked to the rescue save.' }
@@ -107,8 +118,7 @@ try {
     Wait-Title '*Mission complete*Landing saved*'
     Send-Key 32
     Wait-Title '*Mission complete*Landing saved*'
-    Send-Key 27
-    Wait-Exit
+    Exit-Flight
     $after = @(Get-ChildItem -LiteralPath $flightDir[0].FullName -File | Sort-Object Name | Get-FileHash |
         ForEach-Object Hash)
     $missionLog = @(Get-Content -LiteralPath (Join-Path $work 'mission.out'))
