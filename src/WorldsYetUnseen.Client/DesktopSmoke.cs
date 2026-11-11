@@ -38,7 +38,13 @@ internal static partial class DesktopSmoke
         using var process = Process.GetCurrentProcess();
         if (process.MainWindowHandle != IntPtr.Zero)
             throw new InvalidOperationException("The WYU smoke process still owns a main window.");
+        VerifyAdapterSettlement(renderer, requireDebugLayer, requireNvidia, useWarp);
+        Console.WriteLine("D3D12 renderer stopped; native window closed; Core resources released.");
+    }
 
+    internal static void VerifyAdapterSettlement(D3D12Renderer renderer, bool requireDebugLayer, bool requireNvidia,
+        bool useWarp)
+    {
         var diagnostics = renderer.ReadDiagnostics();
         if (diagnostics.Adapter is not { } adapter || adapter.IsSoftware != useWarp || diagnostics.DeviceRemoval is not null)
             throw new InvalidOperationException("The D3D12 smoke did not settle the requested adapter.");
@@ -61,6 +67,5 @@ internal static partial class DesktopSmoke
                 throw new InvalidOperationException("The active D3D12 debug layer did not report clean device settlement.");
         }
 
-        Console.WriteLine("D3D12 renderer stopped; native window closed; Core resources released.");
     }
 }
