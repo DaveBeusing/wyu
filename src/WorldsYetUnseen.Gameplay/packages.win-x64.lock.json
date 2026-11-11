@@ -1,7 +1,22 @@
 {
   "version": 1,
   "dependencies": {
-    "net10.0": {},
+    "net10.0": {
+      "Groundwork.Voxels": {
+        "type": "Direct",
+        "requested": "[0.1.0-dev.43032545158.1, 0.1.0-dev.43032545158.1]",
+        "resolved": "0.1.0-dev.43032545158.1",
+        "contentHash": "FEC9yV7qROnN7mB/+yvPJG3R8MIb24/vxC1NrkV906wXUPREibo3Iv5+x/ekAfaeaQsXoGRIDwrrVLtCG/oc3w==",
+        "dependencies": {
+          "Groundwork.Core": "0.1.0-dev.43032545158.1"
+        }
+      },
+      "Groundwork.Core": {
+        "type": "Transitive",
+        "resolved": "0.1.0-dev.43032545158.1",
+        "contentHash": "L27rh0tiNS2dzH9B3V5yDRdAyr8btMDZEYqz/4o6mDXlKEyQhHKfMsmgPbcilJoM8mSjZ/oAI0ouMx2C5P41ig=="
+      }
+    },
     "net10.0/win-x64": {}
   }
 }
