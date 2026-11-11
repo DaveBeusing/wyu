@@ -97,14 +97,17 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         throw new InvalidOperationException("The seed has no collision-verified spawn.");
     }
 
-    internal async Task ExploreAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, bool scripted,
+    internal async Task ExploreAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost, bool scripted,
         CancellationToken token)
     {
-        var state = await OpenTerrainAsync(terrain, renderer, token).ConfigureAwait(false);
+        var state = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
+        if (slot?.Checkpoint is { } checkpoint && ProceduralLanding.Read(checkpoint, out var landed) == SaveGameValidation.Valid &&
+            landed is { } restored)
+            await ConfirmRestoredLandingAsync(terrain, renderHost.Active, state, restored, token).ConfigureAwait(false);
         if (slot?.ReadOnly == true)
             Notice("Recovered checkpoint opened read-only.");
         else if (slot is not null)
-            Notice("E remove | Q add | 1/2 material\nF5 save | F10 save and quit");
+            Notice("E remove | Q add | 1/2 material\nF5 save | F6 flight | F10 save and quit");
         var start = state.Position;
         var startBrick = planet.Descriptor.SampleAt(start).Vertex.Locate().Brick;
         var nextBrick = startBrick with { Z = startBrick.Z + 1 };
@@ -121,6 +124,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         while (await cadence.WaitForNextTickAsync(token).ConfigureAwait(false))
         {
             var input = window.Capture();
+            var renderer = renderHost.Active;
             if (!scripted && PrototypeMenu.Pressed(input, InputControl.Escape))
                 return;
             if (PrototypeMenu.Pressed(input, InputControl.F1))
@@ -150,6 +154,15 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             {
                 if (_quitAfterSave)
                     return;
+                continue;
+            }
+            if (!scripted && PrototypeMenu.Pressed(input, InputControl.F6))
+            {
+                mouse?.Update(false, ref _yaw, ref _pitch);
+                var result = await FlyAsync(terrain, renderHost, state, null, false, token).ConfigureAwait(false);
+                if (result.Quit)
+                    return;
+                state = result.Player;
                 continue;
             }
 
@@ -204,7 +217,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
 
     private async Task<bool> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
-        PlanetVector? coverageCenter = null)
+        PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null)
     {
         // Spawn search and candidate fallback share the same monotonic origin sequence as movement.
         if (frame.Revision <= terrain.View.Frame.Revision)
@@ -213,7 +226,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             if (!prior.TryRebase(position, out frame))
                 frame = prior;
         }
-        var view = terrain.ChangeView(frame, 1);
+        var view = terrain.ChangeView(frame, terrain.View.RendererEpoch);
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement remained open across a terrain view change.");
         var mask = ++_sequence;
@@ -272,7 +285,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             _transitions = CountTransitions(lease);
         }
         var sequence = ++_sequence;
-        RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, Camera(view, position, heading)));
+        var camera = flightCamera is { } craft ? FlightCamera(view, craft, heading) : Camera(view, position, heading);
+        RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, camera));
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
             pauseWhileMinimized: true).ConfigureAwait(false);
         if (!terrain.Statistics.MovementHeld)

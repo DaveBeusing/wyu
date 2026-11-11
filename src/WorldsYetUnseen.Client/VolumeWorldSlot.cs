@@ -102,11 +102,8 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
                 }
             }
 
-            var admitted = _writer.TryAdmit(cut, 1, static (_, buffer) =>
-            {
-                "WYUVOL01"u8.CopyTo(buffer.Span);
-                return 8;
-            });
+            var admitted = _writer.TryAdmit(cut, 1, static (root, buffer) => ProceduralLanding.Write(
+                (root.State as GameHost.ExplorationRoot)?.Landing, root.Player, root.Terrain.TerrainRevision, buffer.Span));
             if (admitted != VolumeCaptureAdmission.Accepted)
                 return new(admitted switch
                 {
@@ -139,9 +136,7 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
     internal static bool SupportsMaterial(ushort material) =>
         material is (ushort)ReferenceTerrainMaterial.Basalt or (ushort)ReferenceTerrainMaterial.OchreStone;
 
-    private static SaveGameValidation Validate(VolumeCheckpoint checkpoint) =>
-        !checkpoint.Game.SequenceEqual("WYUVOL01"u8) ? SaveGameValidation.Unsupported :
-        checkpoint.Player is null ? SaveGameValidation.Malformed : SaveGameValidation.Valid;
+    private static SaveGameValidation Validate(VolumeCheckpoint checkpoint) => ProceduralLanding.Read(checkpoint, out _);
 
     private static string ManifestPath(string root, Guid id) => Path.Combine(root, $"{id:N}.wyu");
 }

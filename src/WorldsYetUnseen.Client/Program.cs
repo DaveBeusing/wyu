@@ -7,7 +7,8 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         if (args is ["--new-world"] || args is ["--volume-smoke", _, "warp" or "hardware"] ||
-            args is ["--volume-save-smoke", "init" or "restore" or "interrupt" or "verify" or "protected", _])
+            args is ["--volume-save-smoke", "init" or "restore" or "interrupt" or "verify" or "protected", _] ||
+            args is ["--volume-flight-smoke", "flight" or "resume" or "abort" or "preflight", _, "warp" or "hardware"])
             return await RunExplorationAsync(args).ConfigureAwait(false);
 
         string? diagnosticCase = null;
@@ -98,9 +99,10 @@ internal static class Program
     private static async Task<int> RunExplorationAsync(string[] args)
     {
         var saveSmoke = args[0] == "--volume-save-smoke";
-        var scripted = args.Length == 3;
+        var flightSmoke = args[0] == "--volume-flight-smoke";
+        var scripted = args.Length >= 3;
         ulong? seed = null;
-        if (scripted && !saveSmoke)
+        if (scripted && !saveSmoke && !flightSmoke)
         {
             if (!ulong.TryParse(args[1], NumberStyles.None, CultureInfo.InvariantCulture, out var parsed))
             {
@@ -123,8 +125,10 @@ internal static class Program
                 GameHost.VerifyProtectedVolumeSmokeSlot(args[2]);
                 return 0;
             }
-            await GameHost.RunExplorationAsync(seed, saveSmoke || scripted && args[2] == "warp", diagnostics, stop.Token,
-                saveRoot: saveSmoke ? args[2] : null, saveSmoke: saveSmoke ? args[1] : null)
+            var warp = saveSmoke || scripted && args[^1] == "warp";
+            await GameHost.RunExplorationAsync(seed, warp, diagnostics, stop.Token,
+                saveRoot: saveSmoke || flightSmoke ? args[2] : null,
+                saveSmoke: saveSmoke || flightSmoke ? args[1] : null, flightSmoke: flightSmoke)
                 .ConfigureAwait(false);
             return 0;
         }

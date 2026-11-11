@@ -1,6 +1,7 @@
 using Groundwork.Core;
 using Groundwork.Diagnostics;
 using Groundwork.Ecs;
+using Groundwork.Persistence;
 using Groundwork.Platform.Windows;
 using Groundwork.Rendering.D3D12;
 using Groundwork.Voxels;
@@ -13,7 +14,7 @@ internal static partial class GameHost
 {
     internal static async Task RunExplorationAsync(ulong? smokeSeed, bool useWarp, AlphaDiagnostics? diagnostics,
         CancellationToken cancellationToken, string? settingsDirectory = null,
-        string? saveRoot = null, string? saveSmoke = null)
+        string? saveRoot = null, string? saveSmoke = null, bool flightSmoke = false)
     {
         var clock = TimeProvider.System;
         var timeout = TimeSpan.FromSeconds(10);
@@ -31,6 +32,7 @@ internal static partial class GameHost
         var token = stage.Token;
         Task<bool> watchClose = Task.FromResult(false);
         D3D12Renderer? renderer = null;
+        var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota);
         VolumeStreamingCoordinator? terrain = null;
         AlphaOverlay? overlay = null;
         PrototypeMouseLook? mouse = null;
@@ -52,7 +54,8 @@ internal static partial class GameHost
             if (!scripted)
                 slot = await ChooseVolumeSlotAsync(window, overlay!, saveRoot ?? DefaultVolumeRoot(), token).ConfigureAwait(false);
             else if (saveSmoke is not null)
-                slot = await OpenVolumeSmokeSlotAsync(saveRoot!, saveSmoke, token).ConfigureAwait(false);
+                slot = await OpenVolumeSmokeSlotAsync(saveRoot!, saveSmoke is "flight" or "abort" ? "init" : saveSmoke, token)
+                    .ConfigureAwait(false);
             if (!scripted && slot is null)
             {
                 reason = HostStopReason.ExternalCancellation;
@@ -62,25 +65,28 @@ internal static partial class GameHost
             diagnostics?.Enter("PlanetTerrain");
             if (!runtime.TryAllocateWorldId(out var id))
                 throw new InvalidOperationException("Could not allocate an exploration world.");
+            ProceduralLanding? landed = null;
+            if (slot?.Checkpoint is { } checkpoint && ProceduralLanding.Read(checkpoint, out landed) != SaveGameValidation.Valid)
+                throw new InvalidDataException("The procedural checkpoint payload is invalid.");
             var world = runtime.OpenWorld(id, WorldQuota,
-                new BarrierSupervisorPolicy(WorldQuota.Diagnostics.RequiredEvidenceRecords), new ExplorationRoot(id),
+                new BarrierSupervisorPolicy(WorldQuota.Diagnostics.RequiredEvidenceRecords), new ExplorationRoot(id, landed),
                 new ExplorationJobScope(), slot?.Checkpoint?.Tick ?? 0);
             var planet = slot?.Planet ?? new ReferencePlanet(new Guid("d89e4d83-1228-4780-b2c4-1af37f48468e"), smokeSeed!.Value);
             if (!scripted)
                 mouse = new PrototypeMouseLook(window, settings);
             var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot);
             terrain = exploration.CreateTerrain();
-            renderer = D3D12Renderer.CreateWithVolumeTerrain(window, runtime.RuntimeOwnership, terrain, 1,
-                new D3D12DiagnosticsOptions(true, true), useWarp, timeout, timeout);
-            await renderer.InitializeAsync(context, token).ConfigureAwait(false);
-            await renderer.StartAsync(token).ConfigureAwait(false);
+            await renderHost.NearAsync(terrain, token).ConfigureAwait(false);
+            renderer = renderHost.Active;
             reason = HostStopReason.RuntimeFault;
-            if (saveSmoke is null)
-                await exploration.ExploreAsync(terrain, renderer, scripted, token).ConfigureAwait(false);
+            if (flightSmoke)
+                await exploration.RunFlightSmokeAsync(terrain, renderHost, saveSmoke!, token).ConfigureAwait(false);
+            else if (saveSmoke is null)
+                await exploration.ExploreAsync(terrain, renderHost, scripted, token).ConfigureAwait(false);
             else
                 await exploration.RunSaveSmokeAsync(terrain, renderer, saveSmoke, token).ConfigureAwait(false);
             if (scripted)
-                DesktopSmoke.RequestNativeClose(renderer.Read(), "WP11 exploration");
+                DesktopSmoke.RequestNativeClose(renderHost.Active.Read(), "WP11 exploration");
             reason = HostStopReason.ExternalCancellation;
         }
         catch (OperationCanceledException) when (!scripted && token.IsCancellationRequested)
@@ -99,10 +105,18 @@ internal static partial class GameHost
             overlay?.Dispose();
             slot?.Dispose();
             terrain?.Stop();
+            renderer = renderHost.Current;
             try
             {
-                await StopAsync(runtime, clock, renderer, window, null, new EcsStorageBudget(StorageBytes),
-                    null, null, reason).ConfigureAwait(false);
+                try
+                {
+                    await renderHost.StopAsync().ConfigureAwait(false);
+                }
+                finally
+                {
+                    await StopAsync(runtime, clock, null, window, null, new EcsStorageBudget(StorageBytes),
+                        null, null, reason).ConfigureAwait(false);
+                }
             }
             catch (Exception cleanup) when (failure is not null)
             {
@@ -164,7 +178,7 @@ internal static partial class GameHost
         }
     }
 
-    private sealed record ExplorationRoot(WorldId World) : IWorldStateRoot;
+    internal sealed record ExplorationRoot(WorldId World, ProceduralLanding? Landing = null) : IWorldStateRoot;
 
     private sealed class ExplorationJobScope : IJobScopePolicy
     {
