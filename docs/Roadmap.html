@@ -3,12 +3,25 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Groundwork und WYU – Roadmap</title>
+  <title>Worlds Yet Unseen – Roadmap</title>
 </head>
 <body>
   <main>
-    <h1>Groundwork und WYU</h1>
-    <p>Den aktuellen Stand findest du in der <a href="https://github.com/DaveBeusing/Groundwork/blob/master/docs/roadmap.md">gemeinsamen Roadmap</a>.</p>
+    <h1>Worlds Yet Unseen – Roadmap</h1>
+    <p>Die <a href="https://github.com/DaveBeusing/Groundwork/blob/master/docs/roadmap.md">gemeinsame Roadmap</a> dokumentiert die Meilensteine, Engine-Arbeiten und Abnahmestände beider Projekte.</p>
+    <h2>Aktueller Stand</h2>
+    <p>Die Windows-Integration von WP11 wurde auf der Workstation nachgewiesen. <a href="https://github.com/DaveBeusing/Groundwork/issues/90">Referenzqualifikation und Abnahme</a> stehen aus. Für WP12 liegt der <a href="https://github.com/DaveBeusing/Groundwork/pull/109">Generator für Geologie, Höhlen und Erz</a> als offener PR vor.</p>
+    <h2>Freigegebene WYU-Integrationen</h2>
+    <p>Die folgenden Arbeitspakete sind offen. Umfang, Messverfahren und Performance-Grenzen stehen in den verlinkten Issues.</p>
+    <ul>
+      <li><a href="https://github.com/DaveBeusing/wyu/issues/40">Paket B · Biome</a>. Drei Biome sollen beim Gehen und aus dem Orbit erkennbar sein. WYU benötigt die Farbauswertung von Groundwork. <a href="https://github.com/DaveBeusing/Groundwork/issues/110">Groundwork #110</a></li>
+      <li><a href="https://github.com/DaveBeusing/wyu/issues/41">Paket E · Tag/Nacht und Nebel</a>. Spielzeit, Dämmerung und regionaler Nebel bauen auf B und dem Groundwork-Nebelpfad auf. <a href="https://github.com/DaveBeusing/Groundwork/issues/111">Groundwork #111</a></li>
+      <li><a href="https://github.com/DaveBeusing/wyu/issues/42">Paket G · Himmel und Atmosphäre</a>. Der Himmel geht beim Aufstieg in die Orbitansicht über. WYU verwendet den Atmosphärenpass und die Sonnenrichtung aus E. <a href="https://github.com/DaveBeusing/Groundwork/issues/112">Groundwork #112</a></li>
+      <li><a href="https://github.com/DaveBeusing/wyu/issues/43">WP15 · Sonnenlicht und Terrainschatten</a>. Sonnenlicht und dynamische Terrainschatten verwenden die Sonnenrichtung aus E. Sobald G verfügbar ist, wird die Ausrichtung mit der sichtbaren Sonne geprüft. <a href="https://github.com/DaveBeusing/Groundwork/issues/113">Groundwork #113</a></li>
+      <li><a href="https://github.com/DaveBeusing/wyu/issues/44">WP16 · Steine, Geröll, Gras und Bäume</a>. Steine, Geröll, Gras und Bäume werden nach Biom verteilt und mit Distanz-LOD dargestellt. Voraussetzungen sind B und Groundwork-Instancing. <a href="https://github.com/DaveBeusing/Groundwork/issues/114">Groundwork #114</a></li>
+      <li><a href="https://github.com/DaveBeusing/wyu/issues/45">WP17 · Gebirgskämme und Täler</a>. Zusammenhängende Gebirgskämme und Täler bleiben bis in den Orbit erkennbar. Die Integration braucht das Groundwork-Profil und die WP12-Schnittstellen und -Abnahme. <a href="https://github.com/DaveBeusing/Groundwork/issues/115">Groundwork #115</a></li>
+      <li><a href="https://github.com/DaveBeusing/wyu/issues/46">WP18 · Physik für lose Steine</a>. Lose Steine fallen, rollen und reagieren auf Terrainänderungen. Die Testszene benötigt die Groundwork-Physik auf WP11. WP16 ist optional. <a href="https://github.com/DaveBeusing/Groundwork/issues/116">Groundwork #116</a></li>
+    </ul>
     <p>Die <a href="https://github.com/DaveBeusing/wyu/blob/96902f6ac85723f1013f8d8212dbeef30445d8dc/docs/Roadmap.html">ursprüngliche WP01-Planung</a> ist im Git-Verlauf verfügbar.</p>
   </main>
 </body>
