@@ -26,12 +26,12 @@ internal sealed partial class VolumeExploration
     private async Task<bool> HandleWorldCommandsAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
         PlanetWalkState state, InputSnapshot input, CancellationToken token)
     {
-        if (PrototypeMenu.Pressed(input, InputControl.Digit1))
+        if (cave is null && PrototypeMenu.Pressed(input, InputControl.Digit1))
         {
             _material = ReferenceTerrainMaterial.Basalt;
             Notice("Material: basalt");
         }
-        if (PrototypeMenu.Pressed(input, InputControl.Digit2))
+        if (cave is null && PrototypeMenu.Pressed(input, InputControl.Digit2))
         {
             _material = ReferenceTerrainMaterial.OchreStone;
             Notice("Material: ochre stone");
@@ -58,20 +58,25 @@ internal sealed partial class VolumeExploration
             return true;
         }
         var operation = add ? VolumeBrushOperation.Add : VolumeBrushOperation.Remove;
-        if (Aim(terrain, state, operation) is not { } center)
+        if (Aim(terrain, state, operation, out _) is not { } center)
         {
             Notice("Aim at visible terrain 3.5–10 m away.");
             return true;
         }
 
-        var edited = await EditAsync(terrain, renderer, state, center, operation, (ushort)_material, token).ConfigureAwait(false);
+        var beforeOre = CaveOre;
+        var edited = await EditAsync(terrain, renderer, state, center, operation, cave is null ? (ushort)_material : CavePlanet.ShallowRock, token).ConfigureAwait(false);
         diagnostics?.Write(edited ? "edit" : "edit-held", $"operation={operation} revision={_published.TerrainRevision}");
-        Notice(edited ? $"Terrain changed (revision {_published.TerrainRevision})" : "Edit blocked. Terrain retained.");
+        var acquired = CaveOre - beforeOre;
+        Notice(!edited ? "Edit blocked. Terrain retained." : acquired > 0
+            ? $"Ore +{acquired} | Inventory {CaveOre}"
+            : $"Terrain changed (revision {_published.TerrainRevision})");
         return true;
     }
 
-    private LatticeCoordinate? Aim(VolumeStreamingCoordinator terrain, PlanetWalkState state, VolumeBrushOperation operation)
+    private LatticeCoordinate? Aim(VolumeStreamingCoordinator terrain, PlanetWalkState state, VolumeBrushOperation operation, out ushort material)
     {
+        material = 0;
         using var lease = terrain.TryRead();
         if (lease is null || lease.Info != _published || terrain.Statistics.MovementHeld)
             return null;
@@ -84,8 +89,9 @@ internal sealed partial class VolumeExploration
         if (hit.Status != VolumeQueryStatus.Contact || hits[0].Distance < 3.5)
             return null;
         var first = hits[0];
+        material = first.Material;
         var offset = operation == VolumeBrushOperation.Add ? 0.75 : -0.75;
-        return planet.Descriptor.SampleAt(new PlanetVector(first.Position.X + offset * first.Normal.X,
+        return Descriptor.SampleAt(new PlanetVector(first.Position.X + offset * first.Normal.X,
             first.Position.Y + offset * first.Normal.Y, first.Position.Z + offset * first.Normal.Z)).Vertex;
     }
 
@@ -97,7 +103,7 @@ internal sealed partial class VolumeExploration
         var edit = new VolumeBrushIntent(begin.Tick, 1, _published.TerrainRevision,
             new(center.X - 1, center.Y - 1, center.Z - 1), new(center.X + 1, center.Y + 1, center.Z + 1),
             operation, operation == VolumeBrushOperation.Add ? material : (ushort)0);
-        var admission = terrain.SealEditTick(begin.Tick, planet.Descriptor, [edit]);
+        var admission = terrain.SealEditTick(begin.Tick, Descriptor, [edit]);
         Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
         if (admission != VolumeAdmission.Accepted)
             return false;

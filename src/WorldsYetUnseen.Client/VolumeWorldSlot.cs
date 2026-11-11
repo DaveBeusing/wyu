@@ -5,30 +5,32 @@ using WorldsYetUnseen.Gameplay;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, ReferencePlanet planet) : IDisposable
+internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, ReferencePlanet? planet, CavePlanet? cave) : IDisposable
 {
     private const int ManifestBytes = 32;
     private VolumeCheckpointWriter? _writer;
     private bool _retry;
 
-    internal ReferencePlanet Planet { get; } = planet;
-    internal VolumeCheckpointSlot Storage { get; private set; } = new(root, id, lineage, planet.Descriptor, Validate);
+    internal ReferencePlanet? Planet { get; } = planet;
+    internal CavePlanet? Cave { get; } = cave;
+    internal VolumeCheckpointSlot Storage { get; private set; } = new(root, id, lineage, (cave?.Descriptor ?? planet!.Descriptor), Validate);
     internal VolumeCheckpoint? Checkpoint { get; private set; }
     internal bool ReadOnly { get; private set; }
     internal bool HasPendingWrite => _retry;
 
-    internal static VolumeWorldSlot Create(string root, ulong seed)
+    internal static VolumeWorldSlot Create(string root, ulong seed, bool cave = false)
     {
         Directory.CreateDirectory(root);
         var id = Guid.NewGuid();
         var lineage = Guid.NewGuid();
-        var planet = new ReferencePlanet(id, seed);
-        var slot = new VolumeWorldSlot(root, id, lineage, planet)
+        var geology = cave ? new CavePlanet(id, seed) : null;
+        var planet = cave ? null : new ReferencePlanet(id, seed);
+        var slot = new VolumeWorldSlot(root, id, lineage, planet, geology)
         {
-            Storage = VolumeCheckpointSlot.Reserve(root, id, lineage, planet.Descriptor, Validate)
+            Storage = VolumeCheckpointSlot.Reserve(root, id, lineage, geology?.Descriptor ?? planet!.Descriptor, Validate)
         };
         Span<byte> bytes = stackalloc byte[ManifestBytes];
-        "WYUVOL01"u8.CopyTo(bytes);
+        (cave ? "WYUVOL02"u8 : "WYUVOL01"u8).CopyTo(bytes);
         BinaryPrimitives.WriteUInt64LittleEndian(bytes[8..], seed);
         lineage.TryWriteBytes(bytes[16..]);
         using var manifest = new FileStream(ManifestPath(root, id), FileMode.CreateNew, FileAccess.Write, FileShare.None);
@@ -49,10 +51,15 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
             if (manifest.Length != bytes.Length)
                 return null;
             manifest.ReadExactly(bytes);
-            if (!bytes[..8].SequenceEqual("WYUVOL01"u8) || new Guid(bytes[16..]) == Guid.Empty)
+            var cave = bytes[..8].SequenceEqual("WYUVOL02"u8);
+            if ((!cave && !bytes[..8].SequenceEqual("WYUVOL01"u8)) || new Guid(bytes[16..]) == Guid.Empty)
                 return null;
-            var planet = new ReferencePlanet(id, BinaryPrimitives.ReadUInt64LittleEndian(bytes[8..]));
-            var slot = new VolumeWorldSlot(root, id, new Guid(bytes[16..]), planet);
+            var seed = BinaryPrimitives.ReadUInt64LittleEndian(bytes[8..]);
+            if (cave && seed != CavePlanet.Seed)
+                return null;
+            var geology = cave ? new CavePlanet(id, seed) : null;
+            var planet = cave ? null : new ReferencePlanet(id, seed);
+            var slot = new VolumeWorldSlot(root, id, new Guid(bytes[16..]), planet, geology);
             var loaded = slot.Storage.Load();
             status = loaded.Status;
             if (loaded.Status is not (VolumeSlotStatus.Loaded or VolumeSlotStatus.ReadOnlyRecovery) || loaded.Checkpoint is null)
@@ -102,7 +109,8 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
                 }
             }
 
-            var admitted = _writer.TryAdmit(cut, 1, static (root, buffer) => ProceduralLanding.Write(
+            var admitted = _writer.TryAdmit(cut, 1, static (root, buffer) => root.State is CaveInventory caveState
+                ? caveState.Write(buffer.Span) : ProceduralLanding.Write(
                 (root.State as GameHost.ExplorationRoot)?.Landing, root.Player, root.Terrain.TerrainRevision, buffer.Span));
             if (admitted != VolumeCaptureAdmission.Accepted)
                 return new(admitted switch
@@ -136,7 +144,9 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
     internal static bool SupportsMaterial(ushort material) =>
         material is (ushort)ReferenceTerrainMaterial.Basalt or (ushort)ReferenceTerrainMaterial.OchreStone;
 
-    private static SaveGameValidation Validate(VolumeCheckpoint checkpoint) => ProceduralLanding.Read(checkpoint, out _);
+    private static SaveGameValidation Validate(VolumeCheckpoint checkpoint) =>
+        checkpoint.Planet.GeneratorVersion == PlanetGeologyField.GeneratorVersion
+            ? CaveInventory.Read(checkpoint, out _, out _) : ProceduralLanding.Read(checkpoint, out _);
 
     private static string ManifestPath(string root, Guid id) => Path.Combine(root, $"{id:N}.wyu");
 }

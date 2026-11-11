@@ -14,11 +14,11 @@ namespace WorldsYetUnseen.Client;
 
 internal sealed class PlanetLoadException(string message) : InvalidOperationException(message);
 
-internal sealed partial class VolumeExploration(WorldSafetyPorts world, ReferencePlanet planet, WindowsHostModule window,
+internal sealed partial class VolumeExploration(WorldSafetyPorts world, ReferencePlanet? reference, WindowsHostModule window,
     AlphaOverlay? overlay, PrototypeMouseLook? mouse, VolumeWorldSlot? slot, AlphaDiagnostics? diagnostics)
 {
-    private const long MeshBytes = 10 * 1024 * 1024;
-    private const long NativeBytes = 16 * 1024 * 1024;
+    private long MeshBytes => cave is null ? 10 * 1024 * 1024 : 32 * 1024 * 1024;
+    private long NativeBytes => cave is null ? 16 * 1024 * 1024 : 32 * 1024 * 1024;
     private const int RouteSteps = 480;
     private const int OverlayLimit = 8192;
     private static readonly PlanetVector East = new(1, 0, 0);
@@ -32,18 +32,24 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private VolumePublicationInfo _published;
     private int _transitions, _views, _windows, _fineBricks;
 
+    private CavePlanet? cave => slot?.Cave;
+    private ReferencePlanet planet => reference ?? throw new InvalidOperationException("This world uses cave geology.");
+    private PlanetDescriptor Descriptor => cave?.Descriptor ?? planet.Descriptor;
+    private IPlanetBrickSource Field => (IPlanetBrickSource?)cave?.Field ?? planet.Field;
+    private string PlanetName => cave is null ? ReferencePlanet.DisplayName : CavePlanet.Name;
+
     internal VolumeStreamingCoordinator CreateTerrain()
     {
-        var unit = Charge(VolumeStreamingSelection.Select(planet.Descriptor,
-            new(16, ReferencePlanet.RadiusMeters, 16), East));
+        var unit = Charge(SelectTerrain(cave is null ? new(16, ReferencePlanet.RadiusMeters, 16) : CavePlanet.SurfaceProbe, East));
         var baseline = unit.Retained + unit.Retained;
         baseline = baseline with { LeaseSlots = baseline.LeaseSlots + 16, CpuBytes = baseline.CpuBytes + 32L * OverlayLimit };
         var movement = diagnostics?.LimitPlanetStreaming == true ? unit with { CpuBytes = unit.CpuBytes - 1 } : unit;
         var limits = new VolumeStreamingLimits(baseline + unit + unit + unit + unit,
             baseline, movement, unit, unit, unit, 12, 12, 256);
         return slot?.Checkpoint is { } checkpoint
-            ? checkpoint.RestoreTerrain(world, planet.Field, limits, OverlayLimit, VolumeWorldSlot.SupportsMaterial)
-            : new VolumeStreamingCoordinator(world, planet.Field, limits, OverlayLimit);
+            ? checkpoint.RestoreTerrain(world, Field, limits, OverlayLimit,
+                cave is null ? VolumeWorldSlot.SupportsMaterial : CavePlanet.SupportsMaterial)
+            : new VolumeStreamingCoordinator(world, Field, limits, OverlayLimit);
     }
 
     internal static async Task<ulong?> ChooseSeedAsync(WindowsHostModule window, AlphaOverlay overlay,
@@ -97,6 +103,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             return saved;
         }
 
+        if (cave is not null)
+            return await OpenCaveTerrainAsync(terrain, renderer, token).ConfigureAwait(false);
+
         foreach (var candidate in planet.FindSpawnCandidates())
         {
             await LoadAsync(terrain, renderer, candidate, East, PlanetLocalFrame.Create(candidate), token).ConfigureAwait(false);
@@ -112,7 +121,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var state = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
         diagnostics?.Enter("Exploration");
         diagnostics?.Write(slot?.Checkpoint is null ? "spawn" : "continue", FormattableString.Invariant(
-            $"seed={planet.Descriptor.Seed} generator={planet.Descriptor.GeneratorVersion} revision={_published.TerrainRevision} generation={slot?.Checkpoint?.Generation ?? 0}"));
+            $"seed={Descriptor.Seed} generator={Descriptor.GeneratorVersion} revision={_published.TerrainRevision} generation={slot?.Checkpoint?.Generation ?? 0}"));
         if (slot?.Checkpoint is { } checkpoint && ProceduralLanding.Read(checkpoint, out var landed) == SaveGameValidation.Valid &&
             landed is { } restored)
         {
@@ -122,10 +131,12 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
         else if (slot?.ReadOnly == true)
             Notice("Recovered checkpoint opened read-only.");
+        else if (cave is not null)
+            Notice("WASD to explore | E mine | Q fill\nF5 save | F10 save and quit");
         else if (slot is not null)
             Notice("E remove | Q add | 1/2 material\nF5 save | F6 flight | F10 save and quit");
         var start = state.Position;
-        var startBrick = planet.Descriptor.SampleAt(start).Vertex.Locate().Brick;
+        var startBrick = Descriptor.SampleAt(start).Vertex.Locate().Brick;
         var nextBrick = startBrick with { Z = startBrick.Z + 1 };
         if (scripted)
         {
@@ -145,7 +156,12 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 return;
             if (PrototypeMenu.Pressed(input, InputControl.F1))
                 _debug = !_debug;
-            var drawable = ReadHealthyRenderer(renderer).Surface == RenderSurfaceState.Drawable;
+            var rendered = renderer.Read();
+            if (!scripted && rendered is { Lifecycle: RendererLifecycle.Stopping or RendererLifecycle.Stopped,
+                FirstFault: null, FirstCleanupFault: null } &&
+                (token.IsCancellationRequested || window.Read().Phase is HostWindowPhase.Closing or HostWindowPhase.Closed))
+                return;
+            var drawable = RequireHealthyRenderer(rendered).Surface == RenderSurfaceState.Drawable;
             var focused = window.Read().Focused && !input.TransitionLoss;
             mouse?.Update(drawable && focused, ref _yaw, ref _pitch);
             if (!drawable || (!scripted && !focused))
@@ -172,7 +188,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                     return;
                 continue;
             }
-            if (!scripted && PrototypeMenu.Pressed(input, InputControl.F6))
+            if (cave is null && !scripted && PrototypeMenu.Pressed(input, InputControl.F6))
             {
                 mouse?.Update(false, ref _yaw, ref _pitch);
                 var result = await FlyAsync(terrain, renderHost, state, null, false, token).ConfigureAwait(false);
@@ -190,7 +206,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var divisor = Math.Max(1, Math.Max(Math.Abs(x), Math.Abs(z)));
             var begin = await BeginAsync(token).ConfigureAwait(false);
             terrain.BeginTick(begin);
-            var draft = terrain.TryPlanMovement(state, x / divisor, z / divisor, out var status);
+            var draft = cave is null
+                ? terrain.TryPlanMovement(state, x / divisor, z / divisor, out var status)
+                : PlanCaveMovement(terrain, state, x / divisor, z / divisor, out status);
             var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
             var prepared = draft is null ? null : terrain.TryPrepareMovement(draft, commit, []);
             var outcome = Finish(commit, prepared);
@@ -211,10 +229,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             Drain(terrain);
             if (overlay is not null)
             {
-                overlay.Menu = CurrentNotice ?? (prepared is null ? $"Movement held\n{status}" : null);
+                overlay.Menu = CurrentNotice ?? (prepared is null ? $"Movement held\n{status}" : cave is null ? null : CaveHint(terrain, state));
                 var statistics = terrain.Statistics;
                 overlay.Performance = _debug ? FormattableString.Invariant(
-                    $"Seed {planet.Descriptor.Seed} / gen {planet.Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions / LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} / GPU {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms / {status}\nX {state.Position.X:F1} Y {state.Position.Y:F1} Z {state.Position.Z:F1} / origin {_published.View.Frame.Revision}") : null;
+                    $"Seed {Descriptor.Seed} / gen {Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions / LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} / GPU {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms / {status}\nX {state.Position.X:F1} Y {state.Position.Y:F1} Z {state.Position.Z:F1} / origin {_published.View.Frame.Revision}") : null;
             }
             if (scripted && steps % 240 == 0)
                 WriteCheckpoint("route", state);
@@ -222,7 +240,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             {
                 await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= frame, token).ConfigureAwait(false);
                 if (state.Position.Z - start.Z < 28 || _views < 3 || _windows < 2 || _transitions == 0 ||
-                    planet.Descriptor.SampleAt(state.Position).Vertex.Locate().Brick != nextBrick ||
+                    Descriptor.SampleAt(state.Position).Vertex.Locate().Brick != nextBrick ||
                     StrideAt(_selection!, nextBrick) != 1)
                     throw new InvalidOperationException($"Route did not reach expected coverage ({state.Position.Z - start.Z:F1} m, {_views} views, {_windows} windows, {_transitions} transitions).");
                 Console.WriteLine($"WP11 route completed: {steps} ticks, {_views} views, {_windows} windows, {_transitions} seam triangles; destination promoted to LOD 1.");
@@ -247,10 +265,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             throw new InvalidOperationException("Movement remained open across a terrain view change.");
         var mask = ++_sequence;
         if (overlay is not null)
-            overlay.Menu = $"Loading planet terrain\n\n{ReferencePlanet.DisplayName}\nSeed {planet.Descriptor.Seed}\nGenerator {planet.Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
+            overlay.Menu = $"Loading planet terrain\n\n{PlanetName}\nSeed {Descriptor.Seed}\nGenerator {Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
         RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
-        var selection = VolumeStreamingSelection.Select(planet.Descriptor, coverageCenter ?? position, East,
-            supportCells: supportCells);
+        var selection = SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
         if (_selection is null || selection.Minimum != _selection.Minimum)
             _windows++;
         var revision = _published.TerrainRevision;
@@ -259,7 +276,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var result = edit is { } brush
             ? terrain.TryStageEdit(brush.Tick, brush.Id, selection, MeshBytes, Charge(selection), out staged)
             : terrain.TryStage(VolumeWorkClass.Movement, selection, revision, targetRevision, MeshBytes,
-                Charge(selection), planet.Field, out staged);
+                Charge(selection), Field, out staged);
         if (result != VolumeAdmission.Accepted || staged is null)
         {
             if (edit is not null)
@@ -365,7 +382,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         return count;
     }
 
-    private static VolumeResources Charge(VolumeStreamingSelection selection) =>
+    private VolumeResources Charge(VolumeStreamingSelection selection) =>
         new(VolumeStreamingCoordinator.RequiredCpuBytes(selection, MeshBytes) + NativeBytes + 64L * OverlayLimit + 4096,
             NativeBytes, NativeBytes, NativeBytes, 1, 1, 1, 64, 1);
 
@@ -418,7 +435,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
 
     private void WriteCheckpoint(string label, PlanetWalkState state) =>
         Console.WriteLine(FormattableString.Invariant(
-            $"WP11 {label} seed={planet.Descriptor.Seed} tick={_tick} foot={state.Position.X:F5},{state.Position.Y:F5},{state.Position.Z:F5} revision={_published.TerrainRevision} origin={_published.View.Frame.Revision}"));
+            $"WP11 {label} seed={Descriptor.Seed} tick={_tick} foot={state.Position.X:F5},{state.Position.Y:F5},{state.Position.Z:F5} revision={_published.TerrainRevision} origin={_published.View.Frame.Revision}"));
 
     private static int Axis(InputSnapshot input, InputControl positive, InputControl negative) =>
         (input.HeldControls.Contains(positive) ? 1 : 0) - (input.HeldControls.Contains(negative) ? 1 : 0);
@@ -445,9 +462,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
     }
 
-    private static RendererSnapshot ReadHealthyRenderer(D3D12Renderer renderer)
+    private static RendererSnapshot ReadHealthyRenderer(D3D12Renderer renderer) => RequireHealthyRenderer(renderer.Read());
+
+    private static RendererSnapshot RequireHealthyRenderer(RendererSnapshot state)
     {
-        var state = renderer.Read();
         if (state.FirstFault is not null || state.Lifecycle != RendererLifecycle.Running)
             throw new InvalidOperationException($"Terrain renderer failed ({state}).");
         return state;

@@ -9,6 +9,7 @@ namespace WorldsYetUnseen.Client;
 internal sealed partial class AlphaOverlay : IDisposable
 {
     private const byte PanelOpacity = 179;
+    private const int ReticleSize = 21;
     private const uint PopupStyle = 0x80000000;
     private const uint OverlayStyle = 0x080800A0; // No activate, layered, tool window, transparent.
     private readonly ManualResetEventSlim _stop = new();
@@ -16,6 +17,7 @@ internal sealed partial class AlphaOverlay : IDisposable
     private readonly nint _owner;
     private volatile string? _menu;
     private volatile string? _performance;
+    private volatile bool _reticle;
 
     internal AlphaOverlay(bool activateOwner)
     {
@@ -43,6 +45,7 @@ internal sealed partial class AlphaOverlay : IDisposable
 
     internal string? Menu { set => _menu = value; }
     internal string? Performance { set => _performance = value; }
+    internal bool Reticle { set => _reticle = value; }
 
     internal bool AllowFocusHandoff() =>
         GetForegroundWindow() == _owner && AllowSetForegroundWindow((uint)Environment.ProcessId) != 0;
@@ -56,7 +59,8 @@ internal sealed partial class AlphaOverlay : IDisposable
 
     private void Run(nint owner, TaskCompletionSource ready)
     {
-        nint sidebar = 0, telemetry = 0;
+        nint sidebar = 0, telemetry = 0, reticle = 0;
+        Point? reticleOrigin = null;
         try
         {
             sidebar = CreateWindowEx(OverlayStyle, "STATIC", "WYU sidebar", PopupStyle, 0, 0, 0, 0, owner, 0, 0, 0);
@@ -76,6 +80,7 @@ internal sealed partial class AlphaOverlay : IDisposable
                 {
                     menu.Hide();
                     metrics.Hide();
+                    HideReticle();
                     continue;
                 }
                 var origin = new Point();
@@ -88,6 +93,22 @@ internal sealed partial class AlphaOverlay : IDisposable
                 var offset = performance is null ? 0 : height;
                 menu.Update(_menu, new Point(origin.X, origin.Y + offset), new Size(width, bounds.Bottom - offset), 18);
                 metrics.Update(performance, origin, new Size(width, height), 10);
+
+                if (!_reticle || bounds.Right < ReticleSize || bounds.Bottom < ReticleSize)
+                {
+                    HideReticle();
+                    continue;
+                }
+                if (reticle == 0)
+                    reticle = CreateWindowEx(OverlayStyle, "STATIC", "WYU reticle | Aim", PopupStyle, 0, 0, 0, 0, owner, 0, 0, 0);
+                var center = new Point(origin.X + bounds.Right / 2 - ReticleSize / 2,
+                    origin.Y + bounds.Bottom / 2 - ReticleSize / 2);
+                if (reticle != 0 && reticleOrigin != center && DrawReticle(reticle, center))
+                {
+                    if (reticleOrigin is null)
+                        _ = ShowWindow(reticle, 4);
+                    reticleOrigin = center;
+                }
             } while (!_stop.Wait(32));
         }
         catch (Exception error)
@@ -97,10 +118,20 @@ internal sealed partial class AlphaOverlay : IDisposable
         }
         finally
         {
+            if (reticle != 0)
+                _ = DestroyWindow(reticle);
             if (telemetry != 0)
                 _ = DestroyWindow(telemetry);
             if (sidebar != 0)
                 _ = DestroyWindow(sidebar);
+        }
+
+        void HideReticle()
+        {
+            if (reticleOrigin is null)
+                return;
+            _ = ShowWindow(reticle, 0);
+            reticleOrigin = null;
         }
     }
 
@@ -135,18 +166,10 @@ internal sealed partial class AlphaOverlay : IDisposable
         }
     }
 
-    private static bool Draw(nint window, string text, Point origin, Size size, int top, int fontSize)
-    {
-        var desktop = GetDC(0);
-        if (desktop == 0)
-            return false;
-        var dc = CreateCompatibleDC(desktop);
-        var bitmap = CreateCompatibleBitmap(desktop, size.Width, size.Height);
-        var previous = dc != 0 && bitmap != 0 ? SelectObject(dc, bitmap) : 0;
-        try
+    private static bool Draw(nint window, string text, Point origin, Size size, int top, int fontSize) =>
+        DrawLayer(window, origin, size, PanelOpacity, 2, dc =>
         {
-            if (previous == 0 || PatBlt(dc, 0, 0, size.Width, size.Height, 0x00000042) == 0 ||
-                SetBkMode(dc, 1) == 0 || SetTextColor(dc, 0x00FFFFFF) == uint.MaxValue)
+            if (SetBkMode(dc, 1) == 0 || SetTextColor(dc, 0x00FFFFFF) == uint.MaxValue)
                 return false;
             var font = CreateFont(-fontSize, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 4, 0, "Segoe UI");
             var oldFont = font == 0 ? 0 : SelectObject(dc, font);
@@ -156,9 +179,50 @@ internal sealed partial class AlphaOverlay : IDisposable
                 SelectObject(dc, oldFont);
             if (font != 0)
                 _ = DeleteObject(font);
+            return true;
+        });
+
+    private static bool DrawReticle(nint window, Point origin) =>
+        DrawLayer(window, origin, new Size(ReticleSize, ReticleSize), byte.MaxValue, 1, static dc =>
+        {
+            const uint Paint = 0x00F00021;
+            const uint White = 0x00FF0062;
+            var brush = CreateSolidBrush(0x002C2C2C);
+            if (brush == 0)
+                return false;
+            var previous = SelectObject(dc, brush);
+            try
+            {
+                // Black is transparent. The four outlined arms leave the aim point clear.
+                return previous != 0 &&
+                    PatBlt(dc, 9, 1, 3, 7, Paint) != 0 && PatBlt(dc, 9, 13, 3, 7, Paint) != 0 &&
+                    PatBlt(dc, 1, 9, 7, 3, Paint) != 0 && PatBlt(dc, 13, 9, 7, 3, Paint) != 0 &&
+                    PatBlt(dc, 10, 2, 1, 5, White) != 0 && PatBlt(dc, 10, 14, 1, 5, White) != 0 &&
+                    PatBlt(dc, 2, 10, 5, 1, White) != 0 && PatBlt(dc, 14, 10, 5, 1, White) != 0;
+            }
+            finally
+            {
+                if (previous != 0)
+                    _ = SelectObject(dc, previous);
+                _ = DeleteObject(brush);
+            }
+        });
+
+    private static bool DrawLayer(nint window, Point origin, Size size, byte opacity, uint flags, Func<nint, bool> paint)
+    {
+        var desktop = GetDC(0);
+        if (desktop == 0)
+            return false;
+        var dc = CreateCompatibleDC(desktop);
+        var bitmap = CreateCompatibleBitmap(desktop, size.Width, size.Height);
+        var previous = dc != 0 && bitmap != 0 ? SelectObject(dc, bitmap) : 0;
+        try
+        {
+            if (previous == 0 || PatBlt(dc, 0, 0, size.Width, size.Height, 0x00000042) == 0 || !paint(dc))
+                return false;
             var source = new Point();
-            var blend = new Blend { Opacity = PanelOpacity };
-            return UpdateLayeredWindow(window, desktop, ref origin, ref size, dc, ref source, 0, ref blend, 2);
+            var blend = new Blend { Opacity = opacity };
+            return UpdateLayeredWindow(window, desktop, ref origin, ref size, dc, ref source, 0, ref blend, flags);
         }
         finally
         {
@@ -228,6 +292,8 @@ internal sealed partial class AlphaOverlay : IDisposable
     private static partial nint CreateCompatibleBitmap(nint dc, int width, int height);
     [LibraryImport("gdi32.dll")]
     private static partial nint SelectObject(nint dc, nint resource);
+    [LibraryImport("gdi32.dll")]
+    private static partial nint CreateSolidBrush(uint color);
     [LibraryImport("gdi32.dll")]
     private static partial int DeleteObject(nint resource);
     [LibraryImport("gdi32.dll")]
