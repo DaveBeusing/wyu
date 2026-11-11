@@ -14,6 +14,9 @@ internal static class Program
             (nameof(AllMiningOrdersConserveStone), AllMiningOrdersConserveStone),
             (nameof(RejectedActionsPreserveProgress), RejectedActionsPreserveProgress),
             (nameof(CapturedProgressSurvivesLaterActions), CapturedProgressSurvivesLaterActions),
+            (nameof(ReferencePlanetTests.SeedAudit), ReferencePlanetTests.SeedAudit),
+            (nameof(ReferencePlanetTests.ChartContinuity), ReferencePlanetTests.ChartContinuity),
+            (nameof(ReferencePlanetTests.PublishedSpawnAndLanding), ReferencePlanetTests.PublishedSpawnAndLanding),
         ];
         var failed = 0;
         foreach (var (name, run) in tests)
@@ -30,7 +33,7 @@ internal static class Program
             }
         }
 
-        Console.WriteLine($"WP07 portable rules: {tests.Length - failed} passed, {failed} failed.");
+        Console.WriteLine($"WYU gameplay: {tests.Length - failed} passed, {failed} failed.");
         return failed == 0 ? 0 : 1;
     }
 
