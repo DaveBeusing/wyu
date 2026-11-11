@@ -81,7 +81,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     {
         if (slot?.Checkpoint?.Player is { } saved)
         {
-            await LoadAsync(terrain, renderer, saved.Position, saved.Heading, PlanetLocalFrame.Create(saved.Position), token)
+            // Keep both the avatar and the nearby saved landing footprint in the fine support halo.
+            var landing = (_ports.Committed.Read().Root as GameHost.ExplorationRoot)?.Landing;
+            var center = landing is { } landed ? new PlanetVector(
+                (saved.Position.X + landed.Foot.X) / 2, (saved.Position.Y + landed.Foot.Y) / 2,
+                (saved.Position.Z + landed.Foot.Z) / 2) : (PlanetVector?)null;
+            await LoadAsync(terrain, renderer, saved.Position, saved.Heading, PlanetLocalFrame.Create(saved.Position), token,
+                coverageCenter: center, supportCells: landing.HasValue ? 12 : 8)
                 .ConfigureAwait(false);
             if (_ports.Committed.Read().Root is not VolumeWorldRoot root || root.Player != saved)
                 throw new InvalidDataException("The saved player pose could not be restored.");
@@ -220,7 +226,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
 
     private async Task<bool> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
-        PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null)
+        PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8)
     {
         // Spawn search and candidate fallback share the same monotonic origin sequence as movement.
         if (frame.Revision <= terrain.View.Frame.Revision)
@@ -236,7 +242,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (overlay is not null)
             overlay.Menu = $"Loading planet terrain\n\n{ReferencePlanet.DisplayName}\nSeed {planet.Descriptor.Seed}\nGenerator {planet.Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
         RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
-        var selection = VolumeStreamingSelection.Select(planet.Descriptor, coverageCenter ?? position, East);
+        var selection = VolumeStreamingSelection.Select(planet.Descriptor, coverageCenter ?? position, East,
+            supportCells: supportCells);
         if (_selection is null || selection.Minimum != _selection.Minimum)
             _windows++;
         var revision = _published.TerrainRevision;
