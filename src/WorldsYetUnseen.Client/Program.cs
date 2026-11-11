@@ -1,9 +1,14 @@
+using System.Globalization;
+
 namespace WorldsYetUnseen.Client;
 
 internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        if (args is ["--new-world"] || args is ["--volume-smoke", _, "warp" or "hardware"])
+            return await RunExplorationAsync(args).ConfigureAwait(false);
+
         string? diagnosticCase = null;
         string? diagnosticFixture = null;
         if (args is ["--diagnostics-smoke", "startup" or "graphics" or "close", _] &&
@@ -41,7 +46,7 @@ internal static class Program
         };
         if (mode is null && !saveSmoke)
         {
-            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--prototype [slot-directory [settings-directory]] | --prototype-smoke | --d3d12 | --d3d12-smoke | --terrain | --terrain-smoke | --walkable | --walkable-smoke | --planet | --planet-smoke | --flight [slot-directory] | --flight-smoke slot-directory | --flight-reload-smoke slot-directory | --save-world [slot-directory] | --window-smoke | --headless-smoke | --fault-smoke]");
+            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--new-world | --volume-smoke seed warp|hardware | --prototype [slot-directory [settings-directory]] | --prototype-smoke | --d3d12 | --d3d12-smoke | --terrain | --terrain-smoke | --walkable | --walkable-smoke | --planet | --planet-smoke | --flight [slot-directory] | --flight-smoke slot-directory | --flight-reload-smoke slot-directory | --save-world [slot-directory] | --window-smoke | --headless-smoke | --fault-smoke]");
             return 2;
         }
 
@@ -86,6 +91,50 @@ internal static class Program
         {
             eventArgs.Cancel = true;
             cancellation.Cancel();
+        }
+    }
+
+    private static async Task<int> RunExplorationAsync(string[] args)
+    {
+        var scripted = args.Length == 3;
+        ulong? seed = null;
+        if (scripted)
+        {
+            if (!ulong.TryParse(args[1], NumberStyles.None, CultureInfo.InvariantCulture, out var parsed))
+            {
+                Console.Error.WriteLine("Expected an unsigned 64-bit seed.");
+                return 2;
+            }
+            seed = parsed;
+        }
+
+        using var stop = new CancellationTokenSource();
+        if (scripted)
+            stop.CancelAfter(TimeSpan.FromMinutes(3));
+        var diagnostics = scripted ? null : new AlphaDiagnostics(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WorldsYetUnseen", "Logs"), null);
+        Console.CancelKeyPress += Cancel;
+        try
+        {
+            await GameHost.RunExplorationAsync(seed, scripted && args[2] == "warp", diagnostics, stop.Token)
+                .ConfigureAwait(false);
+            return 0;
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine(error);
+            diagnostics?.Report(error);
+            return 1;
+        }
+        finally
+        {
+            Console.CancelKeyPress -= Cancel;
+        }
+
+        void Cancel(object? sender, ConsoleCancelEventArgs eventArgs)
+        {
+            eventArgs.Cancel = true;
+            stop.Cancel();
         }
     }
 }

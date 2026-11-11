@@ -11,7 +11,7 @@ namespace WorldsYetUnseen.Client;
 
 internal enum HostMode { Prototype, PrototypeSmoke, D3D12, D3D12Smoke, Terrain, TerrainSmoke, Walkable, WalkableSmoke, Planet, PlanetSmoke, Flight, FlightSmoke, FlightReloadSmoke, SaveWorld, WindowSmoke, HeadlessSmoke, FaultSmoke }
 
-internal static class GameHost
+internal static partial class GameHost
 {
     private const long StorageBytes = 32 * 1024 * 1024;
     private static readonly ResourceQuota RuntimeQuota = new(1, 32,
@@ -77,15 +77,17 @@ internal static class GameHost
         if (mode == HostMode.Prototype)
             settingsDirectory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "WorldsYetUnseen", "Alpha");
-        var (flightDirectory, restoreFocus) = await RunStageAsync(mode, saveDirectory, settingsDirectory,
+        var (flightDirectory, restoreFocus, newWorld) = await RunStageAsync(mode, saveDirectory, settingsDirectory,
             false, false, diagnostics, cancellationToken)
             .ConfigureAwait(false);
-        if (flightDirectory is not null && !cancellationToken.IsCancellationRequested)
+        if (newWorld && !cancellationToken.IsCancellationRequested)
+            await RunExplorationAsync(null, false, diagnostics, cancellationToken, settingsDirectory).ConfigureAwait(false);
+        else if (flightDirectory is not null && !cancellationToken.IsCancellationRequested)
             await RunStageAsync(HostMode.Flight, flightDirectory, settingsDirectory, true, restoreFocus, diagnostics, cancellationToken)
                 .ConfigureAwait(false);
     }
 
-    private static async Task<(string? FlightDirectory, bool RestoreFocus)> RunStageAsync(HostMode mode, string? saveDirectory,
+    private static async Task<(string? FlightDirectory, bool RestoreFocus, bool NewWorld)> RunStageAsync(HostMode mode, string? saveDirectory,
         string? settingsDirectory, bool alphaFlight, bool restoreFocus, AlphaDiagnostics? alphaDiagnostics,
         CancellationToken hostCancellation)
     {
@@ -110,6 +112,7 @@ internal static class GameHost
         FlightMission? flight = null;
         var startGame = true;
         var launchFlight = false;
+        var launchNewWorld = false;
         var handoffFocus = false;
         WalkableScene? walkable = mode switch
         {
@@ -175,6 +178,7 @@ internal static class GameHost
                     var startMenu = new AlphaStartMenu(window, prototypeSave, new AlphaSettingsStore(settingsDirectory!),
                         overlay!, performance!);
                     startGame = await startMenu.ChooseAsync(cancellationToken).ConfigureAwait(false);
+                    launchNewWorld = startMenu.NewWorldRequested;
                     overlay!.Menu = null;
                     settings = startMenu.Settings;
                     launchFlight = startGame && prototypeSave.Checkpoint is { Progress.BeaconOnline: true };
@@ -260,6 +264,7 @@ internal static class GameHost
                 window?.Read().Phase is HostWindowPhase.Closing or HostWindowPhase.Closed)
             {
                 launchFlight = false;
+                launchNewWorld = false;
                 alphaDiagnostics?.Write("window-close");
             }
         }
@@ -294,7 +299,7 @@ internal static class GameHost
                 requireNvidia: mode == HostMode.PlanetSmoke || IsFlightSmoke(mode));
         if (success is not null)
             Console.WriteLine(success);
-        return (launchFlight ? Path.Combine(saveDirectory!, $"flight-{prototypeSave!.Lineage:N}") : null, handoffFocus);
+        return (launchFlight ? Path.Combine(saveDirectory!, $"flight-{prototypeSave!.Lineage:N}") : null, handoffFocus, launchNewWorld);
     }
 
     private static async Task<bool> WatchWindowCloseAsync(WindowsHostModule window, CancellationTokenSource stage)
