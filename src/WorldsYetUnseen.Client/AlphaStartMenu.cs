@@ -18,6 +18,7 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
 
     private string? _notice;
     internal AlphaSettings Settings { get; private set; } = AlphaSettings.Defaults;
+    internal bool NewWorldRequested { get; private set; }
 
     internal async Task<bool> ChooseAsync(CancellationToken cancellationToken)
     {
@@ -37,7 +38,7 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
         {
             overlay.Menu = visible
                 ? $"WYU | {Option(0, "Start test mission", canStart)} | {Option(1, "Continue", canContinue)} | " +
-                  $"{Option(2, "Settings")} | {Option(3, "Controls")} | {Option(4, "Exit")} | {_notice ?? SlotStatus()} | Arrows / Enter"
+                  $"{Option(2, "Settings")} | {Option(3, "Controls")} | {Option(4, "New World")} | {Option(5, "Exit")} | {_notice ?? SlotStatus()} | Arrows / Enter"
                 : null;
             var input = await ReadAsync(cancellationToken).ConfigureAwait(false);
             if (Pressed(input, InputControl.Escape))
@@ -47,7 +48,7 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
             }
             if (!visible)
                 continue;
-            selected = Navigate(input, selected, 5);
+            selected = Navigate(input, selected, 6);
             if (!Pressed(input, InputControl.Enter))
                 continue;
 
@@ -65,6 +66,9 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
                     await ShowGuidanceAsync(cancellationToken).ConfigureAwait(false);
                     break;
                 case 4:
+                    NewWorldRequested = true;
+                    return false;
+                case 5:
                     return false;
             }
         }

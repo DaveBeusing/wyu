@@ -1,12 +1,26 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Groundwork.Rendering;
 using Groundwork.Rendering.D3D12;
 
 namespace WorldsYetUnseen.Client;
 
-internal static class DesktopSmoke
+internal static partial class DesktopSmoke
 {
     internal static string WindowTitle { get; } = $"Worlds Yet Unseen D3D12 Smoke ({Environment.ProcessId})";
+
+    internal static void SetMinimized(bool minimized)
+    {
+        using var process = Process.GetCurrentProcess();
+        var handle = process.MainWindowHandle;
+        if (handle == 0 || !string.Equals(process.MainWindowTitle, WindowTitle, StringComparison.Ordinal) ||
+            !ShowWindowAsync(handle, minimized ? 6 : 9))
+            throw new InvalidOperationException("Could not change the WYU smoke window state.");
+    }
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool ShowWindowAsync(nint window, int command);
 
     internal static void RequestNativeClose(in RendererSnapshot presented, string scene)
     {
@@ -18,15 +32,16 @@ internal static class DesktopSmoke
             $"{presented.AppliedWidth}x{presented.AppliedHeight}; native close requested.");
     }
 
-    internal static void VerifyShutdown(D3D12Renderer renderer, bool requireDebugLayer, bool requireNvidia = false)
+    internal static void VerifyShutdown(D3D12Renderer renderer, bool requireDebugLayer, bool requireNvidia = false,
+        bool useWarp = false)
     {
         using var process = Process.GetCurrentProcess();
         if (process.MainWindowHandle != IntPtr.Zero)
             throw new InvalidOperationException("The WYU smoke process still owns a main window.");
 
         var diagnostics = renderer.ReadDiagnostics();
-        if (diagnostics.Adapter is not { IsSoftware: false } adapter || diagnostics.DeviceRemoval is not null)
-            throw new InvalidOperationException("The D3D12 smoke did not settle a healthy hardware adapter.");
+        if (diagnostics.Adapter is not { } adapter || adapter.IsSoftware != useWarp || diagnostics.DeviceRemoval is not null)
+            throw new InvalidOperationException("The D3D12 smoke did not settle the requested adapter.");
         if (requireNvidia && adapter.VendorId != 0x10DE)
             throw new InvalidOperationException("The planet route requires an NVIDIA hardware adapter.");
 
