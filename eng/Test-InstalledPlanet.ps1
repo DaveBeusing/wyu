@@ -22,7 +22,9 @@ public static class WyuPlanetInput
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct Point { public int X, Y; }
     private delegate bool Visitor(IntPtr window, IntPtr data);
-    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect bounds);
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr window, int attribute,
+        out Rect bounds, int size);
+    [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr window, out Rect bounds);
     [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr window, ref Point point);
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
@@ -34,9 +36,14 @@ public static class WyuPlanetInput
     public static extern bool PostMessage(IntPtr window, uint message, IntPtr key, IntPtr flags);
     public static bool Pitch(IntPtr window, int pixels)
     {
-        if (!GetClientRect(window, out Rect bounds)) return false;
-        var center = new Point { X = bounds.Right / 2, Y = bounds.Bottom / 2 };
-        return ClientToScreen(window, ref center) && SetCursorPos(center.X, center.Y + pixels);
+        var previous = SetThreadDpiAwarenessContext((IntPtr)(-4));
+        try
+        {
+            if (!GetClientRect(window, out Rect bounds)) return false;
+            var center = new Point { X = bounds.Right / 2, Y = bounds.Bottom / 2 };
+            return ClientToScreen(window, ref center) && SetCursorPos(center.X, center.Y + pixels);
+        }
+        finally { if (previous != IntPtr.Zero) SetThreadDpiAwarenessContext(previous); }
     }
     public static string Dialog(IntPtr owner)
     {
@@ -124,7 +131,9 @@ function Screenshot([string]$Name) {
     Add-Type -AssemblyName System.Drawing
     $process.Refresh()
     $bounds = [WyuPlanetInput+Rect]::new()
-    if (![WyuPlanetInput]::GetWindowRect($process.MainWindowHandle, [ref]$bounds)) { throw 'Cannot capture the WYU window.' }
+    if ([WyuPlanetInput]::DwmGetWindowAttribute($process.MainWindowHandle, 9, [ref]$bounds, 16) -ne 0) {
+        throw 'Cannot capture the WYU window.'
+    }
     $width = $bounds.Right - $bounds.Left
     $height = $bounds.Bottom - $bounds.Top
     if ($width -le 0 -or $height -le 0 -or $width -gt 4096 -or $height -gt 4096) { throw 'Invalid WYU capture rectangle.' }
@@ -141,14 +150,14 @@ function Screenshot([string]$Name) {
 
 function Read-Metrics {
     $text = Read-AlphaOverlay $process 'performance'
-    if ($text -match 'Frame ([0-9.]+) ms.*\nX ([0-9.-]+) Y ([0-9.-]+) Z ([0-9.-]+) \| origin (\d+)') {
+    if ($text -match 'Frame ([0-9.]+) ms.*\nX ([0-9.-]+) Y ([0-9.-]+) Z ([0-9.-]+) / origin (\d+)') {
         [pscustomobject]@{FrameMs = [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture)
             Z = [double]::Parse($Matches[4], [Globalization.CultureInfo]::InvariantCulture); Origin = [int]$Matches[5]}
     }
 }
 
-function Walk-To([int]$Key, [double]$Target, [bool]$Increasing) {
-    Set-Key $Key $true
+function Walk-To([int]$Key, [double]$Target, [bool]$Increasing, [bool]$AlreadyHeld = $false) {
+    if (!$AlreadyHeld) { Set-Key $Key $true }
     try {
         Wait-For {
             $sample = Read-Metrics
@@ -197,20 +206,23 @@ try {
     Screenshot 'invalid-seed'
     Press 27
     Enter-Seed '42'
-    Wait-Panel '*E remove*F6 flight*'
-    $runtime = @($process.Modules | Where-Object ModuleName -eq 'coreclr.dll')
-    if ($runtime.Count -ne 1 -or $runtime[0].FileName -ine (Join-Path (Split-Path $clientPath) 'coreclr.dll')) {
-        throw 'The installed planet did not use its bundled runtime.'
-    }
-    Press 112
-    Wait-For { $null -ne (Read-Metrics) } 'planet metrics'
-    $before = Read-Metrics
-    $frames = [Collections.Generic.List[double]]::new()
-    Walk-To 68 46 $true
+    Set-Key 68 $true
+    try {
+        Wait-Panel '*E remove*F6 flight*'
+        $runtime = @($process.Modules | Where-Object ModuleName -eq 'coreclr.dll')
+        if ($runtime.Count -ne 1 -or $runtime[0].FileName -ine (Join-Path (Split-Path $clientPath) 'coreclr.dll')) {
+            throw 'The installed planet did not use its bundled runtime.'
+        }
+        Press 112
+        Wait-For { $null -ne (Read-Metrics) } 'planet metrics'
+        $before = Read-Metrics
+        $frames = [Collections.Generic.List[double]]::new()
+        Walk-To 68 46 $true $true
+    } finally { Set-Key 68 $false }
     $after = Read-Metrics
     if ($after.Origin -le $before.Origin -or $frames.Count -lt 20) { throw 'Installed walk did not cross an origin boundary.' }
     Screenshot 'exploration'
-    Walk-To 65 16.3 $false
+    Walk-To 65 24 $false
 
     Set-Pitch -170
     Press 69

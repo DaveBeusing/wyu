@@ -20,8 +20,9 @@ contains bounded client logs, screenshots and walking cadence samples. The
 samples come from the gameplay overlay and do not establish production
 CPU, GPU or frame-fence budgets.
 
-The keyboard and mouse route enters seed **42**, walks across an origin
-change and back, adds ochre terrain, saves and relaunches through
+The keyboard and mouse route enters seed **42**, holds **D** as loading
+finishes, crosses the origin change, then walks partway back with **A**.
+It adds ochre terrain, saves and relaunches through
 **Continue**. It starts the automatic flight with **F6**, observes orbit
 and touchdown, saves again and confirms the landed state after restart.
 The [flight replay](wp11-flight.md) separately compares deterministic

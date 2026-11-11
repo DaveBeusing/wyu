@@ -214,7 +214,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 overlay.Menu = prepared is null ? $"Movement held\n{status}" : CurrentNotice;
                 var statistics = terrain.Statistics;
                 overlay.Performance = _debug ? FormattableString.Invariant(
-                    $"Seed {planet.Descriptor.Seed} | generator {planet.Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions | LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} MiB | GPU credit {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms | {status}\nX {state.Position.X:F1} Y {state.Position.Y:F1} Z {state.Position.Z:F1} | origin {_published.View.Frame.Revision}") : null;
+                    $"Seed {planet.Descriptor.Seed} / gen {planet.Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions / LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} / GPU {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms / {status}\nX {state.Position.X:F1} Y {state.Position.Y:F1} Z {state.Position.Z:F1} / origin {_published.View.Frame.Revision}") : null;
             }
             if (scripted && steps % 240 == 0)
                 WriteCheckpoint("route", state);
