@@ -124,7 +124,11 @@ internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet 
             }
             var next = terrain.View.Frame;
             if (next.TryRebase(state.Position, out var rebased))
+            {
                 await LoadAsync(terrain, renderer, state.Position, state.Heading, rebased, token).ConfigureAwait(false);
+                // A new tick must capture focus, surface and keys after the potentially long load.
+                continue;
+            }
 
             var forward = scripted ? 0 : Axis(input, InputControl.W, InputControl.S);
             var right = scripted ? 1 : Axis(input, InputControl.D, InputControl.A);
@@ -203,7 +207,8 @@ internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet 
         using var work = staged;
         if (!await Task.Run(() => work.Execute(token), token).ConfigureAwait(false))
             throw new InvalidOperationException("Terrain generation did not complete.");
-        await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token).ConfigureAwait(false);
+        await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
+            pauseWhileMinimized: true).ConfigureAwait(false);
         RequireMesh(renderer.TryStageVolumeTerrain(work.Generation));
         await WaitAsync(renderer, () => renderer.IsVolumeTerrainReady(work.Generation), token).ConfigureAwait(false);
 
@@ -221,7 +226,8 @@ internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet 
         }
         var sequence = ++_sequence;
         RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, Camera(view, position, heading)));
-        await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+        await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
+            pauseWhileMinimized: true).ConfigureAwait(false);
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement reopened before the next BeginTick.");
         _selection = selection;
@@ -341,21 +347,20 @@ internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet 
         while (terrain.TryReadEvent(out _)) { }
     }
 
-    private static async Task WaitAsync(D3D12Renderer renderer, Func<bool> ready, CancellationToken token)
+    private async Task WaitAsync(D3D12Renderer renderer, Func<bool> ready, CancellationToken token,
+        bool pauseWhileMinimized = false)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        var remaining = TimeSpan.FromSeconds(30);
         while (!ready())
         {
             ReadHealthyRenderer(renderer);
-            try
-            {
-                await Task.Delay(8, timeout.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!token.IsCancellationRequested)
-            {
+            var started = Stopwatch.GetTimestamp();
+            var paused = pauseWhileMinimized && window.Read().Phase == HostWindowPhase.Minimized;
+            await Task.Delay(8, token).ConfigureAwait(false);
+            if (!paused)
+                remaining -= Stopwatch.GetElapsedTime(started);
+            if (remaining <= TimeSpan.Zero && !ready())
                 throw new TimeoutException("Timed out waiting for terrain presentation or GPU preparation.");
-            }
         }
     }
 
