@@ -29,6 +29,7 @@ Supply the approved manifest hash independently of the installer folder.
 The script verifies installed hashes, starts the app from its Start menu
 shortcut, checks that it loaded the bundled runtime, repairs a missing
 program file by reinstalling, then uninstalls and checks test data hashes.
+Enable the PlanetPlaytest switch for the [WP11 installed route](wp11-installed-playtest.md).
 The WP10 alpha accepts an unsigned installer. The fresh Windows 11 offline
 run remains an open follow-up in the Groundwork handover.
 

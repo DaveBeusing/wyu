@@ -12,8 +12,10 @@ using WorldsYetUnseen.Gameplay;
 
 namespace WorldsYetUnseen.Client;
 
+internal sealed class PlanetLoadException(string message) : InvalidOperationException(message);
+
 internal sealed partial class VolumeExploration(WorldSafetyPorts world, ReferencePlanet planet, WindowsHostModule window,
-    AlphaOverlay? overlay, PrototypeMouseLook? mouse, VolumeWorldSlot? slot)
+    AlphaOverlay? overlay, PrototypeMouseLook? mouse, VolumeWorldSlot? slot, AlphaDiagnostics? diagnostics)
 {
     private const long MeshBytes = 10 * 1024 * 1024;
     private const long NativeBytes = 16 * 1024 * 1024;
@@ -36,8 +38,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             new(16, ReferencePlanet.RadiusMeters, 16), East));
         var baseline = unit.Retained + unit.Retained;
         baseline = baseline with { LeaseSlots = baseline.LeaseSlots + 16, CpuBytes = baseline.CpuBytes + 32L * OverlayLimit };
+        var movement = diagnostics?.LimitPlanetStreaming == true ? unit with { CpuBytes = unit.CpuBytes - 1 } : unit;
         var limits = new VolumeStreamingLimits(baseline + unit + unit + unit + unit,
-            baseline, unit, unit, unit, unit, 12, 12, 256);
+            baseline, movement, unit, unit, unit, 12, 12, 256);
         return slot?.Checkpoint is { } checkpoint
             ? checkpoint.RestoreTerrain(world, planet.Field, limits, OverlayLimit, VolumeWorldSlot.SupportsMaterial)
             : new VolumeStreamingCoordinator(world, planet.Field, limits, OverlayLimit);
@@ -107,10 +110,14 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         CancellationToken token)
     {
         var state = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
+        diagnostics?.Enter("Exploration");
+        diagnostics?.Write(slot?.Checkpoint is null ? "spawn" : "continue", FormattableString.Invariant(
+            $"seed={planet.Descriptor.Seed} generator={planet.Descriptor.GeneratorVersion} revision={_published.TerrainRevision} generation={slot?.Checkpoint?.Generation ?? 0}"));
         if (slot?.Checkpoint is { } checkpoint && ProceduralLanding.Read(checkpoint, out var landed) == SaveGameValidation.Valid &&
             landed is { } restored)
         {
             ConfirmRestoredLanding(terrain, restored);
+            diagnostics?.Write("touchdown-restored", FormattableString.Invariant($"flightTick={restored.FlightTick} revision={restored.Revision}"));
             Notice(slot.ReadOnly ? "Verified touchdown opened read-only." : "Continued from a verified touchdown.");
         }
         else if (slot?.ReadOnly == true)
@@ -204,10 +211,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             Drain(terrain);
             if (overlay is not null)
             {
-                overlay.Menu = prepared is null ? $"Movement held\n{status}" : CurrentNotice;
+                overlay.Menu = CurrentNotice ?? (prepared is null ? $"Movement held\n{status}" : null);
                 var statistics = terrain.Statistics;
                 overlay.Performance = _debug ? FormattableString.Invariant(
-                    $"Seed {planet.Descriptor.Seed} | generator {planet.Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions | LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} MiB | GPU credit {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms | {status}") : null;
+                    $"Seed {planet.Descriptor.Seed} / gen {planet.Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions / LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} / GPU {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms / {status}\nX {state.Position.X:F1} Y {state.Position.Y:F1} Z {state.Position.Z:F1} / origin {_published.View.Frame.Revision}") : null;
             }
             if (scripted && steps % 240 == 0)
                 WriteCheckpoint("route", state);
@@ -257,7 +264,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         {
             if (edit is not null)
                 return false;
-            throw new InvalidOperationException($"Terrain streaming admission failed ({result}).");
+            throw new PlanetLoadException(result == VolumeAdmission.Backpressure
+                ? "The terrain streaming budget is full. The planet could not load. Close the game and try again."
+                : $"The planet could not load terrain ({result}). Close the game and try again.");
         }
         using var work = staged;
         if (!await Task.Run(() => work.Execute(token), token).ConfigureAwait(false))

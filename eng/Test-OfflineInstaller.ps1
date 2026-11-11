@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory)][string]$InstallerDirectory,
-    [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedManifestSha256
+    [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedManifestSha256,
+    [switch]$PlanetPlaytest
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -97,7 +98,13 @@ $uninstaller = $Matches[1]
 if ([IO.Path]::GetDirectoryName($uninstaller) -ine $app -or [IO.Path]::GetFileName($uninstaller) -notmatch '^unins\d+\.exe$') {
     throw 'Unexpected uninstall path.'
 }
-Invoke-Setup $uninstaller
+try {
+    if ($PlanetPlaytest) {
+        & (Join-Path $PSScriptRoot 'Test-InstalledPlanet.ps1') -Client $exe -ExpectedCommit $manifest.wyuCommit
+    }
+} finally {
+    Invoke-Setup $uninstaller
+}
 foreach ($path in $app,$shortcut,$registration) {
     if (Test-Path -LiteralPath $path) { throw "Uninstall left $path." }
 }

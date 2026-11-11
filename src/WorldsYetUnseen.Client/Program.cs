@@ -6,7 +6,8 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
-        if (args is ["--new-world"] || args is ["--volume-smoke", _, "warp" or "hardware"] ||
+        if (args is ["--new-world"] || args is ["--planet-playtest", _] or ["--planet-playtest", _, "graphics" or "budget"] ||
+            args is ["--volume-smoke", _, "warp" or "hardware"] ||
             args is ["--volume-save-smoke", "init" or "restore" or "interrupt" or "verify" or "protected", _] ||
             args is ["--volume-flight-smoke", "flight" or "resume" or "abort" or "preflight", _, "warp" or "hardware"])
             return await RunExplorationAsync(args).ConfigureAwait(false);
@@ -100,7 +101,8 @@ internal static class Program
     {
         var saveSmoke = args[0] == "--volume-save-smoke";
         var flightSmoke = args[0] == "--volume-flight-smoke";
-        var scripted = args.Length >= 3;
+        var playtest = args[0] == "--planet-playtest";
+        var scripted = !playtest && args.Length >= 3;
         ulong? seed = null;
         if (scripted && !saveSmoke && !flightSmoke)
         {
@@ -115,11 +117,16 @@ internal static class Program
         using var stop = new CancellationTokenSource();
         if (scripted)
             stop.CancelAfter(TimeSpan.FromMinutes(3));
-        var diagnostics = scripted ? null : new AlphaDiagnostics(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WorldsYetUnseen", "Logs"), null);
+        var fixture = playtest ? Path.GetFullPath(args[1]) : null;
+        if (fixture is not null && !File.Exists(Path.Combine(fixture, "wyu-planet-playtest.fixture")))
+            return 2;
+        var logDirectory = fixture ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "WorldsYetUnseen", "Logs");
+        var diagnostics = scripted ? null : new AlphaDiagnostics(logDirectory, playtest && args.Length == 3 ? args[2] : null);
         Console.CancelKeyPress += Cancel;
         try
         {
+            diagnostics?.Write("start");
             if (saveSmoke && args[1] == "protected")
             {
                 GameHost.VerifyProtectedVolumeSmokeSlot(args[2]);
@@ -127,9 +134,10 @@ internal static class Program
             }
             var warp = saveSmoke || scripted && args[^1] == "warp";
             await GameHost.RunExplorationAsync(seed, warp, diagnostics, stop.Token,
-                saveRoot: saveSmoke || flightSmoke ? args[2] : null,
+                saveRoot: fixture is not null ? Path.Combine(fixture, "v2") : saveSmoke || flightSmoke ? args[2] : null,
                 saveSmoke: saveSmoke || flightSmoke ? args[1] : null, flightSmoke: flightSmoke)
                 .ConfigureAwait(false);
+            diagnostics?.Write("exit");
             return 0;
         }
         catch (Exception error)

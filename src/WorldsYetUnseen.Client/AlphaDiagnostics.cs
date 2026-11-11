@@ -22,6 +22,7 @@ internal sealed partial class AlphaDiagnostics(string directory, string? smokeCa
     internal void CheckStartup() => Inject("startup");
 
     internal void CheckGraphics() => Inject("graphics");
+    internal bool LimitPlanetStreaming => smokeCase == "budget";
 
     private void Inject(string point)
     {
@@ -45,9 +46,11 @@ internal sealed partial class AlphaDiagnostics(string directory, string? smokeCa
         var graphics = GraphicsFailure || Phase == "GraphicsStartup";
         var path = Write("fault", $"{(graphics ? "graphics" : "client")} {failure}") ? $"\n\nLog: {LogPath}"
             : "\n\nThe local log could not be written.";
-        var title = graphics ? "Worlds Yet Unseen — Graphics error" : "Worlds Yet Unseen — Client error";
+        var terrain = !graphics ? failure as PlanetLoadException : null;
+        var title = graphics ? "Worlds Yet Unseen — Graphics error" : terrain is not null
+            ? "Worlds Yet Unseen — Planet loading error" : "Worlds Yet Unseen — Client error";
         var help = graphics ? "The Direct3D 12 renderer could not start or continue. Check that a supported GPU and current driver are available."
-            : $"The client could not continue during {Phase}. Close the game and try again. If it persists, share the log with support.";
+            : terrain?.Message ?? $"The client could not continue during {Phase}. Close the game and try again. If it persists, share the log with support.";
         ShowMessage(0, help + path, title, 0x00010010);
     }
 

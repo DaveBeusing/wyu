@@ -29,14 +29,27 @@ internal sealed partial class VolumeExploration
             return (player, false);
         }
 
-        var anchor = scriptedAnchor ?? Add(player.Position, Scale(player.Heading, 5));
+        diagnostics?.Write("flight-requested", $"revision={_published.TerrainRevision}");
+        var anchors = scriptedAnchor is { } requested ? [requested] : FlightAnchors(player);
         var center = FlightCoverageCenter(player.Position);
         await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, terrain.View.Frame, token,
             coverageCenter: center, supportCells: FlightSupportCells).ConfigureAwait(false);
-        if (!TryFlightPad(terrain, anchor, out var pad, out var digest, out var blocked))
+        var anchor = default(PlanetVector);
+        var pad = default(PlanetVector);
+        var digest = "";
+        var blocked = "";
+        foreach (var candidate in anchors)
+        {
+            if (!TryFlightPad(terrain, candidate, out pad, out digest, out blocked))
+                continue;
+            anchor = candidate;
+            break;
+        }
+        if (anchor == default)
         {
             if (scripted)
                 throw new InvalidOperationException($"Takeoff blocked: {blocked}.");
+            diagnostics?.Write("flight-held", blocked);
             Notice($"Takeoff blocked: {blocked}");
             return (player, false);
         }
@@ -112,6 +125,8 @@ internal sealed partial class VolumeExploration
                     if (flight.Phase != previousPhase)
                     {
                         previousPhase = flight.Phase;
+                        diagnostics?.Write("flight", FormattableString.Invariant(
+                            $"stage={flight.Phase} tick={flight.Tick} revision={revision}"));
                         if (scripted)
                             FlightTrace(flight.Phase.ToString(), flight, revision, digest);
                         break;
@@ -147,6 +162,8 @@ internal sealed partial class VolumeExploration
             throw new InvalidOperationException("Flight did not complete the near/far/near orbital route.");
         var landing = new ProceduralLanding(flight.State.Position, revision, flight.Tick);
         var position = await PublishLandingAsync(terrain, player, landing, token).ConfigureAwait(false);
+        diagnostics?.Write("touchdown", FormattableString.Invariant(
+            $"tick={landing.FlightTick} revision={revision} overlay={digest}"));
         Notice("Touchdown confirmed. F5 saves this landing.");
         if (scripted)
             FlightTrace("touchdown", flight, revision, digest);
@@ -191,6 +208,17 @@ internal sealed partial class VolumeExploration
     }
 
     private static PlanetVector FlightCoverageCenter(PlanetVector position) => Add(position, Scale(Unit(position), 26));
+
+    private static PlanetVector[] FlightAnchors(PlanetWalkState player)
+    {
+        var up = Unit(player.Position);
+        var forward = Scale(player.Heading, 5);
+        var right = Scale(new PlanetVector(player.Heading.Y * up.Z - player.Heading.Z * up.Y,
+            player.Heading.Z * up.X - player.Heading.X * up.Z,
+            player.Heading.X * up.Y - player.Heading.Y * up.X), 5);
+        return [Add(player.Position, forward), Add(player.Position, right),
+            Subtract(player.Position, right), Subtract(player.Position, forward)];
+    }
 
     private bool TryFlightPad(VolumeStreamingCoordinator terrain, PlanetVector anchor, out PlanetVector pad,
         out string digest, out string blocked)
