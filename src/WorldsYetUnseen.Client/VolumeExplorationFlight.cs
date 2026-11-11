@@ -167,15 +167,25 @@ internal sealed partial class VolumeExploration
         return draft.Result.State;
     }
 
-    private async Task ConfirmRestoredLandingAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
-        PlanetWalkState player, ProceduralLanding landed, CancellationToken token)
+    private string ConfirmRestoredLanding(VolumeStreamingCoordinator terrain, ProceduralLanding landed)
     {
-        await LoadAsync(terrain, renderer, player.Position, player.Heading, terrain.View.Frame, token,
-            coverageCenter: FlightCoverageCenter(player.Position)).ConfigureAwait(false);
-        if (landed.Revision != _published.TerrainRevision ||
-            !TryFlightPad(terrain, landed.Foot, out var pad, out _, out _) || Length(Subtract(pad, landed.Foot)) > 0.08)
+        using var lease = terrain.TryRead();
+        if (lease is null || lease.Info != _published || lease.Info.TerrainRevision != landed.Revision ||
+            lease.EditLineage != planet.Descriptor)
+            throw new InvalidDataException("The saved touchdown lacks its committed terrain revision.");
+        // The checkpoint records a grounded craft. Only the local contact needs rebuilding on Continue.
+        var up = Unit(landed.Foot);
+        var start = Add(landed.Foot, Scale(up, 2));
+        var end = Add(landed.Foot, Scale(up, -1.5));
+        var contact = SweepGear(lease, start, end);
+        if (contact.Status != VolumeQueryStatus.Contact || Dot(contact.Normal, up) < 0.87 ||
+            Length(Subtract(Add(start, Scale(Subtract(end, start), contact.Fraction)), landed.Foot)) > 0.08)
             throw new InvalidDataException("The saved touchdown could not be revalidated against rebuilt collision.");
-        Notice("Continued from a verified touchdown.");
+        var bytes = new byte[lease.EditOverlayBytes];
+        if (!lease.TryWriteEditOverlay(bytes, out var written) || written != bytes.Length ||
+            slot?.Checkpoint is not { } checkpoint || !bytes.AsSpan().SequenceEqual(checkpoint.Overlay))
+            throw new InvalidDataException("The saved touchdown overlay differs from the rebuilt terrain.");
+        return Convert.ToHexStringLower(SHA256.HashData(bytes));
     }
 
     private static PlanetVector FlightCoverageCenter(PlanetVector position) => Add(position, Scale(Unit(position), 26));

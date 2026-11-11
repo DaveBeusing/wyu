@@ -6,7 +6,7 @@ For the curated route, use seed 42 and the initial heading. Takeoff may be
 blocked by unsafe slope, missing coverage or an obstructed corridor. The
 flight is automatic. **Esc** exits during flight and the last confirmed save
 remains available. After touchdown, **F5** saves the landed state and
-**Continue** revalidates it against rebuilt collision.
+**Continue** revalidates the local contact against rebuilt collision.
 
 The craft starts and lands at the same approved site. The controller
 integrates bounded thrust at 60 Hz for ascent, injection, braking and
@@ -37,7 +37,8 @@ Build in Release with the [verified package workflow](build-bootstrap.md).
 From an interactive Windows desktop with Graphics Tools and NVIDIA, run
 `./eng/Test-ProceduralFlight.ps1`. The script launches fresh WARP and NVIDIA
 processes, edits a pad, compares semantic flight traces, saves at touchdown
-and restarts. It also aborts a WARP mission after the first far frame and
+and restarts with local coverage that omits the upper flight corridor.
+It also aborts a WARP mission after the first far frame and
 checks the preflight save in a fresh process.
 
 The flight tests verify successful near/far/near presentation and renderer

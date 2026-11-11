@@ -53,10 +53,13 @@ internal sealed partial class VolumeExploration
             ProceduralLanding.Read(checkpoint, out var decoded) != SaveGameValidation.Valid || decoded is not { } landed)
             throw new InvalidOperationException("Landed checkpoint differs from the current player or flight state.");
         if (phase == "resume")
-            await ConfirmRestoredLandingAsync(terrain, renderHost.Active, player, landed, token).ConfigureAwait(false);
-        if (!TryFlightPad(terrain, landed.Foot, out var pad, out var digest, out var reason) ||
-            Length(Subtract(pad, landed.Foot)) > 0.08)
-            throw new InvalidOperationException($"Saved flight footprint differs ({reason}).");
+        {
+            using var lease = terrain.TryRead() ?? throw new InvalidOperationException("Missing restored terrain.");
+            var outer = planet.Descriptor.SampleAt(Scale(Unit(landed.Foot), FlightBoundary + 1));
+            if (lease.TryReadDensity(outer, out _))
+                throw new InvalidOperationException("The restore fixture must omit the upper flight corridor.");
+        }
+        var digest = ConfirmRestoredLanding(terrain, landed);
         var foot = landed.Foot;
         Console.WriteLine(FormattableString.Invariant(
             $"WP11 LANDED generation={checkpoint.Generation} tick={landed.FlightTick} revision={landed.Revision} overlay={digest} craft={foot.X:R},{foot.Y:R},{foot.Z:R} player={player.Position.X:R},{player.Position.Y:R},{player.Position.Z:R}"));

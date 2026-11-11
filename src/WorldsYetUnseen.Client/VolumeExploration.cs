@@ -103,8 +103,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var state = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
         if (slot?.Checkpoint is { } checkpoint && ProceduralLanding.Read(checkpoint, out var landed) == SaveGameValidation.Valid &&
             landed is { } restored)
-            await ConfirmRestoredLandingAsync(terrain, renderHost.Active, state, restored, token).ConfigureAwait(false);
-        if (slot?.ReadOnly == true)
+        {
+            ConfirmRestoredLanding(terrain, restored);
+            Notice(slot.ReadOnly ? "Verified touchdown opened read-only." : "Continued from a verified touchdown.");
+        }
+        else if (slot?.ReadOnly == true)
             Notice("Recovered checkpoint opened read-only.");
         else if (slot is not null)
             Notice("E remove | Q add | 1/2 material\nF5 save | F6 flight | F10 save and quit");
