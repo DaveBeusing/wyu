@@ -12,6 +12,7 @@ namespace WorldsYetUnseen.Client;
 internal sealed partial class VolumeExploration
 {
     private const double FlightOuterHeight = 72;
+    private const int FlightSupportCells = 32;
     private const double GearRadius = 0.4;
     private const double GearHeight = 1.25;
     private static readonly VolumeQueryLimits FlightQueries = new(8_000_000, 128);
@@ -31,7 +32,7 @@ internal sealed partial class VolumeExploration
         var anchor = scriptedAnchor ?? Add(player.Position, Scale(player.Heading, 5));
         var center = FlightCoverageCenter(player.Position);
         await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, terrain.View.Frame, token,
-            coverageCenter: center).ConfigureAwait(false);
+            coverageCenter: center, supportCells: FlightSupportCells).ConfigureAwait(false);
         if (!TryFlightPad(terrain, anchor, out var pad, out var digest, out var blocked))
         {
             if (scripted)
@@ -75,7 +76,8 @@ internal sealed partial class VolumeExploration
                         terrain.ChangeView(view.Frame, checked(view.RendererEpoch + 1));
                         await renderHost.NearAsync(terrain, token).ConfigureAwait(false);
                         await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, view.Frame, token,
-                            coverageCenter: center, flightCamera: flight.State.Position).ConfigureAwait(false);
+                            coverageCenter: center, flightCamera: flight.State.Position, supportCells: FlightSupportCells)
+                            .ConfigureAwait(false);
                         far = false;
                         if (_published.TerrainRevision != revision || !TryFlightPad(terrain, anchor, out var returned,
                                 out var returnedDigest, out blocked) || returnedDigest != digest || Length(Subtract(pad, returned)) > 0.01)

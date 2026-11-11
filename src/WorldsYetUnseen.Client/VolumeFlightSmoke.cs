@@ -17,14 +17,14 @@ internal sealed partial class VolumeExploration
             var anchor = new PlanetVector(21, 4105, 16);
             var center = FlightCoverageCenter(player.Position);
             await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, terrain.View.Frame, token,
-                coverageCenter: center).ConfigureAwait(false);
+                coverageCenter: center, supportCells: FlightSupportCells).ConfigureAwait(false);
             if (!TryFlightPad(terrain, anchor, out var before, out _, out var blocked))
                 throw new InvalidOperationException($"Unedited comparison pad unavailable ({blocked}).");
             if (!await EditAsync(terrain, renderHost.Active, player, new(21, 4105, 16), VolumeBrushOperation.Add,
                     (ushort)ReferenceTerrainMaterial.OchreStone, token).ConfigureAwait(false))
                 throw new InvalidOperationException("The flight fixture could not edit its landing pad.");
             await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, terrain.View.Frame, token,
-                coverageCenter: center).ConfigureAwait(false);
+                coverageCenter: center, supportCells: FlightSupportCells).ConfigureAwait(false);
             if (!TryFlightPad(terrain, anchor, out var after, out _, out blocked) || Length(after) - Length(before) < 0.5)
                 throw new InvalidOperationException($"The landing footprint did not move with the terrain edit ({blocked}).");
             Console.WriteLine(FormattableString.Invariant(
