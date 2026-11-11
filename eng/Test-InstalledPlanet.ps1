@@ -250,7 +250,11 @@ try {
     Continue-Planet
     Wait-Panel '*E remove*F6 flight*'
     Press 117
-    Wait-Panel '*Flight: Orbit*' 70
+    Wait-For {
+        $panel = Read-AlphaOverlay $process
+        if ($panel -like '*Takeoff blocked*') { throw "Installed takeoff was rejected: $panel" }
+        return $panel -like '*Flight: Orbit*'
+    } 'orbital flight' 70
     Screenshot 'orbit'
     Wait-Panel '*Touchdown confirmed*' 140
     Screenshot 'touchdown'
