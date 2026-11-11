@@ -42,8 +42,10 @@ internal sealed partial class VolumeExploration
             var result = await SaveAsync(terrain, token).ConfigureAwait(false);
             var saved = result.Status is VolumeSlotStatus.Committed or VolumeSlotStatus.AlreadyCommitted;
             _quitAfterSave = saveAndQuit && saved;
+            diagnostics?.Write(saved ? "save" : "save-held", $"status={result.Status} generation={result.Checkpoint?.Generation ?? 0} revision={_published.TerrainRevision}");
             Notice(saved && result.Checkpoint is { } checkpoint
-                ? $"Saved generation {checkpoint.Generation}" : $"Save unavailable: {result.Status}");
+                ? $"Saved generation {checkpoint.Generation}" : result.Status == VolumeSlotStatus.Busy
+                    ? "Save busy. Close the other writer or wait, then try again." : $"Save unavailable: {result.Status}");
             return true;
         }
 
@@ -63,6 +65,7 @@ internal sealed partial class VolumeExploration
         }
 
         var edited = await EditAsync(terrain, renderer, state, center, operation, (ushort)_material, token).ConfigureAwait(false);
+        diagnostics?.Write(edited ? "edit" : "edit-held", $"operation={operation} revision={_published.TerrainRevision}");
         Notice(edited ? $"Terrain changed (revision {_published.TerrainRevision})" : "Edit blocked. Terrain retained.");
         return true;
     }

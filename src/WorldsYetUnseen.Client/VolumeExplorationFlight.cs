@@ -112,6 +112,8 @@ internal sealed partial class VolumeExploration
                     if (flight.Phase != previousPhase)
                     {
                         previousPhase = flight.Phase;
+                        diagnostics?.Write("flight", FormattableString.Invariant(
+                            $"stage={flight.Phase} tick={flight.Tick} revision={revision}"));
                         if (scripted)
                             FlightTrace(flight.Phase.ToString(), flight, revision, digest);
                         break;
@@ -147,6 +149,8 @@ internal sealed partial class VolumeExploration
             throw new InvalidOperationException("Flight did not complete the near/far/near orbital route.");
         var landing = new ProceduralLanding(flight.State.Position, revision, flight.Tick);
         var position = await PublishLandingAsync(terrain, player, landing, token).ConfigureAwait(false);
+        diagnostics?.Write("touchdown", FormattableString.Invariant(
+            $"tick={landing.FlightTick} revision={revision} overlay={digest}"));
         Notice("Touchdown confirmed. F5 saves this landing.");
         if (scripted)
             FlightTrace("touchdown", flight, revision, digest);

@@ -74,10 +74,14 @@ internal static partial class GameHost
             var planet = slot?.Planet ?? new ReferencePlanet(new Guid("d89e4d83-1228-4780-b2c4-1af37f48468e"), smokeSeed!.Value);
             if (!scripted)
                 mouse = new PrototypeMouseLook(window, settings);
-            var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot);
+            var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics);
             terrain = exploration.CreateTerrain();
+            diagnostics?.Enter("GraphicsStartup");
+            diagnostics?.CheckGraphics();
             await renderHost.NearAsync(terrain, token).ConfigureAwait(false);
             renderer = renderHost.Active;
+            diagnostics?.Write("adapter", renderer.ReadDiagnostics().Adapter?.Description);
+            diagnostics?.Enter("PlanetTerrain");
             reason = HostStopReason.RuntimeFault;
             if (flightSmoke)
                 await exploration.RunFlightSmokeAsync(terrain, renderHost, saveSmoke!, token).ConfigureAwait(false);
@@ -106,6 +110,9 @@ internal static partial class GameHost
             slot?.Dispose();
             terrain?.Stop();
             renderer = renderHost.Current;
+            if (renderer?.Read() is { } graphics &&
+                (graphics.FirstFault is not null || graphics.FirstCleanupFault is not null))
+                diagnostics?.MarkGraphicsFailure();
             try
             {
                 try
@@ -174,7 +181,15 @@ internal static partial class GameHost
             }).ConfigureAwait(false);
             if (opened.loaded is { } slot)
                 return slot;
-            notice = $"Cannot continue: {opened.status}.\nChoose New World for a separate slot.";
+            notice = opened.status switch
+            {
+                VolumeSlotStatus.Incompatible => "This slot has an incompatible world format. Its files were kept.",
+                VolumeSlotStatus.Corrupt => "This world has damaged checkpoint data. Its files were kept.",
+                VolumeSlotStatus.Empty => "This world has no committed checkpoint yet.",
+                VolumeSlotStatus.Busy or VolumeSlotStatus.Indeterminate => "This world is busy or still recovering. Try again.",
+                _ => $"Cannot continue: {opened.status}."
+            };
+            notice += "\nChoose New World for a separate slot.";
         }
     }
 
