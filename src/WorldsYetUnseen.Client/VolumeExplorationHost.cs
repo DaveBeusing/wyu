@@ -12,7 +12,8 @@ namespace WorldsYetUnseen.Client;
 internal static partial class GameHost
 {
     internal static async Task RunExplorationAsync(ulong? smokeSeed, bool useWarp, AlphaDiagnostics? diagnostics,
-        CancellationToken cancellationToken, string? settingsDirectory = null)
+        CancellationToken cancellationToken, string? settingsDirectory = null,
+        string? saveRoot = null, string? saveSmoke = null)
     {
         var clock = TimeProvider.System;
         var timeout = TimeSpan.FromSeconds(10);
@@ -22,8 +23,9 @@ internal static partial class GameHost
             ?? throw new InvalidOperationException("Could not reserve the exploration runtime.");
         var runtime = RuntimeSafetyAuthority.Create(clock, timing, reservation);
         var context = new EngineModuleContext(clock, timing, runtime.Reporter, runtime.StopControl);
+        var scripted = smokeSeed.HasValue || saveSmoke is not null;
         var window = new WindowsHostModule(new WindowsHostOptions(
-            smokeSeed.HasValue ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen — New World", 960, 540, 256),
+            scripted ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen — New World", 960, 540, 256),
             runtime.UiWake, runtime.RuntimeOwnership);
         using var stage = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = stage.Token;
@@ -32,6 +34,7 @@ internal static partial class GameHost
         VolumeStreamingCoordinator? terrain = null;
         AlphaOverlay? overlay = null;
         PrototypeMouseLook? mouse = null;
+        VolumeWorldSlot? slot = null;
         var reason = HostStopReason.StartupFault;
         Exception? failure = null;
         try
@@ -41,13 +44,16 @@ internal static partial class GameHost
             await window.StartAsync(token).ConfigureAwait(false);
             watchClose = WatchWindowCloseAsync(window, stage);
             var settings = settingsDirectory is null ? AlphaSettings.Defaults : new AlphaSettingsStore(settingsDirectory).Load().Value;
-            if (!smokeSeed.HasValue)
+            if (!scripted)
             {
                 overlay = new AlphaOverlay(activateOwner: true);
                 AlphaWindowSize.TryApply(settings.Size);
             }
-            var seed = smokeSeed ?? await VolumeExploration.ChooseSeedAsync(window, overlay!, token).ConfigureAwait(false);
-            if (seed is null)
+            if (!scripted)
+                slot = await ChooseVolumeSlotAsync(window, overlay!, saveRoot ?? DefaultVolumeRoot(), token).ConfigureAwait(false);
+            else if (saveSmoke is not null)
+                slot = await OpenVolumeSmokeSlotAsync(saveRoot!, saveSmoke, token).ConfigureAwait(false);
+            if (!scripted && slot is null)
             {
                 reason = HostStopReason.ExternalCancellation;
                 return;
@@ -58,25 +64,26 @@ internal static partial class GameHost
                 throw new InvalidOperationException("Could not allocate an exploration world.");
             var world = runtime.OpenWorld(id, WorldQuota,
                 new BarrierSupervisorPolicy(WorldQuota.Diagnostics.RequiredEvidenceRecords), new ExplorationRoot(id),
-                new ExplorationJobScope());
-            // W02 worlds are ephemeral. A later persistence package supplies an instance ID from the saved manifest.
-            var worldIdentity = smokeSeed.HasValue ? new Guid("d89e4d83-1228-4780-b2c4-1af37f48468e") : Guid.NewGuid();
-            var planet = new ReferencePlanet(worldIdentity, seed.Value);
-            if (!smokeSeed.HasValue)
+                new ExplorationJobScope(), slot?.Checkpoint?.Tick ?? 0);
+            var planet = slot?.Planet ?? new ReferencePlanet(new Guid("d89e4d83-1228-4780-b2c4-1af37f48468e"), smokeSeed!.Value);
+            if (!scripted)
                 mouse = new PrototypeMouseLook(window, settings);
-            var exploration = new VolumeExploration(world, planet, window, overlay, mouse);
+            var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot);
             terrain = exploration.CreateTerrain();
             renderer = D3D12Renderer.CreateWithVolumeTerrain(window, runtime.RuntimeOwnership, terrain, 1,
                 new D3D12DiagnosticsOptions(true, true), useWarp, timeout, timeout);
             await renderer.InitializeAsync(context, token).ConfigureAwait(false);
             await renderer.StartAsync(token).ConfigureAwait(false);
             reason = HostStopReason.RuntimeFault;
-            await exploration.ExploreAsync(terrain, renderer, smokeSeed.HasValue, token).ConfigureAwait(false);
-            if (smokeSeed.HasValue)
+            if (saveSmoke is null)
+                await exploration.ExploreAsync(terrain, renderer, scripted, token).ConfigureAwait(false);
+            else
+                await exploration.RunSaveSmokeAsync(terrain, renderer, saveSmoke, token).ConfigureAwait(false);
+            if (scripted)
                 DesktopSmoke.RequestNativeClose(renderer.Read(), "WP11 exploration");
             reason = HostStopReason.ExternalCancellation;
         }
-        catch (OperationCanceledException) when (!smokeSeed.HasValue && token.IsCancellationRequested)
+        catch (OperationCanceledException) when (!scripted && token.IsCancellationRequested)
         {
             reason = HostStopReason.ExternalCancellation;
         }
@@ -90,6 +97,7 @@ internal static partial class GameHost
             await watchClose.ConfigureAwait(false);
             mouse?.Dispose();
             overlay?.Dispose();
+            slot?.Dispose();
             terrain?.Stop();
             try
             {
@@ -105,12 +113,54 @@ internal static partial class GameHost
         if (failure is not null)
             ExceptionDispatchInfo.Throw(failure);
 
-        if (smokeSeed.HasValue)
+        if (scripted)
         {
             DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: true, requireNvidia: !useWarp, useWarp: useWarp);
             if (terrain!.Statistics is not { Readers: 0, Generations: 0 })
                 throw new InvalidOperationException("Exploration retained terrain after shutdown.");
             Console.WriteLine("PASS: WYU WP11 exploration, rebase and native shutdown.");
+        }
+    }
+
+    private static string DefaultVolumeRoot() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WorldsYetUnseen", "WP11", "v2");
+
+    private static async Task<VolumeWorldSlot?> ChooseVolumeSlotAsync(WindowsHostModule window, AlphaOverlay overlay,
+        string root, CancellationToken token)
+    {
+        var slots = VolumeWorldSlot.List(root);
+        var selected = 0;
+        string? notice = null;
+        while (true)
+        {
+            var label = selected == 0 ? "New World" : $"Continue {selected}/{slots.Length}\n{slots[selected - 1]:N}";
+            overlay.Menu = $"WYU\n\nPlanet worlds\n\n> {label}\n\nUp / Down to choose\nEnter to open\nEsc to exit\n\n{notice}";
+            await Task.Delay(16, token).ConfigureAwait(false);
+            var input = window.Capture();
+            if (PrototypeMenu.Pressed(input, InputControl.Escape))
+                return null;
+            if (PrototypeMenu.Pressed(input, InputControl.Up))
+                selected = (selected + slots.Length) % (slots.Length + 1);
+            if (PrototypeMenu.Pressed(input, InputControl.Down))
+                selected = (selected + 1) % (slots.Length + 1);
+            if (!PrototypeMenu.Pressed(input, InputControl.Enter))
+                continue;
+
+            if (selected == 0)
+            {
+                var seed = await VolumeExploration.ChooseSeedAsync(window, overlay, token).ConfigureAwait(false);
+                if (seed is { } value)
+                    return await Task.Run(() => VolumeWorldSlot.Create(root, value)).ConfigureAwait(false);
+                continue;
+            }
+            var opened = await Task.Run(() =>
+            {
+                var loaded = VolumeWorldSlot.Open(root, slots[selected - 1], out var status);
+                return (loaded, status);
+            }).ConfigureAwait(false);
+            if (opened.loaded is { } slot)
+                return slot;
+            notice = $"Cannot continue: {opened.status}.\nChoose New World for a separate slot.";
         }
     }
 

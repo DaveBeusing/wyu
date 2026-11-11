@@ -56,7 +56,8 @@ public sealed class ReferencePlanet
         ArgumentNullException.ThrowIfNull(coordinator);
         spawn = default;
         using var terrain = coordinator.TryRead();
-        if (terrain is null || terrain.EditLineage is not null || !FindSpawnCandidates().Contains(candidate))
+        if (terrain is null || terrain.EditLineage is { } lineage &&
+            (lineage != Descriptor || terrain.EditOverlayBytes != 8) || !FindSpawnCandidates().Contains(candidate))
             return false;
         var key = Descriptor.SampleAt(candidate);
         if (!terrain.TryReadDensity(key, out var density) || density != Field.SampleDensity(key))
