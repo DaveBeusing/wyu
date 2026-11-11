@@ -6,6 +6,9 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        if (args is ["--cave-smoke", "init" or "resume", _])
+            return await RunCaveSmokeAsync(args[1], args[2]).ConfigureAwait(false);
+
         if (args is ["--new-world"] || args is ["--planet-playtest", _] or ["--planet-playtest", _, "graphics" or "budget"] ||
             args is ["--volume-smoke", _, "warp" or "hardware"] ||
             args is ["--volume-save-smoke", "init" or "restore" or "interrupt" or "verify" or "protected", _] ||
@@ -49,7 +52,7 @@ internal static class Program
         };
         if (mode is null && !saveSmoke)
         {
-            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--new-world | --volume-smoke seed warp|hardware | --prototype [slot-directory [settings-directory]] | --prototype-smoke | --d3d12 | --d3d12-smoke | --terrain | --terrain-smoke | --walkable | --walkable-smoke | --planet | --planet-smoke | --flight [slot-directory] | --flight-smoke slot-directory | --flight-reload-smoke slot-directory | --save-world [slot-directory] | --window-smoke | --headless-smoke | --fault-smoke]");
+            Console.Error.WriteLine("Usage: WorldsYetUnseen.Client [--new-world | --cave-smoke init|resume fixture-directory | --volume-smoke seed warp|hardware | --prototype [slot-directory [settings-directory]] | --prototype-smoke | --d3d12 | --d3d12-smoke | --terrain | --terrain-smoke | --walkable | --walkable-smoke | --planet | --planet-smoke | --flight [slot-directory] | --flight-smoke slot-directory | --flight-reload-smoke slot-directory | --save-world [slot-directory] | --window-smoke | --headless-smoke | --fault-smoke]");
             return 2;
         }
 
@@ -94,6 +97,28 @@ internal static class Program
         {
             eventArgs.Cancel = true;
             cancellation.Cancel();
+        }
+    }
+
+    private static async Task<int> RunCaveSmokeAsync(string phase, string directory)
+    {
+        using var stop = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        try
+        {
+            var root = Path.GetFullPath(directory);
+            if (!File.Exists(Path.Combine(root, "wyu-cave-smoke.fixture")))
+            {
+                Console.Error.WriteLine("Expected an isolated cave smoke fixture directory.");
+                return 2;
+            }
+            await GameHost.RunExplorationAsync(null, useWarp: false, diagnostics: null, cancellationToken: stop.Token,
+                saveRoot: root, caveSmoke: phase).ConfigureAwait(false);
+            return 0;
+        }
+        catch (Exception failure)
+        {
+            Console.Error.WriteLine(failure);
+            return 1;
         }
     }
 

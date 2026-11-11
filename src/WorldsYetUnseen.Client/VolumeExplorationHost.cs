@@ -14,7 +14,7 @@ internal static partial class GameHost
 {
     internal static async Task RunExplorationAsync(ulong? smokeSeed, bool useWarp, AlphaDiagnostics? diagnostics,
         CancellationToken cancellationToken, string? settingsDirectory = null,
-        string? saveRoot = null, string? saveSmoke = null, bool flightSmoke = false)
+        string? saveRoot = null, string? saveSmoke = null, bool flightSmoke = false, string? caveSmoke = null)
     {
         var clock = TimeProvider.System;
         var timeout = TimeSpan.FromSeconds(10);
@@ -24,7 +24,7 @@ internal static partial class GameHost
             ?? throw new InvalidOperationException("Could not reserve the exploration runtime.");
         var runtime = RuntimeSafetyAuthority.Create(clock, timing, reservation);
         var context = new EngineModuleContext(clock, timing, runtime.Reporter, runtime.StopControl);
-        var scripted = smokeSeed.HasValue || saveSmoke is not null;
+        var scripted = smokeSeed.HasValue || saveSmoke is not null || caveSmoke is not null;
         var window = new WindowsHostModule(new WindowsHostOptions(
             scripted ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen — New World", 960, 540, 256),
             runtime.UiWake, runtime.RuntimeOwnership);
@@ -53,6 +53,8 @@ internal static partial class GameHost
             }
             if (!scripted)
                 slot = await ChooseVolumeSlotAsync(window, overlay!, saveRoot ?? DefaultVolumeRoot(), token).ConfigureAwait(false);
+            else if (caveSmoke is not null)
+                slot = await OpenCaveSmokeSlotAsync(saveRoot!, caveSmoke, token).ConfigureAwait(false);
             else if (saveSmoke is not null)
                 slot = await OpenVolumeSmokeSlotAsync(saveRoot!, saveSmoke is "flight" or "abort" ? "init" : saveSmoke, token)
                     .ConfigureAwait(false);
@@ -62,16 +64,33 @@ internal static partial class GameHost
                 return;
             }
 
+            if (overlay is not null)
+                overlay.Reticle = slot?.Cave is not null;
             diagnostics?.Enter("PlanetTerrain");
             if (!runtime.TryAllocateWorldId(out var id))
                 throw new InvalidOperationException("Could not allocate an exploration world.");
-            ProceduralLanding? landed = null;
-            if (slot?.Checkpoint is { } checkpoint && ProceduralLanding.Read(checkpoint, out landed) != SaveGameValidation.Valid)
-                throw new InvalidDataException("The procedural checkpoint payload is invalid.");
+            IWorldStateRoot initial;
+            if (slot?.Cave is not null)
+            {
+                var ore = 0;
+                ulong inventoryRevision = 1;
+                if (slot.Checkpoint is { } caveCheckpoint &&
+                    CaveInventory.Read(caveCheckpoint, out ore, out inventoryRevision) != SaveGameValidation.Valid)
+                    throw new InvalidDataException("The cave inventory checkpoint is invalid.");
+                initial = new CaveInventory(id, ore, inventoryRevision);
+            }
+            else
+            {
+                ProceduralLanding? landed = null;
+                if (slot?.Checkpoint is { } checkpoint && ProceduralLanding.Read(checkpoint, out landed) != SaveGameValidation.Valid)
+                    throw new InvalidDataException("The procedural checkpoint payload is invalid.");
+                initial = new ExplorationRoot(id, landed);
+            }
             var world = runtime.OpenWorld(id, WorldQuota,
-                new BarrierSupervisorPolicy(WorldQuota.Diagnostics.RequiredEvidenceRecords), new ExplorationRoot(id, landed),
+                new BarrierSupervisorPolicy(WorldQuota.Diagnostics.RequiredEvidenceRecords), initial,
                 new ExplorationJobScope(), slot?.Checkpoint?.Tick ?? 0);
-            var planet = slot?.Planet ?? new ReferencePlanet(new Guid("d89e4d83-1228-4780-b2c4-1af37f48468e"), smokeSeed!.Value);
+            var planet = slot?.Planet ?? (slot?.Cave is null
+                ? new ReferencePlanet(new Guid("d89e4d83-1228-4780-b2c4-1af37f48468e"), smokeSeed!.Value) : null);
             if (!scripted)
                 mouse = new PrototypeMouseLook(window, settings);
             var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics);
@@ -83,14 +102,16 @@ internal static partial class GameHost
             diagnostics?.Write("adapter", renderer.ReadDiagnostics().Adapter?.Description);
             diagnostics?.Enter("PlanetTerrain");
             reason = HostStopReason.RuntimeFault;
-            if (flightSmoke)
+            if (caveSmoke is not null)
+                await exploration.RunCaveSmokeAsync(terrain, renderer, caveSmoke, token).ConfigureAwait(false);
+            else if (flightSmoke)
                 await exploration.RunFlightSmokeAsync(terrain, renderHost, saveSmoke!, token).ConfigureAwait(false);
             else if (saveSmoke is null)
                 await exploration.ExploreAsync(terrain, renderHost, scripted, token).ConfigureAwait(false);
             else
                 await exploration.RunSaveSmokeAsync(terrain, renderer, saveSmoke, token).ConfigureAwait(false);
             if (scripted)
-                DesktopSmoke.RequestNativeClose(renderHost.Active.Read(), "WP11 exploration");
+                DesktopSmoke.RequestNativeClose(renderHost.Active.Read(), caveSmoke is null ? "WP11 exploration" : "WP12 cave");
             reason = HostStopReason.ExternalCancellation;
         }
         catch (OperationCanceledException) when (!scripted && token.IsCancellationRequested)
@@ -139,7 +160,8 @@ internal static partial class GameHost
             DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: true, requireNvidia: !useWarp, useWarp: useWarp);
             if (terrain!.Statistics is not { Readers: 0, Generations: 0 })
                 throw new InvalidOperationException("Exploration retained terrain after shutdown.");
-            Console.WriteLine("PASS: WYU WP11 exploration, rebase and native shutdown.");
+            Console.WriteLine(caveSmoke is null ? "PASS: WYU WP11 exploration, rebase and native shutdown."
+                : "PASS: WYU WP12 cave route and native shutdown.");
         }
     }
 
@@ -151,21 +173,28 @@ internal static partial class GameHost
     {
         var slots = VolumeWorldSlot.List(root);
         var selected = 0;
+        var caveOption = slots.Length + 1;
+        var optionCount = caveOption + 1;
         string? notice = null;
         while (true)
         {
-            var label = selected == 0 ? "New World" : $"Continue {selected}/{slots.Length}\n{slots[selected - 1]:N}";
-            overlay.Menu = $"WYU\n\nPlanet worlds\n\n> {label}\n\nUp / Down to choose\nEnter to open\nEsc to exit\n\n{notice}";
+            var label = selected == 0 ? "New World" : selected == caveOption
+                ? $"New Cave World\n{CavePlanet.Name} · seed {CavePlanet.Seed}" : $"Continue {selected}/{slots.Length}\n{slots[selected - 1]:N}";
+            var guidance = selected == 0 ? "Up for Cave World\n" : "";
+            overlay.Menu = $"WYU\n\nPlanet worlds\n\n> {label}\n\n{guidance}Up / Down to choose\nEnter to open\nEsc to exit\n\n{notice}";
             await Task.Delay(16, token).ConfigureAwait(false);
             var input = window.Capture();
             if (PrototypeMenu.Pressed(input, InputControl.Escape))
                 return null;
             if (PrototypeMenu.Pressed(input, InputControl.Up))
-                selected = (selected + slots.Length) % (slots.Length + 1);
+                selected = (selected + optionCount - 1) % optionCount;
             if (PrototypeMenu.Pressed(input, InputControl.Down))
-                selected = (selected + 1) % (slots.Length + 1);
+                selected = (selected + 1) % optionCount;
             if (!PrototypeMenu.Pressed(input, InputControl.Enter))
                 continue;
+
+            if (selected == caveOption)
+                return await Task.Run(() => VolumeWorldSlot.Create(root, CavePlanet.Seed, cave: true)).ConfigureAwait(false);
 
             if (selected == 0)
             {
