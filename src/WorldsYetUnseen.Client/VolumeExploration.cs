@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Security.Cryptography;
 using Groundwork.Core;
 using Groundwork.Platform.Windows;
+using Groundwork.Persistence;
 using Groundwork.Rendering;
 using Groundwork.Rendering.D3D12;
 using Groundwork.Voxels;
@@ -11,16 +12,18 @@ using WorldsYetUnseen.Gameplay;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet planet, WindowsHostModule window,
-    AlphaOverlay? overlay, PrototypeMouseLook? mouse)
+internal sealed partial class VolumeExploration(WorldSafetyPorts world, ReferencePlanet planet, WindowsHostModule window,
+    AlphaOverlay? overlay, PrototypeMouseLook? mouse, VolumeWorldSlot? slot)
 {
     private const long MeshBytes = 10 * 1024 * 1024;
     private const long NativeBytes = 16 * 1024 * 1024;
     private const int RouteSteps = 480;
+    private const int OverlayLimit = 8192;
     private static readonly PlanetVector East = new(1, 0, 0);
     private static readonly Vector4 Sky = new(0.18f, 0.28f, 0.42f, 1);
     private readonly WorldPublicationPorts _ports = world.Publication;
-    private ulong _tick, _sequence;
+    private ulong _tick = slot?.Checkpoint?.Tick ?? 0;
+    private ulong _sequence;
     private float _yaw, _pitch = -0.2f;
     private bool _debug;
     private VolumeStreamingSelection? _selection;
@@ -32,10 +35,12 @@ internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet 
         var unit = Charge(VolumeStreamingSelection.Select(planet.Descriptor,
             new(16, ReferencePlanet.RadiusMeters, 16), East));
         var baseline = unit.Retained + unit.Retained;
-        baseline = baseline with { LeaseSlots = baseline.LeaseSlots + 16 };
-        return new VolumeStreamingCoordinator(world, planet.Descriptor,
-            new VolumeStreamingLimits(baseline + unit + unit + unit + unit,
-                baseline, unit, unit, unit, unit, 12, 12, 256));
+        baseline = baseline with { LeaseSlots = baseline.LeaseSlots + 16, CpuBytes = baseline.CpuBytes + 32L * OverlayLimit };
+        var limits = new VolumeStreamingLimits(baseline + unit + unit + unit + unit,
+            baseline, unit, unit, unit, unit, 12, 12, 256);
+        return slot?.Checkpoint is { } checkpoint
+            ? checkpoint.RestoreTerrain(world, planet.Field, limits, OverlayLimit, VolumeWorldSlot.SupportsMaterial)
+            : new VolumeStreamingCoordinator(world, planet.Field, limits, OverlayLimit);
     }
 
     internal static async Task<ulong?> ChooseSeedAsync(WindowsHostModule window, AlphaOverlay overlay,
@@ -71,23 +76,35 @@ internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet 
         }
     }
 
-    internal async Task ExploreAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, bool scripted,
+    private async Task<PlanetWalkState> OpenTerrainAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
         CancellationToken token)
     {
-        ReferenceSpawn? spawn = null;
+        if (slot?.Checkpoint?.Player is { } saved)
+        {
+            await LoadAsync(terrain, renderer, saved.Position, saved.Heading, PlanetLocalFrame.Create(saved.Position), token)
+                .ConfigureAwait(false);
+            if (_ports.Committed.Read().Root is not VolumeWorldRoot root || root.Player != saved)
+                throw new InvalidDataException("The saved player pose could not be restored.");
+            return saved;
+        }
+
         foreach (var candidate in planet.FindSpawnCandidates())
         {
             await LoadAsync(terrain, renderer, candidate, East, PlanetLocalFrame.Create(candidate), token).ConfigureAwait(false);
             if (planet.TryConfirmSpawn(terrain, candidate, out var site) && site.Terrain == _published)
-            {
-                spawn = site;
-                break;
-            }
+                return new PlanetWalkState(site.Foot, East, default);
         }
-        if (spawn is not { } verified)
-            throw new InvalidOperationException("The seed has no collision-verified spawn.");
+        throw new InvalidOperationException("The seed has no collision-verified spawn.");
+    }
 
-        var state = new PlanetWalkState(verified.Foot, East, default);
+    internal async Task ExploreAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, bool scripted,
+        CancellationToken token)
+    {
+        var state = await OpenTerrainAsync(terrain, renderer, token).ConfigureAwait(false);
+        if (slot?.ReadOnly == true)
+            Notice("Recovered checkpoint opened read-only.");
+        else if (slot is not null)
+            Notice("E remove | Q add | 1/2 material\nF5 save | F10 save and quit");
         var start = state.Position;
         var startBrick = planet.Descriptor.SampleAt(start).Vertex.Locate().Brick;
         var nextBrick = startBrick with { Z = startBrick.Z + 1 };
@@ -129,6 +146,12 @@ internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet 
                 // A new tick must capture focus, surface and keys after the potentially long load.
                 continue;
             }
+            if (!scripted && await HandleWorldCommandsAsync(terrain, renderer, state, input, token).ConfigureAwait(false))
+            {
+                if (_quitAfterSave)
+                    return;
+                continue;
+            }
 
             var forward = scripted ? 0 : Axis(input, InputControl.W, InputControl.S);
             var right = scripted ? 1 : Axis(input, InputControl.D, InputControl.A);
@@ -159,7 +182,7 @@ internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet 
             Drain(terrain);
             if (overlay is not null)
             {
-                overlay.Menu = prepared is null ? $"Movement held\n{status}" : null;
+                overlay.Menu = prepared is null ? $"Movement held\n{status}" : CurrentNotice;
                 var statistics = terrain.Statistics;
                 overlay.Performance = _debug ? FormattableString.Invariant(
                     $"Seed {planet.Descriptor.Seed} | generator {planet.Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions | LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} MiB | GPU credit {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms | {status}") : null;
@@ -179,8 +202,9 @@ internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet 
         }
     }
 
-    private async Task LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
-        PlanetVector heading, PlanetLocalFrame frame, CancellationToken token)
+    private async Task<bool> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
+        PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
+        PlanetVector? coverageCenter = null)
     {
         // Spawn search and candidate fallback share the same monotonic origin sequence as movement.
         if (frame.Revision <= terrain.View.Frame.Revision)
@@ -196,27 +220,50 @@ internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet 
         if (overlay is not null)
             overlay.Menu = $"Loading planet terrain\n\n{ReferencePlanet.DisplayName}\nSeed {planet.Descriptor.Seed}\nGenerator {planet.Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
         RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
-        var selection = VolumeStreamingSelection.Select(planet.Descriptor, position, East);
+        var selection = VolumeStreamingSelection.Select(planet.Descriptor, coverageCenter ?? position, East);
         if (_selection is null || selection.Minimum != _selection.Minimum)
             _windows++;
         var revision = _published.TerrainRevision;
-        var result = terrain.TryStage(VolumeWorkClass.Movement, selection, revision, checked(revision + 1), MeshBytes,
-            Charge(selection), planet.Field, out var staged);
+        var targetRevision = revision == 0 ? slot?.Checkpoint?.TerrainRevision ?? 1 : revision;
+        VolumeStreamingWork? staged;
+        var result = edit is { } brush
+            ? terrain.TryStageEdit(brush.Tick, brush.Id, selection, MeshBytes, Charge(selection), out staged)
+            : terrain.TryStage(VolumeWorkClass.Movement, selection, revision, targetRevision, MeshBytes,
+                Charge(selection), planet.Field, out staged);
         if (result != VolumeAdmission.Accepted || staged is null)
+        {
+            if (edit is not null)
+                return false;
             throw new InvalidOperationException($"Terrain streaming admission failed ({result}).");
+        }
         using var work = staged;
         if (!await Task.Run(() => work.Execute(token), token).ConfigureAwait(false))
+        {
+            token.ThrowIfCancellationRequested();
+            if (edit is not null)
+                return false;
             throw new InvalidOperationException("Terrain generation did not complete.");
+        }
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
             pauseWhileMinimized: true).ConfigureAwait(false);
-        RequireMesh(renderer.TryStageVolumeTerrain(work.Generation));
+        var upload = renderer.TryStageVolumeTerrain(work.Generation);
+        if (edit is not null && upload is MeshReplacementSubmissionResult.Backpressure or MeshReplacementSubmissionResult.InvalidRegion)
+            return false;
+        RequireMesh(upload);
         await WaitAsync(renderer, () => renderer.IsVolumeTerrainReady(work.Generation), token).ConfigureAwait(false);
 
         await BeginAsync(token).ConfigureAwait(false);
         var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
         var prepared = renderer.TryPrepareVolumePublication(work.Generation, commit, [], out var preparation);
         if (prepared is null)
+        {
+            if (edit is not null)
+            {
+                Finish(commit);
+                return false;
+            }
             throw new InvalidOperationException($"Terrain publication was rejected ({preparation}).");
+        }
         if (Finish(commit, prepared).Status != BarrierStatus.Committed)
             throw new InvalidOperationException("Terrain publication did not commit.");
         using (var lease = terrain.TryRead() ?? throw new InvalidOperationException("Published terrain unavailable."))
@@ -234,6 +281,7 @@ internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet 
         _fineBricks = CountFineBricks(selection);
         _views++;
         Drain(terrain);
+        return true;
     }
 
     private static int CountFineBricks(VolumeStreamingSelection selection)
@@ -285,7 +333,7 @@ internal sealed class VolumeExploration(WorldSafetyPorts world, ReferencePlanet 
     }
 
     private static VolumeResources Charge(VolumeStreamingSelection selection) =>
-        new(VolumeStreamingCoordinator.RequiredCpuBytes(selection, MeshBytes) + NativeBytes,
+        new(VolumeStreamingCoordinator.RequiredCpuBytes(selection, MeshBytes) + NativeBytes + 64L * OverlayLimit + 4096,
             NativeBytes, NativeBytes, NativeBytes, 1, 1, 1, 64, 1);
 
     private async Task<BarrierStamp> BeginAsync(CancellationToken token)

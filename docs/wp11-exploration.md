@@ -3,7 +3,8 @@
 Open **New World** in the alpha sidebar, or launch with `--new-world`.
 Enter a decimal unsigned 64-bit seed, or leave the field blank to generate
 one. The loading panel shows the recipe name, seed, generator version and
-coverage status. The world is temporary and uses no save slot.
+coverage status. Use **Continue** in the planet world selector to reopen a
+committed checkpoint. See [terrain editing and saves](wp11-volume-save.md).
 
 Use WASD to walk, the mouse to look, F1 for terrain and frame diagnostics,
 and Esc to close the exploration window. The F1 panel shows the two brick
