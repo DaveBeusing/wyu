@@ -131,6 +131,7 @@ internal static class ReferencePlanetTests
                 out var work) == VolumeAdmission.Accepted, "Generation admission");
             using var staged = work ?? throw new InvalidOperationException("Missing staged work");
             Check(staged.Execute(), "Reference region meshing");
+            Check(!planet.TryConfirmSpawn(terrain, candidate, out _), "Unpublished geometry accepted for spawn");
             var begin = await SealAsync(world, BarrierKind.BeginTick);
             var empty = world.Publication.Preparation.TryPrepare(new BarrierPublicationDraft(begin,
                 world.Publication.Committed.Read().Root, world.State.Read().PendingFaultGeneration, [])).Publication
@@ -141,18 +142,20 @@ internal static class ReferencePlanetTests
                 ?? throw new InvalidOperationException("Missing collision publication");
             Check(world.Publication.Finalization.TryFinalize(prepared).Status == BarrierStatus.Committed, "Collision commit");
             using var lease = terrain.TryRead() ?? throw new InvalidOperationException("Missing collision coverage");
-            var foot = default(PlanetVector);
+            var spawn = default(ReferenceSpawn);
             var confirmed = false;
             foreach (var site in planet.FindSpawnCandidates())
             {
-                if (!planet.TryConfirmSpawn(lease, site, out foot))
+                if (!planet.TryConfirmSpawn(terrain, site, out spawn))
                     continue;
                 confirmed = true;
                 break;
             }
             Check(confirmed, $"Unsafe spawn for seed {seed}");
-            Check(!new ReferencePlanet(Guid.NewGuid(), seed).TryConfirmSpawn(lease, candidate, out _), "Foreign world accepted");
-            Check(!planet.TryConfirmSpawn(lease, candidate with { X = candidate.X + 2048 }, out _), "Invalid candidate accepted");
+            Check(spawn.Terrain == lease.Info, "Spawn proof lost the committed terrain identity");
+            Check(!new ReferencePlanet(Guid.NewGuid(), seed).TryConfirmSpawn(terrain, candidate, out _), "Foreign world accepted");
+            Check(!planet.TryConfirmSpawn(terrain, candidate with { X = candidate.X + 2048 }, out _), "Invalid candidate accepted");
+            var foot = spawn.Foot;
             var body = new VolumeCapsule(foot with { Y = foot.Y + 0.35 }, foot with { Y = foot.Y + 1.4 }, 0.35);
             Check(lease.Sweep(body, new(2, 0, 0)).Status == VolumeQueryStatus.Clear, "Eastbound clearance");
             Check(lease.Sweep(body with { A = body.A with { X = body.A.X + 2 },

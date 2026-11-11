@@ -8,6 +8,8 @@ public enum ReferenceTerrainMaterial : ushort
     OchreStone = 2,
 }
 
+public readonly record struct ReferenceSpawn(PlanetVector Foot, VolumePublicationInfo Terrain);
+
 public sealed class ReferencePlanet
 {
     public const string RecipeId = "wyu.reference-planet.v1";
@@ -46,14 +48,15 @@ public sealed class ReferencePlanet
     }
 
     /// <summary>
-    /// Confirms the spawn and landing footprint against published collision from this recipe's initial terrain.
-    /// The caller must hold the current terrain lease and keep the same revision through spawn publication.
+    /// Confirms the spawn and landing footprint against the coordinator's published collision.
+    /// Use the coordinator for this planet's initial terrain and revalidate the returned terrain at spawn publication.
     /// </summary>
-    public bool TryConfirmSpawn(VolumeStreamingLease terrain, PlanetVector candidate, out PlanetVector foot)
+    public bool TryConfirmSpawn(VolumeStreamingCoordinator coordinator, PlanetVector candidate, out ReferenceSpawn spawn)
     {
-        ArgumentNullException.ThrowIfNull(terrain);
-        foot = default;
-        if (terrain.EditLineage is not null || !FindSpawnCandidates().Contains(candidate))
+        ArgumentNullException.ThrowIfNull(coordinator);
+        spawn = default;
+        using var terrain = coordinator.TryRead();
+        if (terrain is null || terrain.EditLineage is not null || !FindSpawnCandidates().Contains(candidate))
             return false;
         var key = Descriptor.SampleAt(candidate);
         if (!terrain.TryReadDensity(key, out var density) || density != Field.SampleDensity(key))
@@ -84,7 +87,7 @@ public sealed class ReferencePlanet
         if (terrain.Sweep(new VolumeCapsule(lower, upper, 0.5), new(0, 8, 0)).Status != VolumeQueryStatus.Clear)
             return false;
 
-        foot = new PlanetVector(candidate.X, center + 0.3, candidate.Z);
+        spawn = new ReferenceSpawn(new PlanetVector(candidate.X, center + 0.3, candidate.Z), terrain.Info);
         return true;
     }
 

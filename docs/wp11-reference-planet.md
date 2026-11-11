@@ -39,12 +39,14 @@ over the verified footprint at +12 m in Y and look down.
 ## Host integration
 
 Try the eight candidates in order. The first step estimates a surface from
-canonical density on the +Y face. The second requires a published lease for
-the same initial terrain revision. A candidate passes only when the nine
+canonical density on the +Y face. Construct the coordinator with this recipe
+instance's descriptor and stage its density field as the source. The second
+step acquires the coordinator's currently published collision. A candidate
+passes only when the nine
 landing rays have one walkable hit each, the footprint elevation agrees with
 its center to within 0.5 m, and the capsule has a clear vertical approach.
 Seed `20261111` exercises fallback to the second candidate. If coverage is
 missing, publish coverage for the candidate before retrying it. If every
-covered candidate fails, report that the seed has no verified spawn. Keep the
-verified terrain revision through spawn publication. W02 wires this policy
+covered candidate fails, report that the seed has no verified spawn. Revalidate
+the returned terrain identity at spawn publication. W02 wires this policy
 to the generated-world host.
