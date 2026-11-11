@@ -173,7 +173,7 @@ internal sealed partial class VolumeExploration
     {
         using var lease = terrain.TryRead();
         if (lease is null || lease.Info != _published || lease.Info.TerrainRevision != landed.Revision ||
-            lease.EditLineage != planet.Descriptor)
+            lease.EditLineage != planet.Descriptor || !HasFineLandingCoverage(landed.Foot))
             throw new InvalidDataException("The saved touchdown lacks its committed terrain revision.");
         // The checkpoint records a grounded craft. Only the local contact needs rebuilding on Continue.
         var up = Unit(landed.Foot);
@@ -229,9 +229,28 @@ internal sealed partial class VolumeExploration
         if (support.Status != VolumeQueryStatus.Contact || Dot(support.Normal, up) < 0.87)
             return false;
         pad = Add(start, Scale(Subtract(end, start), support.Fraction));
+        blocked = "landing footprint lacks full collision detail";
+        if (!HasFineLandingCoverage(pad))
+            return false;
         var clear = SweepGear(lease, Add(pad, Scale(up, 0.04)), outer);
         blocked = $"takeoff corridor {clear.Status}";
         return clear.Status == VolumeQueryStatus.Clear;
+    }
+
+    private bool HasFineLandingCoverage(PlanetVector pad)
+    {
+        if (_selection is not { } selection)
+            return false;
+        // Four metres enclose the local sweep, gear and its radius on every axis.
+        var extent = new PlanetVector(4, 4, 4);
+        var lower = planet.Descriptor.SampleAt(Subtract(pad, extent)).Vertex.Locate().Brick;
+        var upper = planet.Descriptor.SampleAt(Add(pad, extent)).Vertex.Locate().Brick;
+        for (var z = lower.Z; z <= upper.Z; z++)
+        for (var y = lower.Y; y <= upper.Y; y++)
+        for (var x = lower.X; x <= upper.X; x++)
+            if (StrideAt(selection, new(x, y, z)) != 1)
+                return false;
+        return true;
     }
 
     private PlanetFlightState ResolveTouchdown(VolumeStreamingCoordinator terrain, PlanetFlightState previous,
