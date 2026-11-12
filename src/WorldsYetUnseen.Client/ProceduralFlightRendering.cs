@@ -88,87 +88,118 @@ internal static class ProceduralGlobe
     private const int TilesPerAxis = 1 << Level;
     private static readonly Vector4 Space = new(0.01f, 0.018f, 0.04f, 1);
 
+    private static readonly Lazy<SamplingPlan> Plan = new(CreatePlan);
+
+    // Directions and topology depend only on the fixed globe LOD.
+    internal static void Prepare() => _ = Plan.Value;
+
     internal static RenderMeshPair Build(ReferencePlanet planet, PlanetVector pad, ReferenceBiomes? biomes, CancellationToken token)
+    {
+        var plan = Plan.Value;
+        var samples = new GlobeSample[plan.Directions.Length];
+        for (var i = 0; i < samples.Length; i++)
+        {
+            if ((i & 255) == 0)
+                token.ThrowIfCancellationRequested();
+            samples[i] = Sample(planet, plan.Directions[i], biomes);
+        }
+
+        token.ThrowIfCancellationRequested();
+        return new(new(BuildHalf(plan.First, samples, pad, false), Vector3.Zero),
+            new(BuildHalf(plan.Second, samples, pad, true), Vector3.Zero));
+    }
+
+    private static GlobeSample Sample(ReferencePlanet planet, PlanetVector direction, ReferenceBiomes? biomes)
+    {
+        var descriptor = planet.Descriptor;
+        var radius = descriptor.RadiusMeters;
+        var height = 0d;
+        var position = Scale(direction, radius);
+        var vertex = descriptor.SampleAt(position).Vertex;
+        for (var pass = 0; pass < 3; pass++)
+        {
+            var next = planet.Field.SampleLandform(vertex).Elevation / (double)PlanetDensityField.UnitsPerCell;
+            if (next == height)
+                break;
+            height = next;
+            position = Scale(direction, radius + height);
+            vertex = descriptor.SampleAt(position).Vertex;
+        }
+
+        var material = planet.Field.SampleMaterial(vertex);
+        var color = biomes?.Color(position, material) ??
+            (material == (ushort)ReferenceTerrainMaterial.Basalt ? 0xff6f806au : 0xff76a3c4u);
+        return new(Float(position), color);
+    }
+
+    private static RenderMesh BuildHalf(HalfPlan half, GlobeSample[] samples, PlanetVector pad, bool marker)
+    {
+        var count = half.SampleIndices.Length;
+        var vertices = new Vector3[count + (marker ? 4 : 0)];
+        var colors = new uint[vertices.Length];
+        for (var i = 0; i < count; i++)
+        {
+            var sample = samples[half.SampleIndices[i]];
+            vertices[i] = sample.Position;
+            colors[i] = sample.Color;
+        }
+
+        if (!marker)
+            return RenderMesh.Create(vertices, half.Indices, colors);
+
+        var indices = new uint[half.Indices.Length + 6];
+        half.Indices.CopyTo(indices, 0);
+        AddMarker(vertices.AsSpan(count), indices.AsSpan(half.Indices.Length), colors.AsSpan(count), pad, (uint)count);
+        return RenderMesh.Create(vertices, indices, colors);
+    }
+
+    private static SamplingPlan CreatePlan()
     {
         const int intervals = PlanetCoordinates.IntervalsPerPatch;
         const int stride = intervals + 1;
-        const int verticesPerPatch = stride * stride;
-        const int indicesPerPatch = intervals * intervals * 6;
         const int intervalsPerFace = intervals * TilesPerAxis;
+        const int sampleCount = 6 * intervalsPerFace * intervalsPerFace + 2;
         var faces = Enum.GetValues<PlanetFace>();
-        var heights = new Dictionary<PlanetSampleKey, double>(6 * intervalsPerFace * intervalsPerFace + 2);
-        var sharedColors = new Dictionary<PlanetSampleKey, uint>();
-        return new(new(BuildHalf(faces.AsSpan(0, 3), false), Vector3.Zero),
-            new(BuildHalf(faces.AsSpan(3), true), Vector3.Zero));
+        var directions = new List<PlanetVector>(sampleCount);
+        var canonical = new Dictionary<PlanetSampleKey, int>(sampleCount);
+        var first = MapHalf(faces.AsSpan(0, 3));
+        var second = MapHalf(faces.AsSpan(3));
+        return new(directions.ToArray(), first, second);
 
-        RenderMesh BuildHalf(ReadOnlySpan<PlanetFace> charts, bool marker)
+        HalfPlan MapHalf(ReadOnlySpan<PlanetFace> charts)
         {
             var patchCount = charts.Length * TilesPerAxis * TilesPerAxis;
-            var vertices = new Vector3[patchCount * verticesPerPatch + (marker ? 4 : 0)];
-            var indices = new uint[patchCount * indicesPerPatch + (marker ? 6 : 0)];
-            var colors = new uint[vertices.Length];
+            var sampleIndices = new int[patchCount * stride * stride];
+            var indices = new uint[patchCount * intervals * intervals * 6];
             var vertexOffset = 0;
             var indexOffset = 0;
             foreach (var face in charts)
             for (var y = 0; y < TilesPerAxis; y++)
             for (var x = 0; x < TilesPerAxis; x++)
             {
-                token.ThrowIfCancellationRequested();
-                var patch = PlanetPatchMesh.Build(new(face, Level, x, y), planet.Descriptor.RadiusMeters, Height);
-                for (var i = 0; i < patch.Positions.Length; i++)
+                var patch = PlanetPatchMesh.Build(new(face, Level, x, y), 1, static _ => 0);
+                for (var i = 0; i < patch.Samples.Length; i++)
                 {
-                    var position = patch.Positions[i];
-                    var column = i % stride;
-                    var row = i / stride;
-                    vertices[vertexOffset + i] = Float(position);
-                    colors[vertexOffset + i] = column is 0 or intervals || row is 0 or intervals
-                        ? SharedColor(patch.Samples[i], position)
-                        : Color(position);
+                    var key = patch.Samples[i];
+                    if (!canonical.TryGetValue(key, out var sampleIndex))
+                    {
+                        sampleIndex = directions.Count;
+                        canonical.Add(key, sampleIndex);
+                        directions.Add(patch.Positions[i]);
+                    }
+                    sampleIndices[vertexOffset + i] = sampleIndex;
                 }
                 foreach (var index in patch.Indices)
                     indices[indexOffset++] = (uint)vertexOffset + index;
-                vertexOffset += patch.Positions.Length;
+                vertexOffset += patch.Samples.Length;
             }
-            if (marker)
-                AddMarker(vertices.AsSpan(vertexOffset), indices.AsSpan(indexOffset), colors.AsSpan(vertexOffset), pad, (uint)vertexOffset);
-            return RenderMesh.Create(vertices, indices, colors);
-        }
-
-        uint Color(PlanetVector position)
-        {
-            var material = planet.Field.SampleMaterial(planet.Descriptor.SampleAt(position).Vertex);
-            return biomes?.Color(position, material) ??
-                (material == (ushort)ReferenceTerrainMaterial.Basalt ? 0xff6f806au : 0xff76a3c4u);
-        }
-
-        uint SharedColor(PlanetSampleKey key, PlanetVector position)
-        {
-            if (!sharedColors.TryGetValue(key, out var color))
-            {
-                color = Color(position);
-                sharedColors.Add(key, color);
-            }
-            return color;
-        }
-
-        double Height(PlanetSampleKey key)
-        {
-            if (heights.TryGetValue(key, out var height))
-                return height;
-            var radial = PlanetCoordinates.Direction(key);
-            var radius = planet.Descriptor.RadiusMeters;
-            for (var pass = 0; pass < 3; pass++)
-            {
-                var sample = planet.Descriptor.SampleAt(Scale(radial, radius + height));
-                var next = planet.Field.SampleLandform(sample.Vertex).Elevation / (double)PlanetDensityField.UnitsPerCell;
-                if (next == height)
-                    break;
-                height = next;
-            }
-            heights.Add(key, height);
-            return height;
+            return new(sampleIndices, indices);
         }
     }
+
+    private sealed record SamplingPlan(PlanetVector[] Directions, HalfPlan First, HalfPlan Second);
+    private sealed record HalfPlan(int[] SampleIndices, uint[] Indices);
+    private readonly record struct GlobeSample(Vector3 Position, uint Color);
 
     private static void AddMarker(Span<Vector3> vertices, Span<uint> indices, Span<uint> colors, PlanetVector pad, uint offset)
     {

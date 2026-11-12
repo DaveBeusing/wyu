@@ -97,6 +97,12 @@ internal static partial class GameHost
             var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics);
             if (planet is not null && (!scripted || BiomeMeasurements.UseBiomes))
                 renderHost.SetBiomes(new ReferenceBiomes(planet));
+            if (planet is not null)
+            {
+                var planStarted = BiomeMeasurements.Start();
+                ProceduralGlobe.Prepare();
+                BiomeMeasurements.Write("globe-plan", planStarted);
+            }
             terrain = exploration.CreateTerrain();
             diagnostics?.Enter("GraphicsStartup");
             diagnostics?.CheckGraphics();
