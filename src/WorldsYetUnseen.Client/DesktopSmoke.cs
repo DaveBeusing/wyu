@@ -43,7 +43,7 @@ internal static partial class DesktopSmoke
     }
 
     internal static void VerifyAdapterSettlement(D3D12Renderer renderer, bool requireDebugLayer, bool requireNvidia,
-        bool useWarp)
+        bool useWarp, bool allowRetainedSessionQueue = false)
     {
         var diagnostics = renderer.ReadDiagnostics();
         if (diagnostics.Adapter is not { } adapter || adapter.IsSoftware != useWarp || diagnostics.DeviceRemoval is not null)
@@ -62,8 +62,11 @@ internal static partial class DesktopSmoke
             var report = diagnostics.DebugMessages;
             Console.WriteLine($"D3D12 live-object report: warnings={report?.Warnings}, errors={report?.Errors}, " +
                 $"corruption={report?.Corruption}, discarded={report?.Discarded}, " +
-                $"HRESULT=0x{report?.LiveObjectReportResult:X8}, live child objects={report?.LiveChildObjects}.");
-            if (report is not { Errors: 0, Corruption: 0, Discarded: 0, LiveObjectReportResult: 0, LiveChildObjects: 0 })
+                $"HRESULT=0x{report?.LiveObjectReportResult:X8}, live child objects={report?.LiveChildObjects}, " +
+                $"retained session queue={report?.RetainedSessionQueue}.");
+            var expectedChildren = allowRetainedSessionQueue && report?.RetainedSessionQueue == true ? 1 : 0;
+            if (report is not { Errors: 0, Corruption: 0, Discarded: 0, LiveObjectReportResult: 0 } ||
+                report.LiveChildObjects != expectedChildren)
                 throw new InvalidOperationException("The active D3D12 debug layer did not report clean device settlement.");
         }
 

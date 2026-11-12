@@ -17,7 +17,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
 {
     private readonly ProcessResourceBudget _budget = new(new ProcessResourceLimits(1, quota));
     private RuntimeSafetyAuthority? _runtime;
-    private readonly D3D12DeviceSession _device = new(new(!measure, true), warp);
+    private readonly D3D12DeviceSession _device = new(new(!measure, true), warp, reuseDirectQueue: true);
     internal D3D12Renderer? Current { get; private set; }
     private VolumeTerrainColorEvaluator? _colorEvaluator;
     internal ReferenceBiomes? Biomes { get; private set; }
@@ -77,7 +77,8 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
         _runtime = null;
         Current = null;
         if (qualifyHandoff && renderer is not null)
-            DesktopSmoke.VerifyAdapterSettlement(renderer, requireDebugLayer: !measure, requireNvidia: !warp, useWarp: warp);
+            DesktopSmoke.VerifyAdapterSettlement(renderer, requireDebugLayer: !measure, requireNvidia: !warp,
+                useWarp: warp, allowRetainedSessionQueue: true);
     }
 }
 
