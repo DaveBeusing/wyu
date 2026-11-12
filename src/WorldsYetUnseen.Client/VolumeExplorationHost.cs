@@ -33,7 +33,7 @@ internal static partial class GameHost
         Task<bool> watchClose = Task.FromResult(false);
         D3D12Renderer? renderer = null;
         var measure = scripted && BiomeMeasurements.Enabled;
-        var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure);
+        using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure);
         VolumeStreamingCoordinator? terrain = null;
         AlphaOverlay? overlay = null;
         PrototypeMouseLook? mouse = null;
