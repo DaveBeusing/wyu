@@ -3,6 +3,8 @@
     <OutputType>Exe</OutputType>
     <OutputType Condition="'$(WyuInstallerBuild)' == 'true'">WinExe</OutputType>
     <PlatformTarget>x64</PlatformTarget>
+    <!-- Compile loop-heavy terrain methods once, before entering their first loop. -->
+    <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>WorldsYetUnseen.Client</AssemblyName>
     <RootNamespace>WorldsYetUnseen.Client</RootNamespace>
