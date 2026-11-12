@@ -77,9 +77,14 @@ internal sealed partial class VolumeExploration
                 };
         }
         return below
-            ? $"Ember Caves | Ore {CaveOre}\n{_caveAim}\nE mine | Q fill\nF5 save | F10 save and quit"
+            ? FormattableString.Invariant($"Ember Caves | Ore {CaveOre}\n{_caveAim}\nE mine | Q fill\nF5 save | F10 save and quit\n{CaveExitHint(state)}")
             : FormattableString.Invariant($"Ember Caves | Ore {CaveOre}\nCave mouth {Length(Subtract(CavePlanet.Entrance, state.Position)):F1} m\nFollow the ramp ahead | W to walk");
     }
+
+    private string CaveExitHint(PlanetWalkState state) =>
+        _caveExitWaypoint >= 0 ? "Climbing exit rope" :
+        AtCaveExitRope(state) ? "Space climb exit rope" :
+        FormattableString.Invariant($"Exit rope {Length(Subtract(CaveExitAnchor, state.Position)):F1} m");
 
     private static VolumeMovementDraft? PlanCaveMovement(VolumeStreamingCoordinator terrain, PlanetWalkState state,
         double forward, double right, out VolumeQueryStatus status)
@@ -152,6 +157,7 @@ internal sealed partial class VolumeExploration
             !overlayBytes.AsSpan().SequenceEqual(checkpoint.Overlay) ||
             lease.Sweep(CaveBody(state.Position), default, CaveQueries).Status != VolumeQueryStatus.Clear)
             throw new InvalidOperationException("The saved cave edit or collision did not restore.");
+        var resumedState = state;
         if (phase == "resume")
         {
             var begin = await BeginAsync(token).ConfigureAwait(false);
@@ -162,11 +168,54 @@ internal sealed partial class VolumeExploration
             var prepared = draft is null ? null : terrain.TryPrepareMovement(draft, cut, []);
             if (Finish(cut, prepared).Status != BarrierStatus.Committed || draft is null)
                 throw new InvalidOperationException($"The resumed cave tick could not commit ({status}).");
+            resumedState = draft.Result.State;
         }
         var marker = phase == "init" ? "saved" : "continued";
         var hash = Convert.ToHexStringLower(SHA256.HashData(overlayBytes));
         Console.WriteLine(FormattableString.Invariant(
             $"WP12 cave {marker}: ore={CaveOre} generation={checkpoint.Generation} revision={checkpoint.TerrainRevision} overlay={hash} pose={state.Position.X:R},{state.Position.Y:R},{state.Position.Z:R}"));
+        if (phase == "resume")
+        {
+            lease.Dispose();
+            state = resumedState;
+            _caveExitWaypoint = 0;
+            while (NextCaveClimb(state) is { } climb)
+            {
+                if (terrain.View.Frame.TryRebase(state.Position, out var frame))
+                    await LoadAsync(terrain, renderer, state.Position, state.Heading, frame, token).ConfigureAwait(false);
+                var begin = await BeginAsync(token).ConfigureAwait(false);
+                terrain.BeginTick(begin);
+                var draft = terrain.TryPlanCaveClimb(state, climb, out var status, CaveQueries);
+                var cut = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
+                var prepared = draft is null ? null : terrain.TryPrepareMovement(draft, cut, []);
+                if (Finish(cut, prepared).Status != BarrierStatus.Committed || draft?.Result.Status != PlanetWalkStatus.Moved)
+                    throw new InvalidOperationException($"Cave exit blocked at waypoint {_caveExitWaypoint}: {state.Position} ({status}).");
+                state = draft.Result.State;
+                Drain(terrain);
+            }
+            var grounded = false;
+            for (var tick = 0; tick < 90 && !grounded; tick++)
+            {
+                var begin = await BeginAsync(token).ConfigureAwait(false);
+                terrain.BeginTick(begin);
+                var draft = PlanCaveMovement(terrain, state, 0, 0, out var status);
+                var cut = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
+                var prepared = draft is null ? null : terrain.TryPrepareMovement(draft, cut, []);
+                if (Finish(cut, prepared).Status != BarrierStatus.Committed || draft is null)
+                    throw new InvalidOperationException($"Cave exit could not settle on the surface ({status}).");
+                state = draft.Result.State;
+                grounded = draft.Result.Grounded;
+                Drain(terrain);
+            }
+            if (!grounded || state.Position.Y < 60 || Length(state.Position) < CavePlanet.Radius - 0.3 ||
+                CaveOre <= 0 || _published.TerrainRevision != checkpoint.TerrainRevision)
+                throw new InvalidOperationException("Cave exit did not reach supported surface with the restored inventory.");
+            var sequence = ++_sequence;
+            RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence,
+                Camera(terrain.View, state.Position, state.Heading)));
+            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+            Console.WriteLine(FormattableString.Invariant($"WP12 cave reached supported surface: {state.Position.X:R},{state.Position.Y:R},{state.Position.Z:R}"));
+        }
     }
 
     private static bool HasCaveRoof(VolumeStreamingCoordinator terrain, PlanetWalkState state)
