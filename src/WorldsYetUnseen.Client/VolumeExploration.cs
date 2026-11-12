@@ -244,7 +244,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             Drain(terrain);
             if (overlay is not null)
             {
-                overlay.Menu = CurrentNotice ?? (prepared is null ? $"Movement held\n{status}" : cave is null ? null : CaveHint(terrain, state));
+                overlay.Menu = ActiveCaveClimbHint ?? CurrentNotice ?? (prepared is null ? $"Movement held\n{status}" : cave is null ? null : CaveHint(terrain, state));
                 var statistics = terrain.Statistics;
                 overlay.Performance = _debug ? FormattableString.Invariant(
                     $"Seed {Descriptor.Seed} / gen {Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions / LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} / GPU {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms / {status}\nX {state.Position.X:F1} Y {state.Position.Y:F1} Z {state.Position.Z:F1} / origin {_published.View.Frame.Revision}") : null;
@@ -280,7 +280,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             throw new InvalidOperationException("Movement remained open across a terrain view change.");
         var mask = ++_sequence;
         if (overlay is not null)
-            overlay.Menu = $"Loading planet terrain\n\n{PlanetName}\nSeed {Descriptor.Seed}\nGenerator {Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
+            overlay.Menu = ActiveCaveClimbHint ?? $"Loading planet terrain\n\n{PlanetName}\nSeed {Descriptor.Seed}\nGenerator {Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
         RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
         var selection = SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
         if (_selection is null || selection.Minimum != _selection.Minimum)

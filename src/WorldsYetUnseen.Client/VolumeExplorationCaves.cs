@@ -81,8 +81,7 @@ internal sealed partial class VolumeExploration
             : FormattableString.Invariant($"Ember Caves | Ore {CaveOre}\nCave mouth {Length(Subtract(CavePlanet.Entrance, state.Position)):F1} m\nFollow the ramp ahead | W to walk");
     }
 
-    private string CaveExitHint(PlanetWalkState state) =>
-        _caveExitWaypoint >= 0 ? "Climbing exit rope" :
+    private static string CaveExitHint(PlanetWalkState state) =>
         AtCaveExitRope(state) ? "Space climb exit rope" :
         FormattableString.Invariant($"Exit rope {Length(Subtract(CaveExitAnchor, state.Position)):F1} m");
 
