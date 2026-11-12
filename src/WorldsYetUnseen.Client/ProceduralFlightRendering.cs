@@ -25,8 +25,9 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     internal void SetBiomes(ReferenceBiomes biomes)
     {
         Biomes = biomes;
-        _colorEvaluator = (position, material) => biomes.Color(position, material);
+        _colorEvaluator = [MethodImpl(MethodImplOptions.AggressiveOptimization)] (position, material) => biomes.Color(position, material);
         RuntimeHelpers.PrepareDelegate(_colorEvaluator);
+        _ = _colorEvaluator(default, (ushort)ReferenceTerrainMaterial.Basalt);
     }
     internal D3D12Renderer Active => Current ?? throw new InvalidOperationException("No active planet renderer.");
 
@@ -88,37 +89,65 @@ internal static class ProceduralGlobe
 
     internal static RenderMeshPair Build(ReferencePlanet planet, PlanetVector pad, ReferenceBiomes? biomes, CancellationToken token)
     {
+        const int intervals = PlanetCoordinates.IntervalsPerPatch;
+        const int stride = intervals + 1;
+        const int verticesPerPatch = stride * stride;
+        const int indicesPerPatch = intervals * intervals * 6;
+        const int intervalsPerFace = intervals * TilesPerAxis;
         var faces = Enum.GetValues<PlanetFace>();
-        var heights = new Dictionary<PlanetSampleKey, double>();
+        var heights = new Dictionary<PlanetSampleKey, double>(6 * intervalsPerFace * intervalsPerFace + 2);
+        var sharedColors = new Dictionary<PlanetSampleKey, uint>();
         return new(new(BuildHalf(faces.AsSpan(0, 3), false), Vector3.Zero),
             new(BuildHalf(faces.AsSpan(3), true), Vector3.Zero));
 
         RenderMesh BuildHalf(ReadOnlySpan<PlanetFace> charts, bool marker)
         {
-            var vertices = new List<Vector3>();
-            var indices = new List<uint>();
-            var colors = new List<uint>();
+            var patchCount = charts.Length * TilesPerAxis * TilesPerAxis;
+            var vertices = new Vector3[patchCount * verticesPerPatch + (marker ? 4 : 0)];
+            var indices = new uint[patchCount * indicesPerPatch + (marker ? 6 : 0)];
+            var colors = new uint[vertices.Length];
+            var vertexOffset = 0;
+            var indexOffset = 0;
             foreach (var face in charts)
             for (var y = 0; y < TilesPerAxis; y++)
             for (var x = 0; x < TilesPerAxis; x++)
             {
                 token.ThrowIfCancellationRequested();
                 var patch = PlanetPatchMesh.Build(new(face, Level, x, y), planet.Descriptor.RadiusMeters, Height);
-                var offset = (uint)vertices.Count;
-                foreach (var position in patch.Positions)
+                for (var i = 0; i < patch.Positions.Length; i++)
                 {
-                    vertices.Add(Float(position));
-                    var sample = planet.Descriptor.SampleAt(position).Vertex;
-                    var material = planet.Field.SampleMaterial(sample);
-                    colors.Add(biomes?.Color(position, material) ??
-                        (material == (ushort)ReferenceTerrainMaterial.Basalt ? 0xff6f806au : 0xff76a3c4u));
+                    var position = patch.Positions[i];
+                    var column = i % stride;
+                    var row = i / stride;
+                    vertices[vertexOffset + i] = Float(position);
+                    colors[vertexOffset + i] = column is 0 or intervals || row is 0 or intervals
+                        ? SharedColor(patch.Samples[i], position)
+                        : Color(position);
                 }
                 foreach (var index in patch.Indices)
-                    indices.Add(offset + index);
+                    indices[indexOffset++] = (uint)vertexOffset + index;
+                vertexOffset += patch.Positions.Length;
             }
             if (marker)
-                AddMarker(vertices, indices, colors, pad);
-            return RenderMesh.Create(vertices.ToArray(), indices.ToArray(), colors.ToArray());
+                AddMarker(vertices.AsSpan(vertexOffset), indices.AsSpan(indexOffset), colors.AsSpan(vertexOffset), pad, (uint)vertexOffset);
+            return RenderMesh.Create(vertices, indices, colors);
+        }
+
+        uint Color(PlanetVector position)
+        {
+            var material = planet.Field.SampleMaterial(planet.Descriptor.SampleAt(position).Vertex);
+            return biomes?.Color(position, material) ??
+                (material == (ushort)ReferenceTerrainMaterial.Basalt ? 0xff6f806au : 0xff76a3c4u);
+        }
+
+        uint SharedColor(PlanetSampleKey key, PlanetVector position)
+        {
+            if (!sharedColors.TryGetValue(key, out var color))
+            {
+                color = Color(position);
+                sharedColors.Add(key, color);
+            }
+            return color;
         }
 
         double Height(PlanetSampleKey key)
@@ -130,24 +159,31 @@ internal static class ProceduralGlobe
             for (var pass = 0; pass < 3; pass++)
             {
                 var sample = planet.Descriptor.SampleAt(Scale(radial, radius + height));
-                height = planet.Field.SampleLandform(sample.Vertex).Elevation / (double)PlanetDensityField.UnitsPerCell;
+                var next = planet.Field.SampleLandform(sample.Vertex).Elevation / (double)PlanetDensityField.UnitsPerCell;
+                if (next == height)
+                    break;
+                height = next;
             }
             heights.Add(key, height);
             return height;
         }
     }
 
-    private static void AddMarker(List<Vector3> vertices, List<uint> indices, List<uint> colors, PlanetVector pad)
+    private static void AddMarker(Span<Vector3> vertices, Span<uint> indices, Span<uint> colors, PlanetVector pad, uint offset)
     {
         var up = Vector3.Normalize(Float(pad));
         var axis = MathF.Abs(up.X) < 0.9f ? Vector3.UnitX : Vector3.UnitZ;
         var east = Vector3.Normalize(Vector3.Cross(up, axis));
-        var north = Vector3.Cross(up, east);
+        var north = Vector3.Normalize(Vector3.Cross(up, east));
         var center = Float(pad) + up * 8;
-        var offset = (uint)vertices.Count;
-        vertices.AddRange([center + east * 8, center + north * 8, center - east * 8, center - north * 8]);
-        indices.AddRange([offset, offset + 1, offset + 2, offset, offset + 2, offset + 3]);
-        colors.AddRange([0xff19eaff, 0xff19eaff, 0xff19eaff, 0xff19eaff]);
+        vertices[0] = center + east * 8 + north * 8;
+        vertices[1] = center - east * 8 + north * 8;
+        vertices[2] = center - east * 8 - north * 8;
+        vertices[3] = center + east * 8 - north * 8;
+        ReadOnlySpan<uint> order = [0, 1, 2, 0, 2, 3];
+        for (var i = 0; i < order.Length; i++)
+            indices[i] = offset + order[i];
+        colors.Fill(0xff19eaffu);
     }
 
     internal static RenderFrame Frame(ulong sequence, PlanetVector position, PlanetVector heading)

@@ -59,10 +59,9 @@ internal sealed partial class VolumeExploration
             FlightTrace("launch", flight, revision, digest);
         var globeTask = Task.Run(() =>
         {
-            var buildStarted = BiomeMeasurements.Start();
-            var buildBytes = BiomeMeasurements.AllocatedBytes(buildStarted);
+            var buildSample = BiomeMeasurements.StartBuild();
             var globe = ProceduralGlobe.Build(planet, pad, renderHost.Biomes, token);
-            BiomeMeasurements.WriteBuild("globe-build", buildStarted, buildBytes);
+            BiomeMeasurements.WriteBuild("globe-build", buildSample);
             return globe;
         }, token);
         var far = false;

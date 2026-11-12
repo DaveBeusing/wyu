@@ -345,10 +345,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
             pauseWhileMinimized: true).ConfigureAwait(false);
-        var packStarted = BiomeMeasurements.Start();
-        var packBytes = BiomeMeasurements.AllocatedBytes(packStarted);
+        var packSample = BiomeMeasurements.StartBuild();
         var upload = renderer.TryStageVolumeTerrain(work.Generation);
-        BiomeMeasurements.WriteBuild("near-pack", packStarted, packBytes);
+        BiomeMeasurements.WriteBuild("near-pack", packSample);
         if (edit is not null && upload is MeshReplacementSubmissionResult.Backpressure or MeshReplacementSubmissionResult.InvalidRegion)
             return false;
         RequireMesh(upload);
