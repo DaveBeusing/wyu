@@ -174,12 +174,12 @@ internal static class ProceduralGlobe
         var up = Vector3.Normalize(Float(pad));
         var axis = MathF.Abs(up.X) < 0.9f ? Vector3.UnitX : Vector3.UnitZ;
         var east = Vector3.Normalize(Vector3.Cross(up, axis));
-        var north = Vector3.Normalize(Vector3.Cross(up, east));
+        var north = Vector3.Cross(up, east);
         var center = Float(pad) + up * 8;
-        vertices[0] = center + east * 8 + north * 8;
-        vertices[1] = center - east * 8 + north * 8;
-        vertices[2] = center - east * 8 - north * 8;
-        vertices[3] = center + east * 8 - north * 8;
+        vertices[0] = center + east * 8;
+        vertices[1] = center + north * 8;
+        vertices[2] = center - east * 8;
+        vertices[3] = center - north * 8;
         ReadOnlySpan<uint> order = [0, 1, 2, 0, 2, 3];
         for (var i = 0; i < order.Length; i++)
             indices[i] = offset + order[i];
