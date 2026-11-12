@@ -97,12 +97,17 @@ internal static class ProceduralGlobe
     {
         var plan = Plan.Value;
         var samples = new GlobeSample[plan.Directions.Length];
-        for (var i = 0; i < samples.Length; i++)
+        const int batchSize = 512;
+        var batches = (samples.Length + batchSize - 1) / batchSize;
+        // Disjoint canonical ranges let the runtime rebalance slow batches without
+        // changing output order or letting the globe monopolize the CPU.
+        Parallel.For(0, batches, new ParallelOptions { MaxDegreeOfParallelism = 2, CancellationToken = token }, batch =>
         {
-            if ((i & 255) == 0)
-                token.ThrowIfCancellationRequested();
-            samples[i] = Sample(planet, plan.Directions[i], biomes);
-        }
+            var start = batch * batchSize;
+            var end = Math.Min(start + batchSize, samples.Length);
+            for (var i = start; i < end; i++)
+                samples[i] = Sample(planet, plan.Directions[i], biomes);
+        });
 
         token.ThrowIfCancellationRequested();
         return new(new(BuildHalf(plan.First, samples, pad, false), Vector3.Zero),
