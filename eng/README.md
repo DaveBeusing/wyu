@@ -8,14 +8,14 @@ package content hashes. NuGet.org supplies the renderer's transitive
 
 | Groundwork producer | Pinned value |
 | --- | --- |
-| Package version | `0.1.0-dev.43118949133.1` |
-| Master commit | `bf56de9347c2a99159595812968a0141bf0e8708` |
-| Windows CI run and attempt | [`43118949133.1`](https://github.com/DaveBeusing/Groundwork/actions/runs/43118949133/attempts/1) |
-| Producer artifact ZIP SHA-256 | `30AF39204EB06E1A95E7E7300640747999602DA7B1B6212B80192928B2F8AC53` |
-| Build manifest SHA-256 | `2406F20155B6CD05EA3B268DCCF256B95385E716BE7103A211850291FBB1B61D` |
-| Archive record SHA-256 | `8AC2E84C3ECC0204AFEBEA4A336E7551874C818C2313C68D369D2A669AD597C4` |
+| Package version | `0.1.0-dev.43194538950.1` |
+| Master commit | `638ed063e6dfebe15418f60e6f4991ff7132f5d7` |
+| Windows CI run and attempt | [`43194538950.1`](https://github.com/DaveBeusing/Groundwork/actions/runs/43194538950/attempts/1) |
+| Producer artifact ZIP SHA-256 | `915E8939D5C2A941F56484D74D66872D43B5492AD2074E39DC548080F7B4151B` |
+| Build manifest SHA-256 | `B86E00D8ADCC5581ACF242D9B7B3E598D0C886ACE44D5B3318AD76DB433D68EA` |
+| Archive record SHA-256 | `E5772D4D3181A72FE45E8C0EA33CEAE98657D94DCDDFF9991204065054C60388` |
 
-The [immutable GitHub release](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.43118949133.1-immutable)
+The [immutable GitHub release](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.43194538950.1-immutable)
 contains the original ten CI packages, the build manifest, the archive
 record, and the Apache-2.0 license. Keep the release available while any
 consumer pins the version.
