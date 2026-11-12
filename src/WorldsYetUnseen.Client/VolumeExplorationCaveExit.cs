@@ -23,6 +23,8 @@ internal sealed partial class VolumeExploration
 
     private int _caveExitWaypoint = -1;
 
+    private string? ActiveCaveClimbHint => _caveExitWaypoint >= 0 ? "Climbing exit rope" : null;
+
     private static bool AtCaveExitRope(PlanetWalkState state) =>
         Length(Subtract(state.Position, CaveExitAnchor)) <= 1.2;
 
