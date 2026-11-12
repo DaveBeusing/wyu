@@ -114,7 +114,10 @@ internal static partial class GameHost
             else
                 await exploration.RunSaveSmokeAsync(terrain, renderer, saveSmoke, token).ConfigureAwait(false);
             if (scripted)
+            {
+                renderHost.Dispose();
                 DesktopSmoke.RequestNativeClose(renderHost.Active.Read(), caveSmoke is null ? "WP11 exploration" : "WP12 cave");
+            }
             reason = HostStopReason.ExternalCancellation;
         }
         catch (OperationCanceledException) when (!scripted && token.IsCancellationRequested)

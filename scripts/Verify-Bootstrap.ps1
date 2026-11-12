@@ -31,7 +31,7 @@ try {
     Assert-True ($refs.Count -eq 1 -and
         $refs[0].GetAttribute('Include') -ceq '../WorldsYetUnseen.Gameplay/WorldsYetUnseen.Gameplay.csproj') 'Unexpected WYU host project dependency.'
     $packages = @($project.SelectNodes('//PackageReference'))
-    $expectedVersion = '0.1.0-dev.43277674049.1'
+    $expectedVersion = '0.1.0-dev.43301223359.1'
     $expectedIds = @('Core', 'Diagnostics', 'Ecs', 'Jobs', 'Persistence', 'Platform.Windows', 'Rendering', 'Rendering.D3D12', 'Simulation', 'Voxels') |
         ForEach-Object { "Groundwork.$_" }
     Assert-True ($packages.Count -eq $expectedIds.Count) 'Unexpected WYU package reference count.'
