@@ -273,16 +273,26 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private async Task<bool> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
-        Task? rendererReady = null)
+        Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null)
     {
-        // Spawn search and candidate fallback share the same monotonic origin sequence as movement.
-        if (frame.Revision <= terrain.View.Frame.Revision)
+        VolumeViewIdentity view;
+        if (returnTerrain is { } preparedReturn)
         {
-            var prior = terrain.View.Frame;
-            if (!prior.TryRebase(position, out frame))
-                frame = prior;
+            view = preparedReturn.View;
+            if (view != terrain.View || preparedReturn.Revision != _published.TerrainRevision)
+                throw new InvalidOperationException("Prepared return terrain no longer matches the flight view.");
         }
-        var view = terrain.ChangeView(frame, terrain.View.RendererEpoch);
+        else
+        {
+            // Spawn search and candidate fallback share the monotonic origin sequence.
+            if (frame.Revision <= terrain.View.Frame.Revision)
+            {
+                var prior = terrain.View.Frame;
+                if (!prior.TryRebase(position, out frame))
+                    frame = prior;
+            }
+            view = terrain.ChangeView(frame, terrain.View.RendererEpoch);
+        }
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement remained open across a terrain view change.");
         var mask = ++_sequence;
@@ -290,31 +300,34 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             overlay.Menu = ActiveCaveClimbHint ?? $"Loading planet terrain\n\n{PlanetName}\nSeed {Descriptor.Seed}\nGenerator {Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
         if (rendererReady is null)
             RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
-        var selection = SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
+        var selection = returnTerrain?.Selection ?? SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
         if (_selection is null || selection.Minimum != _selection.Minimum)
             _windows++;
         var revision = _published.TerrainRevision;
         var targetRevision = revision == 0 ? slot?.Checkpoint?.TerrainRevision ?? 1 : revision;
-        VolumeStreamingWork? staged;
-        var result = edit is { } brush
-            ? terrain.TryStageEdit(brush.Tick, brush.Id, selection, MeshBytes, Charge(selection), out staged)
-            : terrain.TryStage(VolumeWorkClass.Movement, selection, revision, targetRevision, MeshBytes,
-                Charge(selection), Field, out staged);
-        if (result != VolumeAdmission.Accepted || staged is null)
+        var work = returnTerrain?.Work;
+        if (work is null)
         {
-            if (edit is not null)
-                return false;
-            throw new PlanetLoadException(result == VolumeAdmission.Backpressure
-                ? "The terrain streaming budget is full. The planet could not load. Close the game and try again."
-                : $"The planet could not load terrain ({result}). Close the game and try again.");
+            var result = edit is { } brush
+                ? terrain.TryStageEdit(brush.Tick, brush.Id, selection, MeshBytes, Charge(selection), out work)
+                : terrain.TryStage(VolumeWorkClass.Movement, selection, revision, targetRevision, MeshBytes,
+                    Charge(selection), Field, out work);
+            if (result != VolumeAdmission.Accepted || work is null)
+            {
+                if (edit is not null)
+                    return false;
+                throw TerrainAdmissionFailure(result);
+            }
         }
-        using var work = staged;
-        var generated = Task.Run(() => work.Execute(token), token);
+        using var ownedWork = returnTerrain is null ? work : null;
+        var generated = returnTerrain?.Generated ?? ExecuteTerrainAsync(work, token);
         if (rendererReady is not null)
         {
             try
             {
+                var startupStarted = BiomeMeasurements.Start();
                 await rendererReady.ConfigureAwait(false);
+                BiomeMeasurements.Write("near-startup-wait", startupStarted);
                 RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
             }
             catch
@@ -373,6 +386,20 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         Drain(terrain);
         return true;
     }
+
+    private static PlanetLoadException TerrainAdmissionFailure(VolumeAdmission result) =>
+        new(result == VolumeAdmission.Backpressure
+            ? "The terrain streaming budget is full. The planet could not load. Close the game and try again."
+            : $"The planet could not load terrain ({result}). Close the game and try again.");
+
+    private static Task<bool> ExecuteTerrainAsync(VolumeStreamingWork work, CancellationToken token, string phase = "terrain-build") =>
+        Task.Run(() =>
+        {
+            var started = BiomeMeasurements.Start();
+            var completed = work.Execute(token);
+            BiomeMeasurements.Write(phase, started);
+            return completed;
+        }, token);
 
     private static int CountFineBricks(VolumeStreamingSelection selection)
     {
