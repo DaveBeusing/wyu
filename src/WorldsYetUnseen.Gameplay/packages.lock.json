@@ -4,17 +4,17 @@
     "net10.0": {
       "Groundwork.Voxels": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.43242277216.1, 0.1.0-dev.43242277216.1]",
-        "resolved": "0.1.0-dev.43242277216.1",
-        "contentHash": "DdFnRWT+ynGCN5xMktnj/VnZ93htP9KNiyKGoumC6UtEf8P9IbacWbqq5vgjruHBwJG1BcLswjcy3rM2ml+pLw==",
+        "requested": "[0.1.0-dev.43277674049.1, 0.1.0-dev.43277674049.1]",
+        "resolved": "0.1.0-dev.43277674049.1",
+        "contentHash": "OrM9CAPvEm8EgWVm8K+m1wqboVyjLatQYT7MEJhfVUNq4yJxy0gDC1OOVisRXjP08wIHVAqhhYro5uAABHcvng==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.43242277216.1"
+          "Groundwork.Core": "0.1.0-dev.43277674049.1"
         }
       },
       "Groundwork.Core": {
         "type": "Transitive",
-        "resolved": "0.1.0-dev.43242277216.1",
-        "contentHash": "jhTLuclJADFoR4dnIEvYH7eK85ikZNpvh/Ubpf4bh26mZYQFD/xq64+67/7yHwj7CYKzORzehPtlJgQacFE7lQ=="
+        "resolved": "0.1.0-dev.43277674049.1",
+        "contentHash": "JwTU7It3EEAcRMPmQP/vZH/hmiOYznayRBOTXsFUTdwelTuAmJYNF+GLNJJT32RnqZPNuCCDMKbkTEkBFd6Lug=="
       }
     }
   }

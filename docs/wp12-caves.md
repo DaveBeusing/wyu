@@ -6,7 +6,7 @@ The game uses the V2 geology field, protected cave streaming and the atomic terr
 
 ## Windows qualification
 
-- Groundwork package `0.1.0-dev.43242277216.1` is pinned in the solution and installer locks. [Immutable archive](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.43242277216.1-immutable)
+- Groundwork package `0.1.0-dev.43277674049.1` is pinned in the solution and installer locks. [Immutable archive](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.43277674049.1-immutable)
 - On NVIDIA RTX PRO 5000 Blackwell Laptop, driver `32.0.15.9653`, the scripted player descended to 10.3 m below the reference surface. A ray from the player's eye contacted the cave roof before reaching the reference surface. Mining awarded four ore. The fresh process restored generation 1 and terrain revision 2 at the identical underground position, verified the same edit overlay, and committed a simulation tick. Committed member hashes remained unchanged.
 - Debug Layer and DRED were enabled. The mining and Continue processes reported eight and two warnings respectively and zero errors, corruption, discarded messages, or live GPU child objects.
 - Run `pwsh -File eng/Test-CaveExploration.ps1` on a Windows desktop with NVIDIA and Graphics Tools after the verified consumer build. The harness uses a temporary save directory.

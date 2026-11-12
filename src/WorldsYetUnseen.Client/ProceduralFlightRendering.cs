@@ -13,11 +13,11 @@ namespace WorldsYetUnseen.Client;
 // A renderer Stop fences its owning runtime. Each successive graphics owner therefore
 // has its own bounded lifetime while the world and the HWND keep their original authority.
 internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, RuntimeTimingLimits timing,
-    ResourceQuota quota, bool measure)
+    ResourceQuota quota, bool measure) : IDisposable
 {
     private readonly ProcessResourceBudget _budget = new(new ProcessResourceLimits(1, quota));
     private RuntimeSafetyAuthority? _runtime;
-    private readonly D3D12DiagnosticsOptions _diagnostics = new(!measure, true);
+    private readonly D3D12DeviceSession _device = new(new(!measure, true), warp);
     internal D3D12Renderer? Current { get; private set; }
     private VolumeTerrainColorEvaluator? _colorEvaluator;
     internal ReferenceBiomes? Biomes { get; private set; }
@@ -31,15 +31,14 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     internal D3D12Renderer Active => Current ?? throw new InvalidOperationException("No active planet renderer.");
 
     internal Task NearAsync(VolumeStreamingCoordinator terrain, CancellationToken token) =>
-        StartAsync(owner => _colorEvaluator is { } colors
-            ? D3D12Renderer.CreateWithColoredVolumeTerrain(window, owner, terrain, terrain.View.RendererEpoch,
-                colors, _diagnostics, warp, timing.Shutdown, timing.Shutdown)
-            : D3D12Renderer.CreateWithVolumeTerrain(window, owner, terrain, terrain.View.RendererEpoch,
-                _diagnostics, warp, timing.Shutdown, timing.Shutdown), token);
+        StartAsync(owner => D3D12Renderer.CreateWithSessionVolumeTerrain(window, owner, terrain,
+            terrain.View.RendererEpoch, _device, _colorEvaluator, timing.Shutdown, timing.Shutdown), token);
 
     internal Task FarAsync(RenderMeshPair globe, CancellationToken token) =>
-        StartAsync(owner => D3D12Renderer.CreateWithMeshes(window, owner, globe, _diagnostics, warp,
+        StartAsync(owner => D3D12Renderer.CreateWithSessionMeshes(window, owner, globe, _device,
             timing.Shutdown, timing.Shutdown), token);
+
+    public void Dispose() => _device.Dispose();
 
     private async Task StartAsync(Func<IRuntimeOwnership, D3D12Renderer> create, CancellationToken token)
     {
