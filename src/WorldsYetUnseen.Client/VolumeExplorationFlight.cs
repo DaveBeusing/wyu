@@ -60,8 +60,9 @@ internal sealed partial class VolumeExploration
         var globeTask = Task.Run(() =>
         {
             var buildStarted = BiomeMeasurements.Start();
+            var buildBytes = BiomeMeasurements.AllocatedBytes(buildStarted);
             var globe = ProceduralGlobe.Build(planet, pad, renderHost.Biomes, token);
-            BiomeMeasurements.Write("globe-build", buildStarted);
+            BiomeMeasurements.WriteBuild("globe-build", buildStarted, buildBytes);
             return globe;
         }, token);
         var far = false;
@@ -97,10 +98,17 @@ internal sealed partial class VolumeExploration
                         await renderHost.StopAsync(qualifyHandoff: scripted).ConfigureAwait(false);
                         var view = terrain.View;
                         terrain.ChangeView(view.Frame, checked(view.RendererEpoch + 1));
-                        await renderHost.NearAsync(terrain, token).ConfigureAwait(false);
-                        await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, view.Frame, token,
-                            coverageCenter: center, flightCamera: flight.State.Position, supportCells: FlightSupportCells)
-                            .ConfigureAwait(false);
+                        var nearReady = renderHost.NearAsync(terrain, token);
+                        try
+                        {
+                            await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, view.Frame, token,
+                                coverageCenter: center, flightCamera: flight.State.Position, supportCells: FlightSupportCells,
+                                rendererReady: nearReady).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            await nearReady.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                        }
                         far = false;
                         if (_published.TerrainRevision != revision || !TryFlightPad(terrain, anchor, out var returned,
                                 out var returnedDigest, out blocked) || returnedDigest != digest || Length(Subtract(pad, returned)) > 0.01)

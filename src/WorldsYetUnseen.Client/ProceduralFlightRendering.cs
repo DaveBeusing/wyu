@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using Groundwork.Core;
 using Groundwork.Platform.Windows;
 using Groundwork.Rendering;
@@ -18,13 +19,21 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     private RuntimeSafetyAuthority? _runtime;
     private readonly D3D12DiagnosticsOptions _diagnostics = new(!measure, true);
     internal D3D12Renderer? Current { get; private set; }
-    internal ReferenceBiomes? Biomes { get; set; }
+    private VolumeTerrainColorEvaluator? _colorEvaluator;
+    internal ReferenceBiomes? Biomes { get; private set; }
+
+    internal void SetBiomes(ReferenceBiomes biomes)
+    {
+        Biomes = biomes;
+        _colorEvaluator = (position, material) => biomes.Color(position, material);
+        RuntimeHelpers.PrepareDelegate(_colorEvaluator);
+    }
     internal D3D12Renderer Active => Current ?? throw new InvalidOperationException("No active planet renderer.");
 
     internal Task NearAsync(VolumeStreamingCoordinator terrain, CancellationToken token) =>
-        StartAsync(owner => Biomes is { } biomes
+        StartAsync(owner => _colorEvaluator is { } colors
             ? D3D12Renderer.CreateWithColoredVolumeTerrain(window, owner, terrain, terrain.View.RendererEpoch,
-                (position, material) => biomes.Color(position, material), _diagnostics, warp, timing.Shutdown, timing.Shutdown)
+                colors, _diagnostics, warp, timing.Shutdown, timing.Shutdown)
             : D3D12Renderer.CreateWithVolumeTerrain(window, owner, terrain, terrain.View.RendererEpoch,
                 _diagnostics, warp, timing.Shutdown, timing.Shutdown), token);
 

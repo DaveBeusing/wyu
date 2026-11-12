@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Groundwork.Voxels;
 
 namespace WorldsYetUnseen.Gameplay;
@@ -31,6 +32,7 @@ public sealed class ReferenceBiomes
 
     public ReferenceBiomeBlend Evaluate(PlanetVector position) => Palette[Index(position)].Blend;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public uint Color(PlanetVector position, ushort material)
     {
         // The generated radial relief contributes to the canonical position. The
@@ -39,6 +41,7 @@ public sealed class ReferenceBiomes
         return material == (ushort)ReferenceTerrainMaterial.OchreStone ? entry.Ochre : entry.Basalt;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int Index(PlanetVector position) =>
         Math.Clamp((int)(Midpoint + position.X * _x + position.Y * _y + position.Z * _z), 0, TableSize - 1);
 

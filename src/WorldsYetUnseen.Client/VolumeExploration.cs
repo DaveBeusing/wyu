@@ -272,7 +272,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
 
     private async Task<bool> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
-        PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8)
+        PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
+        Task? rendererReady = null)
     {
         // Spawn search and candidate fallback share the same monotonic origin sequence as movement.
         if (frame.Revision <= terrain.View.Frame.Revision)
@@ -287,7 +288,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var mask = ++_sequence;
         if (overlay is not null)
             overlay.Menu = ActiveCaveClimbHint ?? $"Loading planet terrain\n\n{PlanetName}\nSeed {Descriptor.Seed}\nGenerator {Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
-        RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
+        if (rendererReady is null)
+            RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
         var selection = SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
         if (_selection is null || selection.Minimum != _selection.Minimum)
             _windows++;
@@ -307,7 +309,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 : $"The planet could not load terrain ({result}). Close the game and try again.");
         }
         using var work = staged;
-        if (!await Task.Run(() => work.Execute(token), token).ConfigureAwait(false))
+        var generated = Task.Run(() => work.Execute(token), token);
+        if (rendererReady is not null)
+        {
+            await Task.WhenAll(generated, rendererReady).ConfigureAwait(false);
+            RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
+        }
+        if (!await generated.ConfigureAwait(false))
         {
             token.ThrowIfCancellationRequested();
             if (edit is not null)
@@ -317,8 +325,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
             pauseWhileMinimized: true).ConfigureAwait(false);
         var packStarted = BiomeMeasurements.Start();
+        var packBytes = BiomeMeasurements.AllocatedBytes(packStarted);
         var upload = renderer.TryStageVolumeTerrain(work.Generation);
-        BiomeMeasurements.Write("near-pack", packStarted);
+        BiomeMeasurements.WriteBuild("near-pack", packStarted, packBytes);
         if (edit is not null && upload is MeshReplacementSubmissionResult.Backpressure or MeshReplacementSubmissionResult.InvalidRegion)
             return false;
         RequireMesh(upload);

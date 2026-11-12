@@ -96,7 +96,7 @@ internal static partial class GameHost
                 mouse = new PrototypeMouseLook(window, settings);
             var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics);
             if (planet is not null && (!scripted || BiomeMeasurements.UseBiomes))
-                renderHost.Biomes = new ReferenceBiomes(planet);
+                renderHost.SetBiomes(new ReferenceBiomes(planet));
             terrain = exploration.CreateTerrain();
             diagnostics?.Enter("GraphicsStartup");
             diagnostics?.CheckGraphics();
