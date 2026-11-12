@@ -22,6 +22,9 @@ function Invoke-CavePhase([string]$Phase, [string]$CheckpointLabel) {
         $output -cnotcontains 'PASS: WYU WP12 cave route and native shutdown.') {
         throw "Cave phase $Phase failed (exit $exitCode)."
     }
+    if ($Phase -ceq 'resume' -and @($output | Where-Object { $_ -cmatch '^WP12 cave reached supported surface: ' }).Count -ne 1) {
+        throw 'The resumed player did not reach supported surface.'
+    }
     $state = $checkpoint[0].Substring($CheckpointLabel.Length).Trim()
     if (!$state) { throw "Cave phase $Phase omitted its checkpoint evidence." }
     return $state
@@ -47,4 +50,4 @@ if ($continued -cne $saved) { throw 'The cave checkpoint changed after a new pro
 if ((@(Get-CommittedMemberHashes $slots[0].FullName) -join "`n") -cne ($memberHashes -join "`n")) {
     throw 'Continuing under ground rewrote a committed member.'
 }
-Write-Host 'PASS: NVIDIA cave mining, underground continuation and native shutdown.'
+Write-Host 'PASS: NVIDIA cave mining, underground continuation, surface return and native shutdown.'

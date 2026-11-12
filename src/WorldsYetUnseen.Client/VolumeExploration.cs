@@ -182,7 +182,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 // A new tick must capture focus, surface and keys after the potentially long load.
                 continue;
             }
-            if (!scripted && await HandleWorldCommandsAsync(terrain, renderer, state, input, token).ConfigureAwait(false))
+            if (!scripted && _caveExitWaypoint < 0 && await HandleWorldCommandsAsync(terrain, renderer, state, input, token).ConfigureAwait(false))
             {
                 if (_quitAfterSave)
                     return;
@@ -198,6 +198,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 continue;
             }
 
+            if (cave is not null && _caveExitWaypoint < 0 && AtCaveExitRope(state) &&
+                PrototypeMenu.Pressed(input, InputControl.Space))
+                _caveExitWaypoint = 0;
+            var climb = _caveExitWaypoint >= 0 ? NextCaveClimb(state) : null;
             var forward = scripted ? 0 : Axis(input, InputControl.W, InputControl.S);
             var right = scripted ? 1 : Axis(input, InputControl.D, InputControl.A);
             var angle = scripted ? 0 : _yaw;
@@ -206,12 +210,23 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var divisor = Math.Max(1, Math.Max(Math.Abs(x), Math.Abs(z)));
             var begin = await BeginAsync(token).ConfigureAwait(false);
             terrain.BeginTick(begin);
-            var draft = cave is null
-                ? terrain.TryPlanMovement(state, x / divisor, z / divisor, out var status)
-                : PlanCaveMovement(terrain, state, x / divisor, z / divisor, out status);
+            VolumeQueryStatus status;
+            VolumeMovementDraft? draft;
+            if (climb is { } displacement)
+                draft = terrain.TryPlanCaveClimb(state, displacement, out status, CaveQueries);
+            else
+                draft = cave is null
+                    ? terrain.TryPlanMovement(state, x / divisor, z / divisor, out status)
+                    : PlanCaveMovement(terrain, state, x / divisor, z / divisor, out status);
+
             var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
             var prepared = draft is null ? null : terrain.TryPrepareMovement(draft, commit, []);
             var outcome = Finish(commit, prepared);
+            if (climb is not null && (draft?.Result.Status != PlanetWalkStatus.Moved || outcome.Status != BarrierStatus.Committed))
+            {
+                _caveExitWaypoint = -1;
+                Notice(status == VolumeQueryStatus.Contact ? "Exit rope blocked by terrain." : $"Exit rope unavailable ({status}).");
+            }
             if (prepared is not null && outcome.Status == BarrierStatus.Committed)
             {
                 state = draft!.Result.State;
