@@ -312,8 +312,16 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var generated = Task.Run(() => work.Execute(token), token);
         if (rendererReady is not null)
         {
-            await Task.WhenAll(generated, rendererReady).ConfigureAwait(false);
-            RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
+            try
+            {
+                await rendererReady.ConfigureAwait(false);
+                RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
+            }
+            catch
+            {
+                await ((Task)generated).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                throw;
+            }
         }
         if (!await generated.ConfigureAwait(false))
         {

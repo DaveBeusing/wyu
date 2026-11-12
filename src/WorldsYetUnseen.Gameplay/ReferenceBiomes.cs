@@ -15,6 +15,7 @@ public sealed class ReferenceBiomes
     private const int Midpoint = TableSize / 2;
     private const int BlendWidth = 32;
     private static readonly ColorEntry[] Palette = CreatePalette();
+    private readonly ColorEntry[] _palette = Palette;
     private readonly double _x;
     private readonly double _y;
     private readonly double _z;
@@ -30,14 +31,14 @@ public sealed class ReferenceBiomes
         _z = Math.Sin(angle) * scale;
     }
 
-    public ReferenceBiomeBlend Evaluate(PlanetVector position) => Palette[Index(position)].Blend;
+    public ReferenceBiomeBlend Evaluate(PlanetVector position) => _palette[Index(position)].Blend;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public uint Color(PlanetVector position, ushort material)
     {
         // The generated radial relief contributes to the canonical position. The
         // existing material adds the same tint to both representations.
-        ref readonly var entry = ref Palette[Index(position)];
+        ref readonly var entry = ref _palette[Index(position)];
         return material == (ushort)ReferenceTerrainMaterial.OchreStone ? entry.Ochre : entry.Basalt;
     }
 
