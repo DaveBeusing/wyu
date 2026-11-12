@@ -14,6 +14,7 @@ internal static class Program
             (nameof(AllMiningOrdersConserveStone), AllMiningOrdersConserveStone),
             (nameof(RejectedActionsPreserveProgress), RejectedActionsPreserveProgress),
             (nameof(CapturedProgressSurvivesLaterActions), CapturedProgressSurvivesLaterActions),
+            (nameof(ReferenceBiomeTests.TwoSeedParity), ReferenceBiomeTests.TwoSeedParity),
             (nameof(ReferencePlanetTests.SeedAudit), ReferencePlanetTests.SeedAudit),
             (nameof(ReferencePlanetTests.ChartContinuity), ReferencePlanetTests.ChartContinuity),
             (nameof(ReferencePlanetTests.PublishedSpawnAndLanding), ReferencePlanetTests.PublishedSpawnAndLanding),

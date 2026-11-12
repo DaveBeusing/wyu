@@ -240,7 +240,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 _yaw = steps is >= 60 and <= 80 ? (steps - 60) * (MathF.Tau / 20) : 0;
             var camera = Camera(terrain.View, state.Position, state.Heading);
             var frame = ++_sequence;
+            var presentStarted = scripted ? BiomeMeasurements.Start() : 0;
             RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, frame, camera));
+            if (presentStarted != 0)
+            {
+                await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= frame, token).ConfigureAwait(false);
+                BiomeMeasurements.Write("ground", presentStarted);
+            }
             Drain(terrain);
             if (overlay is not null)
             {
@@ -310,7 +316,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
             pauseWhileMinimized: true).ConfigureAwait(false);
+        var packStarted = BiomeMeasurements.Start();
         var upload = renderer.TryStageVolumeTerrain(work.Generation);
+        BiomeMeasurements.Write("near-pack", packStarted);
         if (edit is not null && upload is MeshReplacementSubmissionResult.Backpressure or MeshReplacementSubmissionResult.InvalidRegion)
             return false;
         RequireMesh(upload);

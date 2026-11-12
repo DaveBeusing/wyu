@@ -32,7 +32,8 @@ internal static partial class GameHost
         var token = stage.Token;
         Task<bool> watchClose = Task.FromResult(false);
         D3D12Renderer? renderer = null;
-        var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota);
+        var measure = scripted && BiomeMeasurements.Enabled;
+        var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure);
         VolumeStreamingCoordinator? terrain = null;
         AlphaOverlay? overlay = null;
         PrototypeMouseLook? mouse = null;
@@ -94,6 +95,8 @@ internal static partial class GameHost
             if (!scripted)
                 mouse = new PrototypeMouseLook(window, settings);
             var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics);
+            if (planet is not null && (!scripted || BiomeMeasurements.UseBiomes))
+                renderHost.Biomes = new ReferenceBiomes(planet);
             terrain = exploration.CreateTerrain();
             diagnostics?.Enter("GraphicsStartup");
             diagnostics?.CheckGraphics();
@@ -157,7 +160,7 @@ internal static partial class GameHost
 
         if (scripted)
         {
-            DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: true, requireNvidia: !useWarp, useWarp: useWarp);
+            DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: !measure, requireNvidia: !useWarp, useWarp: useWarp);
             if (terrain!.Statistics is not { Readers: 0, Generations: 0 })
                 throw new InvalidOperationException("Exploration retained terrain after shutdown.");
             Console.WriteLine(caveSmoke is null ? "PASS: WYU WP11 exploration, rebase and native shutdown."

@@ -12,19 +12,24 @@ namespace WorldsYetUnseen.Client;
 // A renderer Stop fences its owning runtime. Each successive graphics owner therefore
 // has its own bounded lifetime while the world and the HWND keep their original authority.
 internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, RuntimeTimingLimits timing,
-    ResourceQuota quota)
+    ResourceQuota quota, bool measure)
 {
     private readonly ProcessResourceBudget _budget = new(new ProcessResourceLimits(1, quota));
     private RuntimeSafetyAuthority? _runtime;
+    private readonly D3D12DiagnosticsOptions _diagnostics = new(!measure, true);
     internal D3D12Renderer? Current { get; private set; }
+    internal ReferenceBiomes? Biomes { get; set; }
     internal D3D12Renderer Active => Current ?? throw new InvalidOperationException("No active planet renderer.");
 
     internal Task NearAsync(VolumeStreamingCoordinator terrain, CancellationToken token) =>
-        StartAsync(owner => D3D12Renderer.CreateWithVolumeTerrain(window, owner, terrain, terrain.View.RendererEpoch,
-            new(true, true), warp, timing.Shutdown, timing.Shutdown), token);
+        StartAsync(owner => Biomes is { } biomes
+            ? D3D12Renderer.CreateWithColoredVolumeTerrain(window, owner, terrain, terrain.View.RendererEpoch,
+                (position, material) => biomes.Color(position, material), _diagnostics, warp, timing.Shutdown, timing.Shutdown)
+            : D3D12Renderer.CreateWithVolumeTerrain(window, owner, terrain, terrain.View.RendererEpoch,
+                _diagnostics, warp, timing.Shutdown, timing.Shutdown), token);
 
     internal Task FarAsync(RenderMeshPair globe, CancellationToken token) =>
-        StartAsync(owner => D3D12Renderer.CreateWithMeshes(window, owner, globe, new(true, true), warp,
+        StartAsync(owner => D3D12Renderer.CreateWithMeshes(window, owner, globe, _diagnostics, warp,
             timing.Shutdown, timing.Shutdown), token);
 
     private async Task StartAsync(Func<IRuntimeOwnership, D3D12Renderer> create, CancellationToken token)
@@ -63,7 +68,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
         _runtime = null;
         Current = null;
         if (qualifyHandoff && renderer is not null)
-            DesktopSmoke.VerifyAdapterSettlement(renderer, requireDebugLayer: true, requireNvidia: !warp, useWarp: warp);
+            DesktopSmoke.VerifyAdapterSettlement(renderer, requireDebugLayer: !measure, requireNvidia: !warp, useWarp: warp);
     }
 }
 
@@ -73,7 +78,7 @@ internal static class ProceduralGlobe
     private const int TilesPerAxis = 1 << Level;
     private static readonly Vector4 Space = new(0.01f, 0.018f, 0.04f, 1);
 
-    internal static RenderMeshPair Build(ReferencePlanet planet, PlanetVector pad, CancellationToken token)
+    internal static RenderMeshPair Build(ReferencePlanet planet, PlanetVector pad, ReferenceBiomes? biomes, CancellationToken token)
     {
         var faces = Enum.GetValues<PlanetFace>();
         var heights = new Dictionary<PlanetSampleKey, double>();
@@ -97,7 +102,8 @@ internal static class ProceduralGlobe
                     vertices.Add(Float(position));
                     var sample = planet.Descriptor.SampleAt(position).Vertex;
                     var material = planet.Field.SampleMaterial(sample);
-                    colors.Add(material == (ushort)ReferenceTerrainMaterial.Basalt ? 0xff6f806au : 0xff76a3c4u);
+                    colors.Add(biomes?.Color(position, material) ??
+                        (material == (ushort)ReferenceTerrainMaterial.Basalt ? 0xff6f806au : 0xff76a3c4u));
                 }
                 foreach (var index in patch.Indices)
                     indices.Add(offset + index);

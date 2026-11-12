@@ -57,7 +57,13 @@ internal sealed partial class VolumeExploration
         var flight = new ProceduralFlight(planet.Descriptor.RadiusMeters, pad, player.Heading);
         if (scripted)
             FlightTrace("launch", flight, revision, digest);
-        var globeTask = Task.Run(() => ProceduralGlobe.Build(planet, pad, token), token);
+        var globeTask = Task.Run(() =>
+        {
+            var buildStarted = BiomeMeasurements.Start();
+            var globe = ProceduralGlobe.Build(planet, pad, renderHost.Biomes, token);
+            BiomeMeasurements.Write("globe-build", buildStarted);
+            return globe;
+        }, token);
         var far = false;
         var usedFar = false;
         var previousPhase = flight.Phase;
@@ -78,12 +84,16 @@ internal sealed partial class VolumeExploration
                     continue;
                 }
 
-                var steps = scripted ? 120 : 12;
+                var steps = scripted && !BiomeMeasurements.Enabled ? 120 : 12;
+                long transitionStarted = 0;
+                string? transition = null;
                 for (var step = 0; step < steps; step++)
                 {
                     var next = flight.Propose();
                     if (far && Length(next.Position) <= FlightBoundary)
                     {
+                        transitionStarted = BiomeMeasurements.Start();
+                        transition = "to-ground";
                         await renderHost.StopAsync(qualifyHandoff: scripted).ConfigureAwait(false);
                         var view = terrain.View;
                         terrain.ChangeView(view.Frame, checked(view.RendererEpoch + 1));
@@ -111,6 +121,8 @@ internal sealed partial class VolumeExploration
 
                     if (!far && !usedFar && Length(next.Position) > FlightBoundary)
                     {
+                        transitionStarted = BiomeMeasurements.Start();
+                        transition = "to-orbit";
                         var globe = await globeTask.ConfigureAwait(false);
                         await renderHost.StopAsync(qualifyHandoff: scripted).ConfigureAwait(false);
                         if (terrain.Statistics is not { MovementHeld: true, Readers: 0 })
@@ -132,6 +144,7 @@ internal sealed partial class VolumeExploration
                         break;
                     }
                 }
+                var frameStarted = far && flight.Phase == ProceduralFlightPhase.Orbit ? BiomeMeasurements.Start() : 0;
                 var sequence = ++_sequence;
                 var renderer = renderHost.Active;
                 if (far)
@@ -142,6 +155,9 @@ internal sealed partial class VolumeExploration
                 if (scripted || flight.Phase == ProceduralFlightPhase.Landed)
                     await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
                         pauseWhileMinimized: true).ConfigureAwait(false);
+                BiomeMeasurements.Write("orbit", frameStarted);
+                if (transition is not null)
+                    BiomeMeasurements.Write(transition, transitionStarted);
                 if (abortAtFar && far)
                     return (player, true);
                 if (!scripted)
