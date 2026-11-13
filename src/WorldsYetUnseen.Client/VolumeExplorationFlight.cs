@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Security.Cryptography;
 using Groundwork.Core;
 using Groundwork.Persistence;
+using Groundwork.Rendering;
 using Groundwork.Rendering.D3D12;
 using Groundwork.Voxels;
 using static WorldsYetUnseen.Client.FlightVector;
@@ -93,6 +94,8 @@ internal sealed partial class VolumeExploration
                 long transitionStarted = 0;
                 long acceptedAt = 0;
                 string? transition = null;
+                ulong? handoffTick = null;
+                SkyPixels[]? beforeSky = null;
                 for (var step = 0; step < steps; step++)
                 {
                     var next = flight.Propose();
@@ -100,6 +103,12 @@ internal sealed partial class VolumeExploration
                     {
                         transitionStarted = BiomeMeasurements.Start();
                         transition = "to-ground";
+                        if (skySmoke)
+                        {
+                            handoffTick = checked(_environmentTick + (ulong)flight.Tick);
+                            beforeSky = await CaptureFlightSkyAsync(renderHost.Active, terrain.View, flight.State.Position,
+                                player.Heading, handoffTick.Value, far: true, token).ConfigureAwait(false);
+                        }
                         var stopStarted = BiomeMeasurements.Start();
                         await renderHost.StopAsync(qualifyHandoff: scripted).ConfigureAwait(false);
                         BiomeMeasurements.Write("far-stop", stopStarted);
@@ -117,6 +126,14 @@ internal sealed partial class VolumeExploration
                             await nearReady.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
                         }
                         far = false;
+                        if (beforeSky is not null)
+                        {
+                            var pixels = await CaptureFlightSkyAsync(renderHost.Active, terrain.View, flight.State.Position,
+                                player.Heading, handoffTick!.Value, far: false, token).ConfigureAwait(false);
+                            VerifyFlightSky(beforeSky, pixels, transition);
+                            beforeSky = null;
+                            handoffTick = null;
+                        }
                         if (_published.TerrainRevision != revision || !TryFlightPad(terrain, anchor, out var returned,
                                 out var returnedDigest, out blocked) || returnedDigest != digest || Length(Subtract(pad, returned)) > 0.01)
                             throw new InvalidOperationException($"Landing coverage or revision changed ({blocked}).");
@@ -140,6 +157,12 @@ internal sealed partial class VolumeExploration
                     {
                         transitionStarted = BiomeMeasurements.Start();
                         transition = "to-orbit";
+                        if (skySmoke)
+                        {
+                            handoffTick = checked(_environmentTick + (ulong)flight.Tick);
+                            beforeSky = await CaptureFlightSkyAsync(renderHost.Active, terrain.View, next.Position,
+                                player.Heading, handoffTick.Value, far: false, token).ConfigureAwait(false);
+                        }
                         var globe = await globeTask.ConfigureAwait(false);
                         await renderHost.StopAsync(qualifyHandoff: scripted).ConfigureAwait(false);
                         if (terrain.Statistics is not { MovementHeld: true, Readers: 0 })
@@ -147,6 +170,12 @@ internal sealed partial class VolumeExploration
                         await renderHost.FarAsync(globe, token).ConfigureAwait(false);
                         far = true;
                         usedFar = true;
+                        if (beforeSky is not null)
+                        {
+                            var pixels = await CaptureFlightSkyAsync(renderHost.Active, terrain.View, next.Position,
+                                player.Heading, handoffTick!.Value, far: true, token).ConfigureAwait(false);
+                            VerifyFlightSky(beforeSky, pixels, transition);
+                        }
                         if (scripted)
                             FlightTrace("far-ascent", flight, revision, digest);
                         break;
@@ -170,7 +199,9 @@ internal sealed partial class VolumeExploration
                 var presentationTick = fraction == 1 ? tick : tick - 1;
                 var subTick = fraction == 1 ? 0 : fraction;
                 var camera = FlightCamera(terrain.View, flight.State.Position, player.Heading, presentationTick, subTick);
-                var orbit = ProceduralGlobe.Frame(sequence, camera);
+                var orbit = camera.Sky is not null ? ProceduralGlobe.Frame(sequence, camera) :
+                    ProceduralGlobe.LegacyFrame(sequence, flight.State.Position, player.Heading,
+                        Atmosphere(FlightEye(flight.State.Position), presentationTick, subTick));
                 if (scripted && _weather is not null)
                 {
                     if (camera.Fog is not { } fog || (far && fog.MaxOpacity != 0))
@@ -401,10 +432,57 @@ internal sealed partial class VolumeExploration
     private VolumeCamera FlightCamera(VolumeViewIdentity view, PlanetVector position, PlanetVector heading, ulong tick,
         double fraction = 0)
     {
+        if (!ReferenceSky.Enabled)
+        {
+            var legacyUp = Vector3.Normalize(ProceduralGlobe.Float(position));
+            var legacyForward = Vector3.Normalize(-legacyUp + ProceduralGlobe.Float(heading) * 0.35f);
+            var legacyEye = FlightEye(position);
+            return ApplyAtmosphere(new(view, legacyEye, legacyForward, legacyUp, 0.95f,
+                0.08f, 210, Vector4.One, Sky), Atmosphere(legacyEye, tick, fraction));
+        }
         var (forward, up) = ProceduralGlobe.ViewBasis(position, heading);
         var eye = FlightEye(position);
         return ApplySky(ApplyAtmosphere(new(view, eye, forward, up, ProceduralGlobe.FieldOfView,
             0.08f, 210, Vector4.One, Sky), Atmosphere(eye, tick, fraction)), tick, fraction);
+    }
+
+    private async Task<SkyPixels[]> CaptureFlightSkyAsync(D3D12Renderer renderer, VolumeViewIdentity view,
+        PlanetVector position, PlanetVector heading, ulong tick, bool far, CancellationToken token)
+    {
+        var camera = FlightCamera(view, position, heading, tick);
+        var sky = camera.Sky ?? throw new InvalidOperationException("Missing sky for pixel fixture.");
+        var radial = Vector3.Normalize(sky.EyeMeters);
+        var tangent = Vector3.Normalize(Vector3.Cross(radial, Vector3.UnitZ));
+        // Keep the accepted eye fixed. Controlled lighting separates stars and the solar disk from the horizon.
+        var solar = Vector3.Normalize(radial + 0.18f * tangent);
+        var views = new[]
+        {
+            camera with { Forward = tangent, Up = radial, Sky = sky with { Forward = tangent, Up = radial } },
+            camera with { Forward = radial, Up = tangent, Sky = sky with
+                { Forward = radial, Up = tangent, SunDirection = solar } },
+            camera with { Forward = radial, Up = tangent, Sky = sky with
+                { Forward = radial, Up = tangent, SunDirection = -radial, SunRadiance = 0 } },
+        };
+        var captures = new SkyPixels[views.Length];
+        for (var index = 0; index < views.Length; index++)
+        {
+            var sequence = ++_sequence;
+            var sample = views[index];
+            RequireFrame(far ? renderer.TrySubmit(new RenderFrame(sequence, sample.ClearColor) { Sky = sample.Sky }) :
+                renderer.TrySubmitVolumeCamera(_published.Generation, sequence, sample));
+            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+            await Task.Delay(100, token).ConfigureAwait(false);
+            var surface = renderer.Read();
+            captures[index] = SkyPixels.Capture(surface.AppliedWidth, index == 0 ? surface.AppliedHeight * 2 / 3 : surface.AppliedHeight);
+        }
+        return captures;
+    }
+
+    private void VerifyFlightSky(SkyPixels[] before, SkyPixels[] after, string transition)
+    {
+        SkyPixels.Verify(before[0], after[0], Descriptor.Seed, transition, "horizon");
+        SkyPixels.Verify(before[1], after[1], Descriptor.Seed, transition, "sun");
+        SkyPixels.Verify(before[2], after[2], Descriptor.Seed, transition, "stars");
     }
 
     private static void FlightTrace(string phase, ProceduralFlight flight, ulong revision, string digest)

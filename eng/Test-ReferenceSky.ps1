@@ -20,6 +20,14 @@ try {
             if ($exitCode -ne 0 -or $output -cnotcontains 'PASS: WYU WP11 exploration, rebase and native shutdown.') {
                 throw "Sky route $seed/$action failed."
             }
+            if ($action -eq 'flight') {
+                foreach ($direction in 'to-orbit','to-ground') {
+                    foreach ($feature in 'horizon','sun','stars') {
+                        $pixelChecks = @($output | Where-Object { $_ -cmatch "^PACKAGE G PIXELS $direction/$feature seed=$seed " })
+                        if ($pixelChecks.Count -ne 1) { throw "Missing $direction/$feature pixel check for seed $seed." }
+                    }
+                }
+            }
             $checkpoints = if ($action -eq 'flight') { 'twilight','to-orbit','orbit','to-ground','landed' } else { 'landed' }
             foreach ($stage in $checkpoints) {
                 $matchesForStage = @($output | Where-Object { $_ -cmatch "^PACKAGE G $stage seed=$seed " })
