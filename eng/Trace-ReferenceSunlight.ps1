@@ -49,13 +49,17 @@ if (!$aligned) { throw "Recording saved to $trace, but the replay produced no ca
 $aligned | Export-Csv -LiteralPath (Join-Path $output 'markers-qpc.csv')
 if ($presentMonPath) {
     $presents = Join-Path $output 'presents.csv'
-    & $presentMonPath --etl_file $trace --process_name dotnet.exe --qpc_time --v2_metrics --no_console_stats --output_file $presents
+    & $presentMonPath --etl_file $trace --qpc_time --v2_metrics --no_console_stats --output_file $presents
     if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $presents -PathType Leaf)) {
-        throw "PresentMon could not decode $trace."
+        Write-Warning "PresentMon did not export $trace. The ETL and GPU markers were retained."
     }
     $clientPids = @($aligned | Select-Object -ExpandProperty Pid -Unique)
-    Import-Csv -LiteralPath $presents | Where-Object { [int]$_.ProcessID -in $clientPids } |
-        Group-Object PresentMode | Select-Object Name,Count | Format-Table
+    if (Test-Path -LiteralPath $presents -PathType Leaf) {
+        $modes = @(Import-Csv -LiteralPath $presents | Where-Object { [int]$_.ProcessID -in $clientPids } |
+            Group-Object PresentMode | Select-Object Name,Count)
+        if ($modes) { $modes | Format-Table }
+        else { Write-Warning 'PresentMon did not classify the WYU presents. Inspect the raw DxgKrnl events.' }
+    }
 }
 if ($FlipMode) { Set-Content -LiteralPath (Join-Path $output 'requested-flip-mode.txt') -Value $FlipMode }
 Write-Host "[FERTIG] $trace"

@@ -316,3 +316,11 @@ with zero DWM overlaps in either capture. Their p99 values were effectively
 unchanged across captures: about 2.531/2.692 ms off/on at low sun and
 2.536/2.707 ms during turns. These observations do not establish that
 changing the presentation mode reduces DWM overlaps or long-frame risk.
+
+The clipped-window capture flip-clip-20261113-235034 saved successfully.
+The ETL has zero reported event loss and 13,220 WYU DXGI Present starts
+and matching counts of Present stops and DxgKrnl PresentHistoryDetailed
+starts. PresentMon classified only DWM output even with its process filter
+removed. Treat the WYU presentation mode in this capture as unverified.
+The capture wrapper now preserves the ETL and continues after a missing
+PresentMon export. Its Modes parameter can resume only the missing arm.
