@@ -54,6 +54,18 @@ internal sealed partial class VolumeExploration
             decoded is not { } landed || environmentTick != ReferenceWeather.InitialTick + (ulong)landed.FlightTick ||
             environmentTick != _environmentTick)
             throw new InvalidOperationException("Landed checkpoint differs from the current player or flight state.");
+        var camera = Camera(terrain.View, player.Position, player.Heading);
+        if (phase == "interrupt")
+        {
+            _environmentTick = checked(_environmentTick + 60);
+            var write = await SaveAsync(terrain, token).ConfigureAwait(false);
+            if (write is not { Status: VolumeSlotStatus.Indeterminate, Member: "volume.a" } ||
+                write.Error?.Message != "NTFS checkpoint rename failed." || !slot!.HasPendingWrite)
+                throw new InvalidOperationException($"Expected blocked landed checkpoint publication ({write.Status}, {write.Member}).");
+            Console.WriteLine("WP11 LANDED INTERRUPT READY");
+            await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
+            return;
+        }
         if (phase == "resume")
         {
             VerifyEnvironmentPayload(checkpoint, landed);
@@ -66,6 +78,8 @@ internal sealed partial class VolumeExploration
         var foot = landed.Foot;
         Console.WriteLine(FormattableString.Invariant(
             $"WP11 LANDED generation={checkpoint.Generation} tick={landed.FlightTick} revision={landed.Revision} overlay={digest} craft={foot.X:R},{foot.Y:R},{foot.Z:R} player={player.Position.X:R},{player.Position.Y:R},{player.Position.Z:R}"));
+        Console.WriteLine(FormattableString.Invariant(
+            $"PACKAGE E LANDED tick={environmentTick} tint={camera.Tint.X:R} fog={camera.Fog?.MaxOpacity:R} band={camera.Fog?.StartDepthMeters:R},{camera.Fog?.EndDepthMeters:R}"));
     }
 
     private static void VerifyEnvironmentPayload(VolumeCheckpoint checkpoint, ProceduralLanding landed)

@@ -15,6 +15,10 @@ foreach ($seed in @('42', '20261111')) {
         if ($exitCode -ne 0 -or $output -cnotcontains 'PASS: WYU WP11 exploration, rebase and native shutdown.') {
             throw "Exploration failed for seed $seed on $adapter (exit $exitCode)."
         }
+        if ($env:WYU_PACKAGE_E -cne 'off' -and
+            $output -cnotcontains 'PASS: Package E region boundary presented continuously at x=128.') {
+            throw "Missing region-boundary presentation for seed $seed on $adapter."
+        }
 
         $checkpoints = @($output | Where-Object { $_ -cmatch '^WP11 (spawn|route) seed=' })
         if ($checkpoints.Count -ne 3) {

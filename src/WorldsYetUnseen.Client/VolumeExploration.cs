@@ -152,6 +152,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             if (StrideAt(_selection!, startBrick) != 1 || StrideAt(_selection!, nextBrick) != 2 || _transitions == 0)
                 throw new InvalidOperationException("The scripted route must start beside a generated 2:1 boundary.");
             WriteCheckpoint("spawn", state);
+            if (_weather is not null)
+                await VerifyWeatherBoundaryAsync(terrain, renderHost.Active, state, token).ConfigureAwait(false);
         }
         var steps = 0;
         var exercisedWindow = false;
@@ -525,9 +527,6 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private ReferenceAtmosphere? Atmosphere(PlanetVector position, ulong tick, double fraction = 0) =>
         _weather?.Evaluate(position, tick, fraction);
 
-    private VolumeCamera ApplyAtmosphere(VolumeCamera camera, ulong tick)
-        => ApplyAtmosphere(camera, Atmosphere(camera.Position, tick));
-
     private static VolumeCamera ApplyAtmosphere(VolumeCamera camera, ReferenceAtmosphere? weather)
     {
         if (weather is not { } atmosphere)
@@ -551,19 +550,25 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         };
         var generation = _published.Generation;
         var height = ReferencePlanet.RadiusMeters;
-        foreach (var phase in new[] { "clear", "dense", "boundary" })
+        var timestampPairs = Environment.GetEnvironmentVariable("WYU_PACKAGE_E_TIMESTAMP_PAIRS") == "1";
+        foreach (var phase in timestampPairs ? new[] { "dense", "boundary" } : new[] { "clear", "dense", "boundary" })
         {
             var start = Stopwatch.GetTimestamp();
-            for (var frame = 0; frame < 420; frame++)
+            var firstSequence = _sequence + 1;
+            var count = timestampPairs ? 5280 : 420;
+            for (var frame = 0; frame < count; frame++)
             {
+                var sample = timestampPairs ? frame / 2 : frame;
                 var point = phase switch
                 {
                     "clear" => new PlanetVector(0, height + 72, 0),
                     "dense" => new PlanetVector(128, height - 128, -128),
-                    _ => new PlanetVector(128 + (frame % 41 - 20) * 0.25, height - 128, -128),
+                    _ => new PlanetVector(128 + (sample % 41 - 20) * 0.25, height - 128, -128),
                 };
-                var tick = phase == "dense" ? 60UL : ReferenceWeather.InitialTick + (ulong)frame;
+                var tick = phase == "dense" ? 60UL : ReferenceWeather.InitialTick + (ulong)sample;
                 var atmosphere = Atmosphere(point, tick);
+                if (timestampPairs && ((frame / 44 + frame % 44) & 1) == 0)
+                    atmosphere = null;
                 var begin = await BeginAsync(token).ConfigureAwait(false);
                 terrain.BeginTick(begin);
                 Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
@@ -577,7 +582,49 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 throw new InvalidOperationException("Weather-only frames changed the published terrain.");
             Console.WriteLine(FormattableString.Invariant(
                 $"PACKAGE E WINDOW {Environment.ProcessId} {phase} {start} {Stopwatch.GetTimestamp()}"));
+            if (timestampPairs)
+                Console.WriteLine($"PACKAGE E TIMESTAMP PAIRS {phase} {firstSequence} {count}");
         }
+    }
+
+    private async Task VerifyWeatherBoundaryAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
+        PlanetWalkState state, CancellationToken token)
+    {
+        var point = state.Position with { X = 128 };
+        var direction = Unit(point);
+        var radius = Descriptor.RadiusMeters;
+        var surface = Scale(direction, radius);
+        var elevation = planet.Field.SampleLandform(Descriptor.SampleAt(surface).Vertex).Elevation /
+            (double)PlanetDensityField.UnitsPerCell;
+        point = Scale(direction, radius + elevation) with { X = 128 };
+        var original = terrain.View.Frame;
+        await LoadAsync(terrain, renderer, point, state.Heading, PlanetLocalFrame.Create(point), token).ConfigureAwait(false);
+        var publication = _published;
+        var center = Camera(terrain.View, point, state.Heading);
+        var eye = center.Position with { X = 128 };
+        var expected = Atmosphere(eye, _environmentTick);
+        foreach (var offset in new[] { -0.0001, 0, 0.0001 })
+        {
+            var position = eye with { X = eye.X + offset };
+            var weather = Atmosphere(position, _environmentTick);
+            if (weather is not { } value || expected is not { } target ||
+                Math.Abs(value.FogStart - target.FogStart) > 0.0001 ||
+                Math.Abs(value.FogOpacity - target.FogOpacity) > 0.0001)
+                throw new InvalidOperationException("Weather jumped at the region boundary.");
+            var begin = await BeginAsync(token).ConfigureAwait(false);
+            terrain.BeginTick(begin);
+            Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
+            var sequence = ++_sequence;
+            RequireFrame(renderer.TrySubmitVolumeCamera(publication.Generation, sequence,
+                ApplyAtmosphere(center with { Position = position }, weather)));
+            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+            Drain(terrain);
+        }
+        using (var read = terrain.TryRead())
+            if (read?.Info != publication)
+                throw new InvalidOperationException("Region weather changed the terrain publication.");
+        await LoadAsync(terrain, renderer, state.Position, state.Heading, original, token).ConfigureAwait(false);
+        Console.WriteLine("PASS: Package E region boundary presented continuously at x=128.");
     }
 
     private static ulong ReadEnvironmentTick(VolumeCheckpoint? checkpoint)

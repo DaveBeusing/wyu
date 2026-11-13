@@ -27,6 +27,13 @@ boundaries, segment rollover, cache history, and altitude fade. The Windows
 exploration and flight scripts check renderer handoff, landing and Continue.
 The volume save and cave scripts exercise NTFS recovery and cave regression.
 
+The Windows region fixture presents camera positions at x = 127.9999, 128 and
+128.0001 m against one terrain publication. The flight replay checks matching
+near/orbit daylight at the handoffs, zero orbital fog and its return at landing.
+On NVIDIA, the replay blocks the third save's NTFS rename after a landed
+checkpoint, terminates the writer and verifies the old checkpoint and fog
+after restart. This tests interruption before installation.
+
 `eng/Measure-ReferenceWeather.ps1 -PresentMon <path-to-PresentMon.exe>`
 runs paired NVIDIA replays with the same seed-42 spawn view, resolution and
 biomes in both variants. Each process presents 420 frames in each of three
@@ -35,6 +42,16 @@ the camera view and terrain generation stay fixed. The script discards the first
 pair, alternates order in five measured pairs, and exports frame and phase CSVs.
 PresentMon GPU Busy comes from ETW GPU scheduling events. D3D12 timestamp-query
 qualification is tracked separately.
+
+For an instrumented renderer that emits `TERRAIN GPU <sequence> <milliseconds>`,
+set `WYU_PACKAGE_E_MEASURE=1`, `WYU_WP13_MEASURE=on` and
+`WYU_PACKAGE_E_TIMESTAMP_PAIRS=1`, then run `--volume-smoke 42 hardware`.
+The `PACKAGE E TIMESTAMP PAIRS` line gives the first sequence and frame count
+per phase. The run alternates variants every frame, reverses their order every
+44 frames, and evaluates both frames of a pair at the same weather sample.
+Discard the first 880 frames per phase and divide the remaining 4,400 into
+five blocks of 880 frames. The renderer probe brackets the terrain draw with
+D3D12 timestamp queries. The released Groundwork package remains pinned.
 
 Run the capture from an administrator PowerShell or an account in Performance
 Log Users. The workstation build session could not create the ETW session.

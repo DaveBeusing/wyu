@@ -24,6 +24,45 @@ function Invoke-FlightPhase([string]$Phase, [string]$Root, [string]$Adapter) {
     return $output
 }
 
+function Test-LandedInterruption([string]$Root) {
+    $slots = @(Get-ChildItem -LiteralPath (Join-Path $Root 'v2') -Directory)
+    if ($slots.Count -ne 1) { throw 'Expected one landed slot.' }
+    $slot = $slots[0]
+    $a = Join-Path $slot.FullName 'volume.a'
+    $b = Join-Path $slot.FullName 'volume.b'
+    $intent = Join-Path $slot.FullName 'volume.intent'
+    $before = @(Get-FileHash -LiteralPath $a,$b | ForEach-Object Hash)
+    $priorIntent = if (Test-Path -LiteralPath $intent) { (Get-FileHash -LiteralPath $intent).Hash }
+    $log = Join-Path $Root 'landed-interrupt.stdout'
+    $errors = Join-Path $Root 'landed-interrupt.stderr'
+    $writer = $null
+    $lock = [IO.File]::Open($a, 'Open', 'Read', 'ReadWrite')
+    try {
+        $writer = Start-Process -FilePath (Get-Command dotnet).Source -ArgumentList @(
+            ('"' + $client + '"'), '--volume-flight-smoke', 'interrupt', ('"' + $Root + '"'), 'hardware'
+        ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $errors
+        $deadline = [DateTime]::UtcNow.AddSeconds(90)
+        while (!(Select-String -LiteralPath $log -SimpleMatch 'WP11 LANDED INTERRUPT READY' -Quiet)) {
+            if ($writer.HasExited -or [DateTime]::UtcNow -ge $deadline) {
+                Get-Content -LiteralPath $log,$errors | Write-Host
+                throw 'Landed writer did not reach the blocked rename.'
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        if ((Get-FileHash -LiteralPath $intent).Hash -ceq $priorIntent) { throw 'Missing new landed write intent.' }
+        $writer.Kill()
+        if (!$writer.WaitForExit(5000)) { throw 'Landed writer did not exit.' }
+    } finally {
+        if ($writer) {
+            if (!$writer.HasExited) { $writer.Kill(); $writer.WaitForExit(5000) | Out-Null }
+            $writer.Dispose()
+        }
+        $lock.Dispose()
+    }
+    $after = @(Get-FileHash -LiteralPath $a,$b | ForEach-Object Hash)
+    if (($after -join ' ') -cne ($before -join ' ')) { throw 'Landed interruption changed a committed member.' }
+}
+
 $reference = $null
 foreach ($adapter in @('warp', 'hardware')) {
     $root = New-FlightFixture
@@ -37,10 +76,18 @@ foreach ($adapter in @('warp', 'hardware')) {
     } elseif ($trace -cne $reference) {
         throw 'The semantic flight trace differed across the two runs.'
     }
-    $landed = @($flight | Where-Object { $_ -cmatch '^WP11 LANDED ' })
-    $resumed = @(Invoke-FlightPhase 'resume' $root $adapter | Where-Object { $_ -cmatch '^WP11 LANDED ' })
-    if ($landed.Count -ne 1 -or $resumed.Count -ne 1 -or $landed[0] -cne $resumed[0]) {
+    $landed = @($flight | Where-Object { $_ -cmatch '^(WP11|PACKAGE E) LANDED ' })
+    $resumed = @(Invoke-FlightPhase 'resume' $root $adapter | Where-Object { $_ -cmatch '^(WP11|PACKAGE E) LANDED ' })
+    if ($landed.Count -ne 2 -or ($landed -join "`n") -cne ($resumed -join "`n")) {
         throw "The landed checkpoint changed after restart on $adapter."
+    }
+    if ($adapter -eq 'hardware') {
+        Test-LandedInterruption $root
+        $recovered = @(Invoke-FlightPhase 'resume' $root $adapter | Where-Object { $_ -cmatch '^(WP11|PACKAGE E) LANDED ' })
+        if (($recovered -join "`n") -cne ($landed -join "`n")) {
+            throw 'Landed checkpoint or fog changed after interrupted publication.'
+        }
+        Write-Host 'PASS: Interrupted landed publication preserved the prior checkpoint and reconstructed fog.'
     }
 }
 

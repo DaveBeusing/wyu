@@ -12,7 +12,7 @@ internal static class Program
         if (args is ["--new-world"] || args is ["--planet-playtest", _] or ["--planet-playtest", _, "graphics" or "budget"] ||
             args is ["--volume-smoke", _, "warp" or "hardware"] ||
             args is ["--volume-save-smoke", "init" or "restore" or "interrupt" or "verify" or "protected", _] ||
-            args is ["--volume-flight-smoke", "flight" or "resume" or "abort" or "preflight", _, "warp" or "hardware"])
+            args is ["--volume-flight-smoke", "flight" or "resume" or "abort" or "preflight" or "interrupt", _, "warp" or "hardware"])
             return await RunExplorationAsync(args).ConfigureAwait(false);
 
         string? diagnosticCase = null;
@@ -141,7 +141,7 @@ internal static class Program
 
         using var stop = new CancellationTokenSource();
         if (scripted)
-            stop.CancelAfter(TimeSpan.FromMinutes(3));
+            stop.CancelAfter(TimeSpan.FromMinutes(Environment.GetEnvironmentVariable("WYU_PACKAGE_E_TIMESTAMP_PAIRS") == "1" ? 6 : 3));
         var fixture = playtest ? Path.GetFullPath(args[1]) : null;
         if (fixture is not null && !File.Exists(Path.Combine(fixture, "wyu-planet-playtest.fixture")))
             return 2;

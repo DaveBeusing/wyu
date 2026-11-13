@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Numerics;
 using System.Security.Cryptography;
 using Groundwork.Core;
@@ -88,6 +89,7 @@ internal sealed partial class VolumeExploration
 
                 var steps = scripted && !BiomeMeasurements.Enabled ? 120 : 12;
                 long transitionStarted = 0;
+                long acceptedAt = 0;
                 string? transition = null;
                 for (var step = 0; step < steps; step++)
                 {
@@ -130,6 +132,7 @@ internal sealed partial class VolumeExploration
                         next = ResolveTouchdown(terrain, flight.State, next, pad, revision);
                     _ = checked(_environmentTick + (ulong)flight.Tick + 1);
                     flight.Accept(next);
+                    acceptedAt = Stopwatch.GetTimestamp();
 
                     if (!far && !usedFar && Length(next.Position) > FlightBoundary)
                     {
@@ -159,13 +162,34 @@ internal sealed partial class VolumeExploration
                 var frameStarted = far && flight.Phase == ProceduralFlightPhase.Orbit ? BiomeMeasurements.Start() : 0;
                 var sequence = ++_sequence;
                 var renderer = renderHost.Active;
+                var tick = checked(_environmentTick + (ulong)flight.Tick);
+                var fraction = acceptedAt == 0 || flight.Phase == ProceduralFlightPhase.Landed ? 1 :
+                    Math.Clamp(Stopwatch.GetElapsedTime(acceptedAt).TotalSeconds * 60, 0, 1);
+                var presentationTick = fraction == 1 ? tick : tick - 1;
+                var subTick = fraction == 1 ? 0 : fraction;
+                var eye = FlightEye(flight.State.Position);
+                var environment = Atmosphere(eye, presentationTick, subTick);
+                if (scripted && _weather is not null)
+                {
+                    if (environment is not { } weather || (far && weather.FogOpacity != 0))
+                        throw new InvalidOperationException("Flight weather did not fade at the orbit boundary.");
+                    if (transition is not null)
+                    {
+                        var near = FlightCamera(terrain.View, flight.State.Position, player.Heading, presentationTick, subTick);
+                        var orbit = ProceduralGlobe.Frame(sequence, flight.State.Position, player.Heading, environment);
+                        if (near.ClearColor != orbit.ClearColor || near.Tint != orbit.Scene!.Value.Tint)
+                            throw new InvalidOperationException("Daylight changed at the renderer handoff.");
+                    }
+                    if (flight.Phase == ProceduralFlightPhase.Landed && weather.FogOpacity <= 0)
+                        throw new InvalidOperationException("Local fog did not return after descent.");
+                }
                 if (far)
                     RequireFrame(renderer.TrySubmit(ProceduralGlobe.Frame(sequence, flight.State.Position, player.Heading,
-                        Atmosphere(flight.State.Position, checked(_environmentTick + (ulong)flight.Tick)))));
+                        environment)));
                 else
                     RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence,
                         FlightCamera(terrain.View, flight.State.Position, player.Heading,
-                            checked(_environmentTick + (ulong)flight.Tick))));
+                            presentationTick, subTick)));
                 if (scripted || flight.Phase == ProceduralFlightPhase.Landed)
                     await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
                         pauseWhileMinimized: true).ConfigureAwait(false);
@@ -366,11 +390,14 @@ internal sealed partial class VolumeExploration
             Add(start, Scale(up, GearHeight - GearRadius)), GearRadius), Subtract(end, start), FlightQueries);
     }
 
-    private VolumeCamera FlightCamera(VolumeViewIdentity view, PlanetVector position, PlanetVector heading, ulong tick)
+    private VolumeCamera FlightCamera(VolumeViewIdentity view, PlanetVector position, PlanetVector heading, ulong tick,
+        double fraction = 0)
     {
         var up = Vector3.Normalize(ProceduralGlobe.Float(position));
         var forward = Vector3.Normalize(-up + ProceduralGlobe.Float(heading) * 0.35f);
-        return ApplyAtmosphere(new(view, FlightEye(position), forward, up, 0.95f, 0.08f, 210, Vector4.One, Sky), tick);
+        var eye = FlightEye(position);
+        return ApplyAtmosphere(new(view, eye, forward, up, 0.95f, 0.08f, 210, Vector4.One, Sky),
+            Atmosphere(eye, tick, fraction));
     }
 
     private static void FlightTrace(string phase, ProceduralFlight flight, ulong revision, string digest)
