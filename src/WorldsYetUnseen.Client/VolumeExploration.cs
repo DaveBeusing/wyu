@@ -123,6 +123,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         CancellationToken token)
     {
         var state = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
+        if (scripted && Environment.GetEnvironmentVariable("WYU_WP15_PROBE") is "route" or "measure")
+        {
+            await VerifySunlightAsync(terrain, renderHost.Active, state, token).ConfigureAwait(false);
+            return;
+        }
         if (scripted && Environment.GetEnvironmentVariable("WYU_PACKAGE_E_MEASURE") == "1")
         {
             await MeasureAtmosphereAsync(terrain, renderHost.Active, state, token).ConfigureAwait(false);
@@ -315,8 +320,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement remained open across a terrain view change.");
         var mask = ++_sequence;
-        var camera = flightCamera is { } craft ? FlightCamera(view, craft, heading, flightTick ?? _environmentTick) :
-            Camera(view, position, heading);
+        var presentationTick = flightTick ?? _environmentTick;
+        var camera = flightCamera is { } craft
+            ? ApplySunlight(FlightCamera(view, craft, heading, presentationTick), presentationTick, 0)
+            : Camera(view, position, heading);
         if (overlay is not null)
             overlay.Menu = ActiveCaveClimbHint ?? $"Loading planet terrain\n\n{PlanetName}\nSeed {Descriptor.Seed}\nGenerator {Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
         if (rendererReady is null)
@@ -517,9 +524,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var direction = MathF.Cos(_yaw) * tangent + MathF.Sin(_yaw) * Vector3.Cross(tangent, up);
         direction = MathF.Cos(_pitch) * direction + MathF.Sin(_pitch) * up;
         var eye = WalkingEye(foot);
-        var atmosphere = Atmosphere(eye, interpolation?.Tick ?? _environmentTick, interpolation?.Fraction ?? 0);
-        return ApplySky(ApplyAtmosphere(new(view, eye, direction, up, 1.0f, 0.08f, 150, Vector4.One, Sky), atmosphere),
-            interpolation?.Tick ?? _environmentTick, interpolation?.Fraction ?? 0);
+        var (tick, fraction) = interpolation ?? (_environmentTick, 0);
+        return ApplyNearEnvironment(new(view, eye, direction, up, 1.0f, 0.08f, 150, Vector4.One, Sky), tick, fraction);
     }
 
     private static PlanetVector WalkingEye(PlanetVector foot) => Add(foot, Scale(Unit(foot), 1.65));
@@ -528,6 +534,15 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
 
     private ReferenceAtmosphere? Atmosphere(PlanetVector position, ulong tick, double fraction = 0) =>
         _weather?.Evaluate(position, tick, fraction);
+
+    private VolumeCamera ApplyNearEnvironment(VolumeCamera camera, ulong tick, double fraction)
+    {
+        var weather = Atmosphere(camera.Position, tick, fraction);
+        return ApplySunlight(ApplySky(ApplyAtmosphere(camera, weather), tick, fraction), tick, fraction);
+    }
+
+    private VolumeCamera ApplySunlight(VolumeCamera camera, ulong tick, double fraction) =>
+        _weather is not null && ReferenceSunlight.Enabled ? ReferenceSunlight.Apply(camera, tick, fraction) : camera;
 
     private VolumeCamera ApplySky(VolumeCamera camera, ulong tick, double fraction) =>
         reference is not null && ReferenceSky.Enabled ? camera with
@@ -665,7 +680,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
             var sequence = ++_sequence;
             RequireFrame(renderer.TrySubmitVolumeCamera(publication.Generation, sequence,
-                ApplySky(ApplyAtmosphere(center with { Position = position }, weather), _environmentTick, 0)));
+                ApplyNearEnvironment(center with { Position = position }, _environmentTick, 0)));
             await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
             Drain(terrain);
         }

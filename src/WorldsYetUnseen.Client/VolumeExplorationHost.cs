@@ -25,6 +25,7 @@ internal static partial class GameHost
         var runtime = RuntimeSafetyAuthority.Create(clock, timing, reservation);
         var context = new EngineModuleContext(clock, timing, runtime.Reporter, runtime.StopControl);
         var scripted = smokeSeed.HasValue || saveSmoke is not null || caveSmoke is not null;
+        var measureSunlight = scripted && Environment.GetEnvironmentVariable("WYU_WP15_PROBE") == "measure";
         var window = new WindowsHostModule(new WindowsHostOptions(
             scripted ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen — New World", 960, 540, 256),
             runtime.UiWake, runtime.RuntimeOwnership);
@@ -32,7 +33,7 @@ internal static partial class GameHost
         var token = stage.Token;
         Task<bool> watchClose = Task.FromResult(false);
         D3D12Renderer? renderer = null;
-        var measure = scripted && BiomeMeasurements.Enabled;
+        var measure = measureSunlight || scripted && BiomeMeasurements.Enabled;
         using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure);
         VolumeStreamingCoordinator? terrain = null;
         AlphaOverlay? overlay = null;
@@ -45,6 +46,8 @@ internal static partial class GameHost
             diagnostics?.Enter("WorldSelection");
             await window.InitializeAsync(context, token).ConfigureAwait(false);
             await window.StartAsync(token).ConfigureAwait(false);
+            if (measureSunlight && !AlphaWindowSize.TryApply((1920, 1080)))
+                throw new InvalidOperationException("The WP15 probe requires a 1920x1080 client area.");
             watchClose = WatchWindowCloseAsync(window, stage);
             var settings = settingsDirectory is null ? AlphaSettings.Defaults : new AlphaSettingsStore(settingsDirectory).Load().Value;
             if (!scripted)
