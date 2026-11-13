@@ -177,5 +177,54 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 
 ## Open decisions and next planning area
 - Fate of the colony ship, detailed disaster sequence, alien language/society and first contact, specific survivors and encounter timing, named celestial bodies, detailed story events and optional endings.
-- Base administration and energy management are the next design discussion.
+- Further base maintenance/repair automation, advanced energy sources, shield collapse/restart behavior, and research-tree dependencies remain open.
 - Detailed balancing, exact interfaces, algorithms and acceptance tests belong to future scoped work packages.
+
+## Design decisions — 13 November 2026: Bases, energy, shields and research
+
+**Status:** Agreed design intent, not implemented. These decisions supplement and, where explicitly more specific, clarify earlier rules. Exact numerical balancing remains open.
+
+### Base independence and interconnection
+- Each base or outpost operates independently and may have its own power generation, storage and machinery. Bases can be connected to a common power network using player-placed physical cables, including over long distances.
+- Electrical transmission is **lossless regardless of distance**. A disconnected outpost continues operating using available local generation or stored energy.
+- Cables are visible and physically routed. Perform simplified obstruction/collision checks when placing cables; avoid unintended routing through solid rock or structures. During operation use logical graph connectivity rather than continuous collision simulation. Recheck affected segments when terrain or structures change.
+- Later researched communications allow remote monitoring and eventually remote control of connected outposts. A communications outage does not inherently stop locally autonomous systems.
+
+### Energy types, progression and storage
+- Three simplified energy concepts: **electricity** for equipment and systems; **physical fuels/propellants** consumed by generators and propulsion; and **heat** as a simplified temperature/environment effect, not detailed thermodynamic energy transport.
+- Use a **single compatible electrical grid** without voltage tiers, transformers or simulated electrical resistance. Energy accounting is per connected network.
+- Initial generation progression: **fuel-burning generators first, solar generation next**, with solar available before major solar storms. Batteries become available early.
+- Solar storm effects must remain consistent with the established severity schedule: early weak storms cause no general electronics disruption; later stronger storms can temporarily interrupt exposed solar generation without permanently damaging panels. Batteries retain charge.
+- Wind generation and more advanced power sources are part of the wider technology space, but their exact unlock order beyond fuel then solar is not settled.
+
+### Active shields
+- In addition to passive shielding from terrain/materials, active shields are researchable, electricity-consuming systems. Separate technology branches may protect against **radiation/environmental hazards** and **physical impacts/projectiles**.
+- Shield generators are universal modular components usable on any base or freely built vehicle, including small rovers and spacecraft. No arbitrary vehicle-class or size restriction; actual coverage and effectiveness depend on installed generators and available energy.
+- A generator creates a **spherical shield** with variable radius. Multiple generators may produce overlapping coverage areas. Shields are generally unobtrusive or nearly invisible when idle, with visible activation or impact feedback.
+- Shields may operate **continuously** as long as sufficient energy is available. When supply is inadequate, protection weakens progressively rather than switching off immediately.
+- Each shield has a finite **stress/reserve state**. Projectile impacts impose discrete stress; sustained radiation or other exposure imposes continuous stress and increases energy demand. Sustained overload can weaken and ultimately collapse protection, permitting penetration.
+- With adequate energy, a shield **regenerates even while under attack**. Recovery consumes energy, not repair materials. Detailed regeneration rates, overlapping-shield interaction and post-collapse restart behavior remain to be specified.
+- Passive underground/rock protection remains viable and is not superseded by mandatory active shielding.
+
+### Base overview and alerts
+- Provide a **simple global overview** of the player's bases/outposts, available early in single-player. Each base remains locally autonomous; global remote status depends on communication links.
+- The initial overview is **read-oriented**: current condition, warnings (e.g. power shortage, weak shield) and simple visual lines showing inter-base power connections. Remote controls and priority management may be added later.
+- When communication is unavailable, retain last-known data with an explicit **stale/offline** indicator; do not present it as live telemetry.
+- Display current status only, not historical graphs or alert history initially. Basic filters (energy, shields, production) are available; sort by severity/urgency by default.
+- Alerts remain visible unobtrusively in the **HUD**, including while the overview is open; visual and optional audio alerts are supported, and audio can be disabled.
+- The overview is an **overlay**, optionally pinnable; allow the player to pause while consulting it. Fixed initial warning thresholds may become configurable later.
+- Multiplayer synchronization is out of initial scope; avoid needlessly precluding later extension.
+
+### Discovery-led research
+- The research tree is **revealed progressively through discoveries**; do not show all future branches at game start.
+- A small guaranteed foundational research path prevents bad luck with discoveries from blocking progress. Prioritize **survival** (food, warmth, protection), then **energy**, and only later **shield technologies**.
+- Found knowledge/artifacts are the primary discovery source rather than a mandatory experiment minigame. Some research requires combining several finds, kept understandable and lightweight.
+- Research is carried out at a **base research station/table** rather than entirely in the backpack. The previously established initial use of the damaged rescue capsule for earliest research remains an exception/starting capability.
+- Research generally takes a **short amount of time** and progresses in the background; it can be interrupted and resumed. Research unlocks are **global to the save**, not per-base.
+- The 13 November discussion favors research consuming discovered items/finds without additional generic resource costs. This **clarifies the earlier general materials-cost assumption** for discovery-led research; specific crafting, station construction and technology requirements may still consume ordinary materials. No abstract research-point currency.
+- Previously unlocked blueprints and research progress persist.
+
+### Deferred details
+- Exact shield energy demand, reserve/regeneration formulas, coverage limits, overlap resolution, restart behavior and protective damage types.
+- Cable placement constraints and repair interactions, cross-planet communication implementation, advanced generator progression and power failure priorities.
+- Base maintenance/repair automation, remote controls, precise overview UX, research prerequisites and item consumption rules.
