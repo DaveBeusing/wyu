@@ -1,7 +1,8 @@
-# Worlds Yet Unseen — Consolidated World Vision & Lore
+# Worlds Yet Unseen — World Vision, Lore & Gameplay Canon
 
-**Status:** Consolidated design canon, 13 November 2026. Design intent only; not a claim of implementation.
-**Sources:** [World Vision](World_Vision.md), [Gameplay Decisions](Gameplay_Decisions_2026-11-10.md), [Gameplay Follow-up](Gameplay_Decisions_Followup_2026-11-10.md). This document is the narrative/vision entry point; detailed gameplay values remain in their source documents.
+**Stand:** 13. November 2026  
+**Status:** Konsolidierte Designentscheidungen, keine Aussage über Implementierungsstand.  
+**Geltung:** Eine zentrale Referenz für Spielvision, Lore und beschlossene Gameplay-Regeln; Groundwork bleibt eine eigenständige Engine.
 
 ## 1. Core promise
 *Worlds Yet Unseen* is a first-person, single-player survival and discovery game on procedural, persistent, deformable voxel worlds. Its emotional pillars are solitude, wonder, freedom, gradual unease and discovery. The player is free to settle, build, explore and eventually travel into space; escaping the starting planet is not a mandatory ending.
@@ -47,217 +48,17 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 
 **Open:** alien language, society, motivations, first contact, relationship to older ruins and precise technology. Do not presume universal hostility or friendship.
 
-## 7. Player freedom, construction and progression
-Players construct shelters, bases, vehicles, probes and ships freely from modular components, with snap aids but without fixed blueprints as the primary method. **Constructed buildings have no collapse/stability simulation and floating constructions are allowed**; this later gameplay decision supersedes the older vision's suggestion of building statics. Voxel terrain deformation remains independent.
+## 7. World construction and technology foundations
 
-Research is discovery-gated and requires real materials and time rather than abstract points. Broad progression moves from survival/tools through bases/power, machinery, vehicles and eventually spaceflight, without mandating a particular first ship or probe.
-
-Production and automation are conveniences, **not a factory optimization game**. Solid goods travel through opaque rectangular conduits; liquids/gases through round pipes. Networks have unlimited throughput. Player inventory is weight-limited, not volume-limited. Detailed logistics, research, survival, weather and radio rules remain governed by the gameplay decision documents.
-
-Death is player-friendly: respawn at the capsule or designated point; constructed bases, research and stored resources persist; carried equipment remains recoverable at the death location without timed despawn. No in-world resurrection explanation is required.
-
-## 8. Spaceflight and planetary expansion
-Player-built modular spacecraft travel **seamlessly** from surface through atmosphere into space, with no loading transition. Simplified Newtonian flight retains inertia and counter-thrust, with optional assistance; gravity is simplified rather than requiring exact orbital mechanics. Docking provides magnetic-feeling alignment assistance. Launch/landing fuel costs are forgiving and re-entry heating is abstracted.
-
-A researched faster **conventional** engine enables longer journeys through ordinary acceleration; there is no warp, hyperspace, FTL, teleportation or mandatory automatic shutdown near celestial bodies. Thrust and braking consume propulsion resources; coasting at speed does not. Piloting remains manual.
-
-Only designated pressurized compartments must be airtight and supplied with life support, not the entire ship. Breaches cause gradual, leak-size-dependent depressurization, from repairable small leaks to rapid major losses. Asteroids can be tunneled through or fully destroyed. A navigational map supports local player markers, with future sharing not architecturally excluded.
-
-## 9. Canon precedence and boundaries
-For explicit conflicts, the later agreed gameplay decisions override earlier exploratory language:
-- **Building stability:** no structural-collapse simulation for constructed buildings.
-- **Storm timing:** fixed 30-day cycle with every third storm extreme; “late-game threat” describes the escalation and experience, not an absence of all early storms.
-- **Logistics:** unlimited conduit throughput; automation is primarily comfort.
-- **Spaceflight:** conventional sublight propulsion, seamless travel and simplified gravity.
-- **Atmosphere:** only declared compartments need sealing; leaks depressurize over time.
-
-Do not convert proposals, balancing estimates or open questions into established story facts. Keep this file as the high-level canonical narrative/vision entry point; retain detailed gameplay decision documents as the authoritative source for precise mechanics until they are separately refactored.
-
-## 10. Still to design
-The colony ship's ultimate fate; named star/planet and exact geography; alien society, communication and first-contact story; human survivor characters and encounter timing; mission history and discoverable evidence; base administration and energy-management details; specific long-term objectives and optional endings. These are **open design topics**, not missing implementation claims.
-
+- Modular construction supports freely designed bases, vehicles and spacecraft, with optional snap alignment and flexible placement. Built structures have no collapse simulation; voxel terrain remains deformable and persistent.
+- Resource deposits are geological and finite, potentially deep underground. Research is gated by discoveries, equipment, materials and time rather than abstract research points.
+- The broad progression is survival/tools, base/power, machinery/automation, vehicles/advanced energy and space exploration. This is a capability progression, not a mandatory fixed build order.
+- Survival combines hunger, health, ambient temperature, radiation and a small number of legible injuries. Sleeping is optional; there is no separate thirst meter.
+- A home base can remain viable throughout the game; underground construction and appropriate materials protect against later solar events.
 
 ---
 
-# Complete decision register (verbatim preserved)
-
-The following sections preserve all detailed decisions from the original three documents. In case of conflict, later explicit decisions supersede earlier exploratory statements as described above. This is a single maintained source; the source files are retired in this PR.
-
-## Original world vision (7 November 2026)
-
-### Worlds Yet Unseen (WYU) — World Vision & Design Foundations
-
-**Stand:** 7. November 2026  
-**Status:** Abgestimmte konzeptionelle Leitlinien; keine Aussage über bereits implementierte Spielfunktionen  
-**Geltungsbereich:** Spiel- und Weltgestaltung von WYU. Groundwork bleibt eine eigenständig wiederverwendbare Engine.
-
-> Dieses Dokument hält die gemeinsamen Grundsatzentscheidungen zu Lore, Atmosphäre, Grafik, Welt, Bauen, Ressourcen und Fortschritt fest. Bewusst nicht festgelegte Details sind im Abschnitt „Offene Fragen“ gesammelt. Konkrete Implementierung und Priorisierung erfolgen in separaten Arbeitspaketen.
-
-## 1. Spielvision
-
-**Worlds Yet Unseen** ist ein First-Person-Survival- und Erkundungsspiel auf prozedural generierten, vollständig veränderbaren Planeten. Der Spieler beginnt allein und ohne einsatzbereite Infrastruktur auf einer zunächst einladenden, erdähnlichen Welt, baut schrittweise eine Basis und eine technologische Produktionsinfrastruktur auf und kann später selbstständig ins All aufbrechen.
-
-Das Spiel kombiniert **Einsamkeit, Entdeckerdrang, Staunen und Gefahr**. Der Aufbau einer langfristig bewohnbaren Heimat ist ebenso legitim wie die Entscheidung, andere Welten zu erforschen. Raumfahrt eröffnet neue Ressourcen, Technologien und Antworten, wird aber nicht durch eine starre Pflicht zur Flucht erzwungen.
-
-**Leitidee der ersten Spielstunde:**
-
-> Ich sitze hier fest, muss überleben und herausfinden, ob ich bleiben muss oder weg kann.
-
-**Zwei übergreifende narrative Fragen:**
-
-1. Wer außer mir hat überlebt?
-2. Warum ist dieser scheinbar perfekte Planet nicht sicher?
-
-## 2. Ausgangssituation und Hintergrundgeschichte
-
-- Die Menschheit schickt ein großes Kolonieschiff mit **mehreren Tausend Menschen** zu einem weit entfernten, als bewohnbar eingestuften Planeten.
-- Die Kolonisten verbringen die lange Reise im **Kryoschlaf**.
-- Beim Anflug bzw. kurz vor Erreichen des Zielplaneten kommt es zu einer Katastrophe. **Ursache und genauer Ablauf bleiben offen.**
-- Der Spieler ist ein **ziviler Kolonist mit technischer Grundausbildung**, ohne vorgegebene Spezialisten- oder Heldenrolle. Die individuelle Entwicklung bleibt offen.
-- **Spielbeginn direkt in einer beschädigten Rettungskapsel auf dem Planeten**, ohne spielbaren Prolog an Bord des Kolonieschiffs. Die Figur weiß zunächst nicht, was genau passiert ist.
-- Die Kapsel dient als erster Orientierungspunkt, begrenzter Schutzraum und als Zugang zu verbliebener Kolonietechnologie bzw. fragmentarischen Informationen.
-- **Das Schicksal des Mutterschiffs ist nicht entschieden.** Denkbar sind ein später auffindbares Wrack, verstreute Trümmer oder ein Rest im Orbit; keine Variante wird jetzt kanonisiert.
-
-Die Technikprogression lässt sich über vorhandene Grundkenntnisse, wiedergewonnene Daten, Forschung und Materialien erklären. Ein konkretes Datenbanksystem und dessen Spielmechanik sind noch nicht festgelegt.
-
-## 3. Narrative Dramaturgie und Einsamkeit
-
-Der Spieler soll **über einen langen Abschnitt annehmen, der einzige menschliche Überlebende zu sein**. Menschliche Spuren dürfen früher auftauchen, tatsächliche Begegnungen mit Überlebenden jedoch erst relativ spät.
-
-- Früh: Rettungskapsel, Natur, Orientierung und Überleben; kaum Hinweise auf andere Menschen.
-- Mittel: Entdeckungen wie abgestürzte Schiffe oder Kapseln, verlassene Stationen, Aufzeichnungen und mögliche indirekte Hinweise auf Überlebende; zunehmende Fragen.
-- Spät: mögliche echte Kontakte mit anderen Überlebenden und intelligenten Aliens sowie größere Zusammenhänge der Welt.
-
-Es ist **nicht** vorgesehen, früh eine funktionierende menschliche Siedlung oder eine große Gruppe von NPCs bereitzustellen. Details zu Personen, Orten, Quests und Erzählereignissen sind offen.
-
-### Drei übergeordnete Spielphasen
-
-| Phase | Grundgefühl | Spielbezogene Risiken |
-| --- | --- | --- |
-| **Früh** | Ruhe, Schönheit, Orientierung, Staunen | Natürliche Umwelt und begrenzte Mittel; kein existenzieller Solarsturm-Druck |
-| **Mittel** | Neugier, leises Unbehagen, offene Fragen | Schwierigeres Gelände, fremde Spuren, regionale Umweltgrenzen |
-| **Spät** | Druck, große Entdeckungen, bewusste Entscheidungen | Schwere Solarstürme, komplexe Infrastruktur- und Reichweitenanforderungen |
-
-Die Phasen sind **kein festes Stunden- oder Level-Skript**. Eine ruhige, einladende Atmosphäre darf auch später noch existieren.
-
-## 4. Der Startplanet und visuelle Identität
-
-**Grafikstil:** Hochwertiger, leicht stilisierter Realismus. Die Welt wirkt glaubwürdig und größtenteils erdähnlich, trägt aber erkennbare, eher subtile fremdartige Science-Fiction-Akzente.
-
-- Wälder, Wiesen, Gebirge, Seen, Flüsse, Küsten, Wüsten, Sümpfe und kältere Regionen sind beispielhafte Biome, keine abschließende Biomenliste.
-- Gelegentlich ungewöhnliche Pflanzen, Tiere, Gesteinsformen oder dezente Biolumineszenz; **keine durchgängig fantastische Kristallwelt**.
-- **Biome und Landschaften gehen plausibel ineinander über** und wirken wie Teile eines zusammenhängenden Planeten.
-- **Glaubwürdiger, kontinuierlicher Tag-Nacht-Wechsel** mit passenden Licht- und Sichtverhältnissen.
-- **Dynamisches, regional unterschiedliches Wetter:** Wind, Regen, Nebel, Schnee, Gewitter und gewöhnliche Stürme.
-- Wetter und Klima sollen durch Gelände, Höhenlagen, Gewässer und Regionen nachvollziehbar erscheinen; keine Verpflichtung zu einer vollständigen physikalischen Klimasimulation.
-- Umweltbedingungen dürfen spielerische Auswirkungen haben, beispielsweise auf Sicht und Erkundung.
-
-Eine visuelle Orientierung wie „überwiegend erdähnlich, mit einzelnen fremdartigen Akzenten“ ist **keine numerische Verteilungsregel**.
-
-## 5. Solarstürme und langfristige Motivation
-
-**Verbindliche Leitlinie: Gefährliche Solarstürme sind ein spätes Spielthema.**
-
-- Das frühe Spiel bleibt überwiegend ruhig und lädt zu Erkundung und Aufbau ein.
-- Gewöhnliche Wetterereignisse, auch Gewitter und starke Winde, sind davon unabhängig und können früher auftreten.
-- Früh sichtbare Besonderheiten am Himmel oder in der Technik sind höchstens subtile Hinweise, **keine existenziellen Solarsturm-Ereignisse**.
-- Im späteren Spiel stellen Solarstürme technische, infrastrukturelle und ökologische Herausforderungen dar.
-- Fortgeschrittene Schutztechnologien und geeignete Bauweisen machen ein dauerhaftes Leben auf dem Planeten grundsätzlich möglich.
-- **Unterirdische oder in Berge eingelassene Basen können natürlichen Schutz bieten.** Dieser Vorteil wird dem Spieler anfangs nicht explizit verraten.
-- Raumfahrt kann langfristig neue Möglichkeiten und Ressourcen eröffnen, bleibt aber eine **freiwillige, sinnvolle Weiterentwicklung** statt eines erzwungenen Endes der Heimatbasis.
-
-Ob die Solaraktivität die Kolonieschiff-Katastrophe verursacht hat und wie sie genau mit fremden Strukturen zusammenhängt, bleibt bewusst ungeklärt.
-
-## 6. Lebewesen und intelligente Außerirdische
-
-Der Startplanet beherbergt eigene Tierwelt, einschließlich möglicher natürlicher Gefahren. Konkrete Arten, Ökosystemrollen und Gegnerlisten sind noch offen.
-
-**Intelligente Aliens existieren bereits auf dem Startplaneten**, leben aber **weit entfernt vom Startgebiet**. Der Spieler begegnet ihnen erst mit ausreichend Erkundungs- und Technikfortschritt.
-
-Für diese Spezies gelten folgende Leitlinien:
-
-- **Deutlich fremdartige Anatomie** und Silhouette, nicht bloß Menschen mit äußerlichen Veränderungen.
-- Auf den ersten Blick **ursprünglich wirkende Lebensweise und Architektur**.
-- Tatsächlich eine **tiefe, der menschlichen Technik fremde technologische Kompetenz**; biologische, kristalline oder feldbasierte Ansätze sind mögliche Richtungen, aber noch keine festgelegten Systeme.
-- Nicht pauschal feindlich: Vorsicht, Territorialverhalten, Missverständnisse, Konflikt und mögliche Kooperation bleiben offen.
-- Antike außerirdische Strukturen existieren; **unklar bleibt, ob diese Spezies ihre Erbauer ist** oder selbst auf ältere Technologie zurückgreift.
-
-Konkrete Begegnungsszenen, Kommunikationsmechaniken, Gesellschaftsformen und Aussehen werden später ausgearbeitet.
-
-## 7. Freier Basisbau und Statik
-
-**Keine vorgefertigten Komplettgebäude als primäres Bausystem.** Der Spieler konstruiert individuelle Bauwerke aus modularen Teilen, beispielsweise Fundamenten, Böden, Wänden, Decken, Dächern, Stützen und Verbindungen.
-
-- Raster und Snap-Punkte unterstützen präzises Arbeiten; kreative Ausrichtung und flexible Platzierung sollen möglich sein.
-- Gebäude können Schutzräume, Lager, Forschung, Energieversorgung, Produktion und Automatisierung beherbergen.
-- **Statik und physikalische Zusammenhänge spielen eine echte, aber nicht übermäßig restriktive Rolle.**
-- Materialeigenschaften, Stützen und Belastungen dürfen sich auswirken; eine frustrierend genaue Ingenieursimulation ist nicht das Designziel.
-- Basen sollen **über die gesamte Spielzeit erweitert und modernisiert** werden können, auch nach dem ersten Raumflug.
-- Physikalische Grundlagen sollen später auch für Fahrzeuge und Raumschiffe nutzbar sein. Konkrete Spielregeln und Simulationsaufwand werden gesondert geplant.
-
-## 8. Vollständig veränderbares Voxel-Terrain
-
-Die Entscheidung für Voxel begründet sich ausdrücklich in einer **umfassend veränderbaren Welt**:
-
-- Gelände, Felsen und Berge können abgetragen, verändert und bebaut werden.
-- Tunnel, Höhlen, unterirdische Räume und ganze Bergbasen sind reguläre Spielmöglichkeiten.
-- Spieler dürfen in die Landschaft hineinbauen, nicht nur auf einer festen Oberfläche.
-- Strukturelle Stabilität bei Ausgrabungen und Hohlräumen ist grundsätzlich relevant.
-- Die Welt soll die Veränderungen dauerhaft erhalten (die technischen Persistenz- und Performance-Anforderungen werden separat spezifiziert).
-
-Unterirdische Konstruktionen sind damit sowohl kreatives Ziel als auch möglicher späterer Schutz vor Solarstürmen.
-
-## 9. Geologische Ressourcen und Technologiefortschritt
-
-**Rohstoffe liegen als tatsächliche geologische Vorkommen in der Welt** und werden durch Erkundung, geeignete Untersuchungen, Bergbau und Weiterverarbeitung erschlossen. Vorkommen können oberirdisch oder in großer Tiefe liegen.
-
-**Bewusst offen:** konkrete Rohstoffnamen, Seltenheitsklassen, Lagerstätten- und Spawnregeln, Mengen, Verarbeitungsketten und Balancing.
-
-Der Technologiepfad wird zunächst in **fünf grobe Stufen** gegliedert:
-
-1. **Überleben und einfache Werkzeuge**
-2. **Basisbau und Stromversorgung**
-3. **Maschinen und Automatisierung**
-4. **Fahrzeuge und fortgeschrittene Energieversorgung**
-5. **Raumfahrt und planetenübergreifende Erkundung**
-
-Jede Stufe soll **neue Handlungs- und Konstruktionsmöglichkeiten** freischalten, nicht bloß größere Zahlen. Die erste Basis bleibt ein möglicher langfristiger Heimat- und Industriestandort.
-
-## 10. Technische und organisatorische Einordnung
-
-- **WYU** verantwortet Spielregeln, Inhalte, Lore, Balancing, spezifische Bau- und Progressionsmechaniken.
-- **Groundwork** liefert generische, unabhängig wiederverwendbare Engine-Funktionen; keine WYU-spezifische Lore in Engine-Verträge übernehmen.
-- Bereits vorhandene technische Prototypen, Fenster, Szenen oder Terrain-Funktionen sind **nicht automatisch die vollständige Implementierung dieses Designkonzepts**.
-- Designgrundsätze aus diesem Dokument sollen künftige Arbeitspakete und die Fortschreibung der [technischen Roadmap](https://github.com/DaveBeusing/Groundwork/blob/master/docs/roadmap.md) informieren; sie ersetzen keine Architekturentscheidungen oder testbaren Anforderungen.
-
-## 11. Absichtlich offene Fragen
-
-Diese Punkte wurden **nicht** endgültig entschieden und sollen nicht implizit als Vorgaben behandelt werden:
-
-- Exakte Ursache der Katastrophe und das endgültige Schicksal des Kolonieschiffs
-- Umfang, Orte und Zeitpunkte weiterer menschlicher Überlebender
-- Geschichte, Biologie, gesellschaftliche Struktur, Kommunikation und Verhalten der Aliens
-- Beziehung zwischen heutigen Aliens, antiken Strukturen und Solarstürmen
-- Konkrete Planeten-, Stern- und Ortsnamen sowie Größe und Dichte der Biome
-- Präzise Klimaparameter, Tageslängen und Wettermodell
-- Auslöser, Stärke, Häufigkeit und technisches Gegenmittel der späten Solarstürme
-- Rohstoffarten, Häufigkeits- und Seltenheitskategorien, Produktionsketten und Ökonomie
-- Detaillierte Baukomponenten, Konstruktionstoleranzen, Statikregeln und Schadensmodelle
-- Konkrete Fahrzeuge, Raumschiffe, Antriebe, Technologien und Reiseziele
-- Queststruktur, Story-Ereignisse und konkrete erste Begegnungen
-
----
-
-**Nächste inhaltliche Fortsetzung:** Auf dieser Flughöhe bleiben und erst bei Bedarf einzelne Themen in eigene Design-Dokumente überführen. Priorität hat die Konsistenz zwischen dem gewünschten Weltgefühl, frei gestaltbarem Voxel-Basisbau, glaubwürdigem Umweltverhalten und der freiwilligen langfristigen Raumfahrt.
-
-
----
-
-## Gameplay decisions (10 November 2026)
-
-### WYU — Gameplay design decisions (10 November 2026)
-
-**Status:** Agreed design decisions; not implemented. This document supersedes conflicting older conceptual statements in `docs/World_Vision.md` for the topics explicitly covered here. Numbers described as initial balancing values remain tunable.
+# Detailed gameplay rules
 
 ## World and exploration
 - Planetary-scale continents, landforms and biomes must remain recognizable during orbital approach; scalable LOD/chunk streaming is an engine concern.
@@ -335,53 +136,46 @@ Diese Punkte wurden **nicht** endgültig entschieden und sollen nicht implizit a
 - Starting biome distribution, specific vehicle designs and technology order.
 - Implementation architecture and acceptance tests belong in separately scoped work packages.
 
-## Compatibility note
-Earlier world-vision text suggests structural stability for buildings and leaves storm timing open; the explicit decisions above take precedence for those topics. Keep planet-scale voxel terrain deformation distinct from building stability. These are design requirements, not claims that the current game or Groundwork already implements them.
+## Additional agreed gameplay decisions
 
+### Wildlife, botany and alien traces
+- Fauna consists of relatively few distinctive species rather than densely populated wildlife. Most are harmless; some are dangerous.
+- Species are biome-dependent; encounters emerge through exploration rather than scripted story events. Threats react to proximity and circumstances and should allow fair chances to react, flee, hide or deter.
+- Occasional group and predator/prey interactions are ambient, not constant spectacles. Early deterrents are limited; research broadens options.
+- Plants provide food, materials and rare medicinal uses; medicinal properties require reliable identification by scanning.
+- Early alien clues remain subtle and ambiguous, including environmental anomalies, artifacts, structures and undecipherable radio signals. Definitive evidence comes relatively late.
+- Alien architecture is organically unfamiliar with technical details. Alien materials require research before exploitation. Alien society and later interactions remain open.
 
----
+### Production philosophy
+- WYU is not a factory optimization game. Automation primarily removes repetitive work and permits freely arranged production facilities.
+- Solid items use opaque square/rectangular enclosed conduits; liquids and gases use round pipes. No individual objects are visibly simulated in conduits.
+- All logistics conduits have unlimited throughput. No belt-speed, flow-rate or allocation-percentage optimization puzzles.
 
-## Gameplay follow-up (10 November 2026)
+### Death and respawn
+- Death is player-friendly. Respawn at the rescue capsule or a later designated respawn point.
+- Constructions, research and stored resources persist. Carried equipment remains at the death location for recovery and never expires on a timer.
+- Respawn is a gameplay convention and needs no cloning or resurrection explanation.
 
-### WYU — Gameplay design follow-up (10 November 2026)
+### Modular spacecraft and flight
+- Ships, probes and other vehicles are freely constructed from modular blocks; no prescribed first spacecraft.
+- Planetary surface, atmosphere and space connect seamlessly without loading screens.
+- Simplified Newtonian physics includes inertia, acceleration and counter-thrust, with optional switchable flight assistance. Aggregate mass and center of mass without per-block rigid-body simulation. Gravity is simplified; exact orbital mechanics are not required.
+- Docking offers magnetic-feeling alignment/snap assistance. Launch and landing fuel requirements are forgiving; re-entry heat is abstracted without detailed heat-shield micromanagement.
+- Only player-designated pressurized compartments require airtight enclosures and functioning life support. Open external structures are permitted.
+- Groundwork checks enclosure integrity when relevant blocks or doors change; pressure is per compartment, not per gas particle. Leak-size-dependent gradual depressurization allows response to small leaks while large breaches depressurize quickly.
+- Longer journeys use a researched, faster **conventional sublight** propulsion system, never warp, hyperspace, FTL, teleportation or scene cuts.
+- The player manually controls acceleration and braking, with no forced cutoff near celestial bodies. Propulsion consumes fuel/energy when thrusting or braking, not while coasting.
+- Asteroids can be mined, tunneled through or completely destroyed. Space navigation includes a map and local player-set markers; future sharing should remain architecturally possible.
 
-**Status:** Agreed gameplay design requirements, not implementation. Supplements `docs/Gameplay_Decisions_2026-11-10.md`; where the discussion explicitly clarifies earlier assumptions, the clarification takes precedence. Exact numerical balancing remains TBD.
+## Canon and conflict resolution
+- **Building statics:** No collapse simulation for constructed buildings; floating structures are allowed. This supersedes the early exploratory suggestion of structural stability. Deformable voxel terrain is a separate system.
+- **Stellar storms:** Every 30 in-game days, every third extreme; the early game remains forgiving because severity escalates. This supersedes any suggestion that all storms begin only late.
+- **Logistics:** Unlimited throughput and comfort-focused automation override proposals for constrained capacity.
+- **Spaceflight:** Conventional sublight propulsion, seamless traversal and simplified gravity. No fixed vehicle progression.
+- **Pressure:** Only selected compartments must be sealed; leaks cause progressive, size-dependent pressure loss.
+- Balancing numbers are initial design values unless explicitly fixed. Do not treat unresolved story questions as established canon.
 
-## Flora, fauna and alien presence
-- Fauna consists of relatively few distinctive species rather than densely populated wildlife. Most species are harmless; some dangerous species exist.
-- Species are biome-dependent, and the player can learn recognizable biome associations. Encounters are emergent open-world events, not scripted story encounters; dangerous encounters may eventually occur through normal exploration.
-- Dangerous creatures react to proximity and circumstances. Encounters may surprise the player, but should allow a fair opportunity to react, flee, hide or deter the threat.
-- Wildlife can interact with other wildlife, including groups and visible predator/prey behavior. Such interactions should be uncommon and mostly ambient, not constant spectacles.
-- Early deterrents are available but limited; research can broaden deterrent options.
-- Plants can provide food, materials and medicinal uses, not merely decoration. Medicinal plants are rare and their properties must be reliably identified by scanning.
-- Early indications of the active alien civilization are subtle and ambiguous: environmental effects, artifacts/structures and undecipherable radio signals. Clear proof of intelligence comes relatively late.
-- Alien architecture is organically alien with recognizable technical details. Alien materials are not initially directly exploitable; research is needed before use. The exact alien society and later interactions remain open.
-
-## Production and logistics clarification
-- WYU is **not a factory optimization game**. Automation primarily reduces repetitive manual work.
-- Solid items travel through opaque, square/rectangular enclosed conduits; liquids and gases use round pipes. No per-item visible motion.
-- Logistics conduits have **unlimited throughput**, as already specified in the main decisions document. Do not introduce belt-speed or pipe-throughput optimization puzzles.
-- Production facilities can be freely arranged; automation is a convenience and progression system, not the central gameplay loop.
-
-## Death and respawn
-- Death is deliberately player-friendly. Respawn occurs at the rescue capsule or a subsequently designated respawn point.
-- Player constructions, unlocked research and stored resources remain intact.
-- Carried equipment remains at the death location and can be recovered; it does not despawn on a timer.
-- Respawn is an accepted gameplay convention; no cloning or resurrection lore explanation is required.
-
-## Spaceflight and ship construction
-- All spacecraft, probes and other vehicles are freely constructed from modular blocks; no prescribed first spacecraft or probe, and no forced vehicle progression.
-- Planet surface, atmosphere and space are traversed seamlessly without loading screens.
-- Flight uses simplified Newtonian behavior: inertia, acceleration and counter-thrust, with optional switchable flight assistance. Mass and center of mass matter without per-block rigid-body simulation. Exact orbital mechanics are **not** required; gravity is simplified.
-- Docking offers a magnetic-feeling alignment/snap assist, avoiding exacting manual alignment.
-- Launch and landing fuel requirements should be forgiving; re-entry heating is abstracted without detailed heat-shield micromanagement.
-- Ships need not be airtight overall. Only player-designated pressurized compartments require an airtight enclosure and functional life support. Open external construction is allowed.
-- Groundwork should detect enclosure integrity when relevant blocks/doors change. Pressure is modeled per compartment rather than per gas particle. Leaks cause **gradual pressure loss depending on leak size and conditions**: small leaks allow time to respond; major breaches depressurize quickly. Do not treat every leak as instant vacuum.
-- Long-distance travel may use a researched **faster conventional propulsion system**, not warp, hyperspace, teleportation, faster-than-light travel or scene cuts.
-- Travel acceleration is manually controlled; no forced automatic drive cutoff near celestial bodies. Propulsion consumes fuel/energy when applying thrust, including braking; coasting at constant velocity in space does not require ongoing propulsion consumption.
-- Asteroids may be mined, tunneled through and completely destroyed; resource distribution remains a balancing concern.
-- Space navigation includes a map and player-set markers. Markers remain local in the initial single-player scope; future sharing should not be architecturally blocked.
-
-## Remaining scope
-- Base administration and energy management are the next proposed design discussion.
-- Detailed balancing, simulation algorithms, technology costs, exact UI and acceptance criteria require subsequent work packages.
+## Open decisions and next planning area
+- Fate of the colony ship, detailed disaster sequence, alien language/society and first contact, specific survivors and encounter timing, named celestial bodies, detailed story events and optional endings.
+- Base administration and energy management are the next design discussion.
+- Detailed balancing, exact interfaces, algorithms and acceptance tests belong to future scoped work packages.
