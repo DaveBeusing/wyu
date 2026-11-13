@@ -166,3 +166,34 @@ not establish an expensive shadow pass or identify a scheduler cause.
 
 The local Windows session denied both WPR GPU and direct DxgKrnl ETW.
 The elevated trace and causal fix are pending.
+
+## DxgKrnl trace and independent repeat
+
+The administrative capture dxgkrnl-20261113-225931 contained no ETW
+event loss. All five pairs passed both GPU budgets. The maximum individual
+relative deltas were +9.45% p95 and +9.67% p99. Calibrated markers still
+showed isolated long frames in both variants. For example:
+
+| Frame | GPU frame / terrain (ms) | DxgKrnl correlation |
+| --- | ---: | --- |
+| Pair 2 on, sequence 480 | 20.025 / 0.273 | A DWM DMA packet started before the frame and completed during it. |
+| Pair 5 off, sequence 110 | 8.635 / 6.176 | Two DWM DMA completions overlap the terrain interval. |
+| Pair 5 on, sequence 57 | 9.408 / 0.277 | A DWM DMA completion falls before terrain start, inside the frame. |
+| Pair 1 off, sequence 128 | 4.517 / 0.105 | A DMA packet submitted under ChatGPT.exe completed inside the frame. |
+
+These samples place much of the excess outside shadow recording and show
+that long terrain intervals can also occur with WP15 off. The DxgKrnl
+events establish overlap, but do not establish which engine scheduling
+decision or dependency delayed WYU. No corrective renderer change was
+made on the basis of this trace.
+
+A separate five-pair 1080p repeat with the same calibrated NVIDIA build
+and WPR inactive passed both pooled budgets. Low sun in pair 4 remained
+just above the individual relative p99 limit at +15.11%. The absolute
+budget passed in every pair and phase.
+
+| Phase | Extra GPU p95 / p99 (ms) | Relative p95 / p99 |
+| --- | ---: | ---: |
+| Midday | 0.1584 / 0.1612 | +6.22% / +5.26% |
+| Low sun | 0.1578 / 0.1603 | +6.37% / +6.31% |
+| Quick turn | 0.1658 / 0.1686 | +6.72% / +6.79% |
