@@ -30,3 +30,25 @@ foreach ($seed in @('42', '20261111')) {
 }
 
 Write-Host 'PASS: Both WP11 seed routes matched across fresh WARP and NVIDIA processes.'
+
+$priorWalk = $env:WYU_PACKAGE_E_WALK
+try {
+    $env:WYU_PACKAGE_E_WALK = '1'
+    foreach ($seed in '42','20261111') {
+        $expected = $null
+        foreach ($adapter in 'warp','hardware') {
+            $output = @(& dotnet $client --volume-smoke $seed $adapter)
+            $exitCode = $LASTEXITCODE
+            $output | Write-Host
+            $walk = @($output | Where-Object { $_ -cmatch '^PACKAGE E WALK ' })
+            if ($exitCode -ne 0 -or $walk.Count -ne 1 -or
+                $output -cnotcontains 'PASS: Package E region boundary presented continuously at x=128.' -or
+                ($null -ne $expected -and $walk[0] -cne $expected)) {
+                throw "Region walk failed for seed $seed on $adapter."
+            }
+            $expected = $walk[0]
+        }
+    }
+} finally {
+    $env:WYU_PACKAGE_E_WALK = $priorWalk
+}

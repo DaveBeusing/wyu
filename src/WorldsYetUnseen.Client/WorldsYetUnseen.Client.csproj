@@ -14,15 +14,15 @@
     <ProjectReference Include="../WorldsYetUnseen.Gameplay/WorldsYetUnseen.Gameplay.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Groundwork.Core" Version="[0.1.0-dev.43301223359.1]" />
-    <PackageReference Include="Groundwork.Diagnostics" Version="[0.1.0-dev.43301223359.1]" />
-    <PackageReference Include="Groundwork.Ecs" Version="[0.1.0-dev.43301223359.1]" />
-    <PackageReference Include="Groundwork.Jobs" Version="[0.1.0-dev.43301223359.1]" />
-    <PackageReference Include="Groundwork.Persistence" Version="[0.1.0-dev.43301223359.1]" />
-    <PackageReference Include="Groundwork.Platform.Windows" Version="[0.1.0-dev.43301223359.1]" />
-    <PackageReference Include="Groundwork.Rendering" Version="[0.1.0-dev.43301223359.1]" />
-    <PackageReference Include="Groundwork.Rendering.D3D12" Version="[0.1.0-dev.43301223359.1]" />
-    <PackageReference Include="Groundwork.Simulation" Version="[0.1.0-dev.43301223359.1]" />
-    <PackageReference Include="Groundwork.Voxels" Version="[0.1.0-dev.43301223359.1]" />
+    <PackageReference Include="Groundwork.Core" Version="[0.1.0-dev.43332217203.1]" />
+    <PackageReference Include="Groundwork.Diagnostics" Version="[0.1.0-dev.43332217203.1]" />
+    <PackageReference Include="Groundwork.Ecs" Version="[0.1.0-dev.43332217203.1]" />
+    <PackageReference Include="Groundwork.Jobs" Version="[0.1.0-dev.43332217203.1]" />
+    <PackageReference Include="Groundwork.Persistence" Version="[0.1.0-dev.43332217203.1]" />
+    <PackageReference Include="Groundwork.Platform.Windows" Version="[0.1.0-dev.43332217203.1]" />
+    <PackageReference Include="Groundwork.Rendering" Version="[0.1.0-dev.43332217203.1]" />
+    <PackageReference Include="Groundwork.Rendering.D3D12" Version="[0.1.0-dev.43332217203.1]" />
+    <PackageReference Include="Groundwork.Simulation" Version="[0.1.0-dev.43332217203.1]" />
+    <PackageReference Include="Groundwork.Voxels" Version="[0.1.0-dev.43332217203.1]" />
   </ItemGroup>
 </Project>

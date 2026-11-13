@@ -223,14 +223,15 @@ internal static class ProceduralGlobe
         colors.Fill(0xff19eaffu);
     }
 
-    internal static RenderFrame Frame(ulong sequence, PlanetVector position, PlanetVector heading)
+    internal static RenderFrame Frame(ulong sequence, PlanetVector position, PlanetVector heading,
+        ReferenceAtmosphere? atmosphere = null)
     {
         var up = Vector3.Normalize(Float(position));
         var tangent = Float(heading) - up * Vector3.Dot(Float(heading), up);
         if (tangent.LengthSquared() < 0.01f)
             tangent = Vector3.Cross(up, MathF.Abs(up.Z) < 0.9f ? Vector3.UnitZ : Vector3.UnitX);
         var forward = Vector3.Normalize(-up + Vector3.Normalize(tangent) * 0.65f);
-        return new(sequence, Space, new RenderScene(Matrix4x4.Identity, Vector4.One,
+        return new(sequence, atmosphere?.Sky ?? Space, new RenderScene(Matrix4x4.Identity, atmosphere?.Tint ?? Vector4.One,
             Matrix4x4.CreateLookTo(Float(position), forward, up), 1.05f, 1f, 10_000f));
     }
 

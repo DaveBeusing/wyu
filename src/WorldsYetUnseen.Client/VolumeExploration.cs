@@ -9,6 +9,7 @@ using Groundwork.Rendering;
 using Groundwork.Rendering.D3D12;
 using Groundwork.Voxels;
 using WorldsYetUnseen.Gameplay;
+using static WorldsYetUnseen.Client.FlightVector;
 
 namespace WorldsYetUnseen.Client;
 
@@ -25,6 +26,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private static readonly Vector4 Sky = new(0.18f, 0.28f, 0.42f, 1);
     private readonly WorldPublicationPorts _ports = world.Publication;
     private ulong _tick = slot?.Checkpoint?.Tick ?? 0;
+    private ulong _environmentTick = ReadEnvironmentTick(slot?.Checkpoint);
+    private readonly ReferenceWeather? _weather = reference is null ||
+        Environment.GetEnvironmentVariable("WYU_PACKAGE_E") == "off" ? null : new(reference);
     private ulong _sequence;
     private float _yaw, _pitch = -0.2f;
     private bool _debug;
@@ -119,6 +123,16 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         CancellationToken token)
     {
         var state = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
+        if (scripted && Environment.GetEnvironmentVariable("WYU_PACKAGE_E_MEASURE") == "1")
+        {
+            await MeasureAtmosphereAsync(terrain, renderHost.Active, state, token).ConfigureAwait(false);
+            return;
+        }
+        if (scripted && _weather is not null && Environment.GetEnvironmentVariable("WYU_PACKAGE_E_WALK") == "1")
+        {
+            await VerifyWeatherBoundaryAsync(terrain, renderHost.Active, state, token).ConfigureAwait(false);
+            return;
+        }
         diagnostics?.Enter("Exploration");
         diagnostics?.Write(slot?.Checkpoint is null ? "spawn" : "continue", FormattableString.Invariant(
             $"seed={Descriptor.Seed} generator={Descriptor.GeneratorVersion} revision={_published.TerrainRevision} generation={slot?.Checkpoint?.Generation ?? 0}"));
@@ -208,6 +222,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var x = Math.Cos(angle) * forward - Math.Sin(angle) * right;
             var z = Math.Sin(angle) * forward + Math.Cos(angle) * right;
             var divisor = Math.Max(1, Math.Max(Math.Abs(x), Math.Abs(z)));
+            var nextEnvironmentTick = cave is null ? checked(_environmentTick + 1) : _environmentTick;
             var begin = await BeginAsync(token).ConfigureAwait(false);
             terrain.BeginTick(begin);
             VolumeQueryStatus status;
@@ -230,6 +245,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             if (prepared is not null && outcome.Status == BarrierStatus.Committed)
             {
                 state = draft!.Result.State;
+                _environmentTick = nextEnvironmentTick;
                 steps++;
             }
             else if (scripted)
@@ -238,7 +254,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             // The scripted look sweep changes the camera independently of the fixed traversal input.
             if (scripted)
                 _yaw = steps is >= 60 and <= 80 ? (steps - 60) * (MathF.Tau / 20) : 0;
-            var camera = Camera(terrain.View, state.Position, state.Heading);
+            var fraction = Math.Clamp(Stopwatch.GetElapsedTime(now).TotalSeconds * 60, 0, 1);
+            var camera = Camera(terrain.View, state.Position, state.Heading,
+                prepared is not null && outcome.Status == BarrierStatus.Committed && cave is null
+                    ? (_environmentTick - 1, fraction) : null);
             var frame = ++_sequence;
             var presentStarted = scripted ? BiomeMeasurements.Start() : 0;
             RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, frame, camera));
@@ -273,7 +292,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private async Task<bool> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
-        Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null)
+        Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null)
     {
         VolumeViewIdentity view;
         if (returnTerrain is { } preparedReturn)
@@ -296,10 +315,12 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement remained open across a terrain view change.");
         var mask = ++_sequence;
+        var maskSky = Atmosphere(flightCamera is { } craftPosition ? FlightEye(craftPosition) : WalkingEye(position),
+            flightTick ?? _environmentTick)?.Sky ?? Sky;
         if (overlay is not null)
             overlay.Menu = ActiveCaveClimbHint ?? $"Loading planet terrain\n\n{PlanetName}\nSeed {Descriptor.Seed}\nGenerator {Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
         if (rendererReady is null)
-            RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
+            RequireFrame(renderer.TrySubmitVolumeMask(view, mask, maskSky));
         var selection = returnTerrain?.Selection ?? SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
         if (_selection is null || selection.Minimum != _selection.Minimum)
             _windows++;
@@ -328,7 +349,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 var startupStarted = BiomeMeasurements.Start();
                 await rendererReady.ConfigureAwait(false);
                 BiomeMeasurements.Write("near-startup-wait", startupStarted);
-                RequireFrame(renderer.TrySubmitVolumeMask(view, mask, Sky));
+                RequireFrame(renderer.TrySubmitVolumeMask(view, mask, maskSky));
             }
             catch
             {
@@ -373,7 +394,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             _transitions = CountTransitions(lease);
         }
         var sequence = ++_sequence;
-        var camera = flightCamera is { } craft ? FlightCamera(view, craft, heading) : Camera(view, position, heading);
+        var camera = flightCamera is { } craft ? FlightCamera(view, craft, heading, flightTick ?? _environmentTick) :
+            Camera(view, position, heading);
         RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, camera));
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
             pauseWhileMinimized: true).ConfigureAwait(false);
@@ -488,20 +510,175 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         return result;
     }
 
-    private VolumeCamera Camera(VolumeViewIdentity view, PlanetVector foot, PlanetVector heading)
+    private VolumeCamera Camera(VolumeViewIdentity view, PlanetVector foot, PlanetVector heading,
+        (ulong Tick, double Fraction)? interpolation = null)
     {
         var up = Vector3.Normalize(new((float)foot.X, (float)foot.Y, (float)foot.Z));
         var tangent = new Vector3((float)heading.X, (float)heading.Y, (float)heading.Z);
         tangent = Vector3.Normalize(tangent - up * Vector3.Dot(up, tangent));
         var direction = MathF.Cos(_yaw) * tangent + MathF.Sin(_yaw) * Vector3.Cross(tangent, up);
         direction = MathF.Cos(_pitch) * direction + MathF.Sin(_pitch) * up;
-        return new(view, new(foot.X + up.X * 1.65, foot.Y + up.Y * 1.65, foot.Z + up.Z * 1.65),
-            direction, up, 1.0f, 0.08f, 150, Vector4.One, Sky);
+        var eye = WalkingEye(foot);
+        var atmosphere = Atmosphere(eye, interpolation?.Tick ?? _environmentTick, interpolation?.Fraction ?? 0);
+        return ApplyAtmosphere(new(view, eye, direction, up, 1.0f, 0.08f, 150, Vector4.One, Sky), atmosphere);
+    }
+
+    private static PlanetVector WalkingEye(PlanetVector foot) => Add(foot, Scale(Unit(foot), 1.65));
+
+    private static PlanetVector FlightEye(PlanetVector position) => Add(position, Scale(Unit(position), 2.6));
+
+    private ReferenceAtmosphere? Atmosphere(PlanetVector position, ulong tick, double fraction = 0) =>
+        _weather?.Evaluate(position, tick, fraction);
+
+    private static VolumeCamera ApplyAtmosphere(VolumeCamera camera, ReferenceAtmosphere? weather)
+    {
+        if (weather is not { } atmosphere)
+            return camera;
+        return camera with
+        {
+            Tint = atmosphere.Tint,
+            ClearColor = atmosphere.Sky,
+            Fog = new(new(atmosphere.Sky.X, atmosphere.Sky.Y, atmosphere.Sky.Z),
+                atmosphere.FogStart, atmosphere.FogEnd, atmosphere.FogOpacity),
+        };
+    }
+
+    private async Task MeasureAtmosphereAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
+        PlanetWalkState state, CancellationToken token)
+    {
+        state = await CommitInitialSmokePoseAsync(terrain, state, token).ConfigureAwait(false);
+        var camera = Camera(terrain.View, state.Position, state.Heading) with
+        {
+            Fog = null, Tint = Vector4.One, ClearColor = Sky,
+        };
+        var generation = _published.Generation;
+        var height = ReferencePlanet.RadiusMeters;
+        var timestampPairs = Environment.GetEnvironmentVariable("WYU_PACKAGE_E_TIMESTAMP_PAIRS") == "1";
+        foreach (var phase in new[] { "clear", "dense", "boundary" })
+        {
+            var start = Stopwatch.GetTimestamp();
+            var firstSequence = _sequence + 1;
+            var count = timestampPairs ? 1056 : 420;
+            for (var frame = 0; frame < count; frame++)
+            {
+                var sample = timestampPairs ? frame / 2 : frame;
+                var point = phase switch
+                {
+                    "clear" => new PlanetVector(0, height + 72, 0),
+                    "dense" => new PlanetVector(128, height - 128, -128),
+                    _ => new PlanetVector(128 + (sample % 41 - 20) * 0.25, height - 128, -128),
+                };
+                var tick = phase == "dense" ? 60UL : ReferenceWeather.InitialTick + (ulong)sample;
+                var atmosphere = Atmosphere(point, tick);
+                if (timestampPairs && ((frame / 44 + frame % 44) & 1) == 0)
+                    atmosphere = null;
+                var begin = await BeginAsync(token).ConfigureAwait(false);
+                terrain.BeginTick(begin);
+                Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
+                var sequence = ++_sequence;
+                RequireFrame(renderer.TrySubmitVolumeCamera(generation, sequence, ApplyAtmosphere(camera, atmosphere)));
+                await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+                Drain(terrain);
+            }
+            using var published = terrain.TryRead();
+            if (published?.Info.Generation != generation || published.Info.TerrainRevision != _published.TerrainRevision)
+                throw new InvalidOperationException("Weather-only frames changed the published terrain.");
+            Console.WriteLine(FormattableString.Invariant(
+                $"PACKAGE E WINDOW {Environment.ProcessId} {phase} {start} {Stopwatch.GetTimestamp()}"));
+            if (timestampPairs)
+                Console.WriteLine($"PACKAGE E TIMESTAMP PAIRS {phase} {firstSequence} {count}");
+        }
+    }
+
+    private async Task VerifyWeatherBoundaryAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
+        PlanetWalkState state, CancellationToken token)
+    {
+        var point = state.Position with { X = 128 };
+        var direction = Unit(point);
+        var radius = Descriptor.RadiusMeters;
+        var surface = Scale(direction, radius);
+        var elevation = 0d;
+        for (var pass = 0; pass < 3; pass++)
+        {
+            elevation = planet.Field.SampleLandform(Descriptor.SampleAt(surface).Vertex).Elevation /
+                (double)PlanetDensityField.UnitsPerCell;
+            surface = Scale(direction, radius + elevation);
+        }
+        point = Scale(direction, radius + elevation) with { X = 128 };
+        await LoadAsync(terrain, renderer, point, state.Heading, PlanetLocalFrame.Create(point), token).ConfigureAwait(false);
+        var publication = _published;
+        var start = point with { X = 127.75 };
+        var up = Unit(start);
+        using (var collision = terrain.TryRead() ?? throw new InvalidOperationException("Missing region walk collision."))
+        {
+            var hits = new VolumeRayHit[4];
+            var ray = collision.Raycast(Add(start, Scale(up, 6)), Add(start, Scale(up, -6)), hits);
+            if (ray.Status != VolumeQueryStatus.Contact || ray.Count != 1)
+                throw new InvalidOperationException($"Region walk start has no unique surface ({ray.Status}).");
+            start = Add(hits[0].Position, Scale(up, 0.35));
+        }
+        var walker = state with { Position = start, Heading = East, Velocity = default };
+        var firstEye = WalkingEye(walker.Position).X;
+        var originalTick = _environmentTick;
+        for (var step = 0; step < 60 && WalkingEye(walker.Position).X <= 128; step++)
+        {
+            var begin = await BeginAsync(token).ConfigureAwait(false);
+            terrain.BeginTick(begin);
+            var movement = terrain.TryPlanMovement(walker, 1, 0, out var status)
+                ?? throw new InvalidOperationException($"Region walk held ({status}).");
+            var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
+            var prepared = terrain.TryPrepareMovement(movement, commit, [])
+                ?? throw new InvalidOperationException("Region walk could not prepare.");
+            if (Finish(commit, prepared).Status != BarrierStatus.Committed)
+                throw new InvalidOperationException("Region walk could not commit.");
+            walker = movement.Result.State;
+            _environmentTick = checked(_environmentTick + 1);
+            var sequence = ++_sequence;
+            RequireFrame(renderer.TrySubmitVolumeCamera(publication.Generation, sequence,
+                Camera(terrain.View, walker.Position, walker.Heading)));
+            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+            Drain(terrain);
+        }
+        if (firstEye >= 128 || WalkingEye(walker.Position).X <= 128)
+            throw new InvalidOperationException("The simulated walk did not cross the weather boundary.");
+        Console.WriteLine(FormattableString.Invariant(
+            $"PACKAGE E WALK seed={Descriptor.Seed} x={firstEye:R}->{WalkingEye(walker.Position).X:R} steps={_environmentTick - originalTick}"));
+        var center = Camera(terrain.View, point, state.Heading);
+        var eye = center.Position with { X = 128 };
+        var expected = Atmosphere(eye, _environmentTick);
+        foreach (var offset in new[] { -0.0001, 0, 0.0001 })
+        {
+            var position = eye with { X = eye.X + offset };
+            var weather = Atmosphere(position, _environmentTick);
+            if (weather is not { } value || expected is not { } target ||
+                Math.Abs(value.FogStart - target.FogStart) > 0.0001 ||
+                Math.Abs(value.FogOpacity - target.FogOpacity) > 0.0001)
+                throw new InvalidOperationException("Weather jumped at the region boundary.");
+            var begin = await BeginAsync(token).ConfigureAwait(false);
+            terrain.BeginTick(begin);
+            Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
+            var sequence = ++_sequence;
+            RequireFrame(renderer.TrySubmitVolumeCamera(publication.Generation, sequence,
+                ApplyAtmosphere(center with { Position = position }, weather)));
+            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+            Drain(terrain);
+        }
+        using (var read = terrain.TryRead())
+            if (read?.Info != publication)
+                throw new InvalidOperationException("Region weather changed the terrain publication.");
+        Console.WriteLine("PASS: Package E region boundary presented continuously at x=128.");
+    }
+
+    private static ulong ReadEnvironmentTick(VolumeCheckpoint? checkpoint)
+    {
+        if (checkpoint is not null && ProceduralLanding.Read(checkpoint, out _, out var tick) == SaveGameValidation.Valid)
+            return tick;
+        return ReferenceWeather.InitialTick;
     }
 
     private void WriteCheckpoint(string label, PlanetWalkState state) =>
         Console.WriteLine(FormattableString.Invariant(
-            $"WP11 {label} seed={Descriptor.Seed} tick={_tick} foot={state.Position.X:F5},{state.Position.Y:F5},{state.Position.Z:F5} revision={_published.TerrainRevision} origin={_published.View.Frame.Revision}"));
+            $"WP11 {label} seed={Descriptor.Seed} tick={_tick} foot={state.Position.X:F5},{state.Position.Y:F5},{state.Position.Z:F5} revision={_published.TerrainRevision} origin={_published.View.Frame.Revision} environment={_environmentTick}"));
 
     private static int Axis(InputSnapshot input, InputControl positive, InputControl negative) =>
         (input.HeldControls.Contains(positive) ? 1 : 0) - (input.HeldControls.Contains(negative) ? 1 : 0);

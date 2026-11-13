@@ -49,11 +49,29 @@ internal sealed partial class VolumeExploration
         }
 
         var checkpoint = slot?.Checkpoint ?? throw new InvalidOperationException("Missing landed checkpoint.");
-        if (checkpoint.Generation != 2 || checkpoint.Player != player ||
-            ProceduralLanding.Read(checkpoint, out var decoded) != SaveGameValidation.Valid || decoded is not { } landed)
+        var installed = phase == "resume-installed";
+        if (checkpoint.Generation != (installed ? 3UL : 2UL) || checkpoint.Player != player ||
+            ProceduralLanding.Read(checkpoint, out var decoded, out var environmentTick) != SaveGameValidation.Valid ||
+            decoded is not { } landed || environmentTick != ReferenceWeather.InitialTick + (ulong)landed.FlightTick + (installed ? 60UL : 0UL) ||
+            environmentTick != _environmentTick)
             throw new InvalidOperationException("Landed checkpoint differs from the current player or flight state.");
-        if (phase == "resume")
+        var camera = Camera(terrain.View, player.Position, player.Heading);
+        if (phase is "interrupt" or "interrupt-installed")
         {
+            _environmentTick = checked(_environmentTick + 60);
+            var write = await SaveAsync(terrain, token).ConfigureAwait(false);
+            if (phase == "interrupt-installed")
+                throw new InvalidOperationException($"The after-install probe did not suspend the writer ({write.Status}).");
+            if (write is not { Status: VolumeSlotStatus.Indeterminate, Member: "volume.a" } ||
+                write.Error?.Message != "NTFS checkpoint rename failed." || !slot!.HasPendingWrite)
+                throw new InvalidOperationException($"Expected blocked landed checkpoint publication ({write.Status}, {write.Member}).");
+            Console.WriteLine("WP11 LANDED INTERRUPT READY");
+            await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
+            return;
+        }
+        if (phase is "resume" or "resume-installed")
+        {
+            VerifyEnvironmentPayload(checkpoint, landed);
             using var lease = terrain.TryRead() ?? throw new InvalidOperationException("Missing restored terrain.");
             var outer = planet.Descriptor.SampleAt(Scale(Unit(landed.Foot), FlightBoundary + 1));
             if (lease.TryReadDensity(outer, out _))
@@ -63,13 +81,35 @@ internal sealed partial class VolumeExploration
         var foot = landed.Foot;
         Console.WriteLine(FormattableString.Invariant(
             $"WP11 LANDED generation={checkpoint.Generation} tick={landed.FlightTick} revision={landed.Revision} overlay={digest} craft={foot.X:R},{foot.Y:R},{foot.Z:R} player={player.Position.X:R},{player.Position.Y:R},{player.Position.Z:R}"));
+        Console.WriteLine(FormattableString.Invariant(
+            $"PACKAGE E LANDED tick={environmentTick} tint={camera.Tint.X:R} fog={camera.Fog?.MaxOpacity:R} band={camera.Fog?.StartDepthMeters:R},{camera.Fog?.EndDepthMeters:R}"));
+    }
+
+    private static void VerifyEnvironmentPayload(VolumeCheckpoint checkpoint, ProceduralLanding landed)
+    {
+        Span<byte> legacy = stackalloc byte[44];
+        "WYUVOL02"u8.CopyTo(legacy);
+        checkpoint.Game[17..].CopyTo(legacy[8..]);
+        if (ProceduralLanding.Read(checkpoint, legacy, out var oldLanding, out var oldTick) != SaveGameValidation.Valid ||
+            oldLanding != landed || oldTick != ReferenceWeather.InitialTick ||
+            ProceduralLanding.Read(checkpoint, "WYUVOL01"u8, out oldLanding, out oldTick) != SaveGameValidation.Valid ||
+            oldLanding is not null || oldTick != ReferenceWeather.InitialTick)
+            throw new InvalidOperationException("Legacy environment payload migration failed.");
+
+        Span<byte> malformed = stackalloc byte[53];
+        checkpoint.Game.CopyTo(malformed);
+        malformed[16] = 2;
+        if (ProceduralLanding.Read(checkpoint, malformed, out _, out _) != SaveGameValidation.Malformed ||
+            ProceduralLanding.Read(checkpoint, checkpoint.Game[..^1], out _, out _) != SaveGameValidation.Malformed)
+            throw new InvalidOperationException("Malformed environment payload was accepted.");
     }
 
     private void PrintPreflightCheckpoint(PlanetWalkState player)
     {
         var checkpoint = slot?.Checkpoint ?? throw new InvalidOperationException("Missing preflight checkpoint.");
         if (checkpoint.Generation != 1 || checkpoint.Player != player ||
-            ProceduralLanding.Read(checkpoint, out var landing) != SaveGameValidation.Valid || landing is not null)
+            ProceduralLanding.Read(checkpoint, out var landing, out var environmentTick) != SaveGameValidation.Valid ||
+            landing is not null || environmentTick != ReferenceWeather.InitialTick || environmentTick != _environmentTick)
             throw new InvalidOperationException("An aborted flight changed its preflight checkpoint.");
         var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(checkpoint.Overlay));
         Console.WriteLine(FormattableString.Invariant(
