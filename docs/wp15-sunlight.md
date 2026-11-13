@@ -324,3 +324,43 @@ starts. PresentMon classified only DWM output even with its process filter
 removed. Treat the WYU presentation mode in this capture as unverified.
 The capture wrapper now preserves the ETL and continues after a missing
 PresentMon export. Its Modes parameter can resume only the missing arm.
+
+### Clipped and unobstructed 1080p captures
+
+Both captures in flip-clip-20261113-235034 decoded with zero reported
+ETW event loss. In the unobstructed arm, PresentMon exported 12,148
+Hardware Composed Independent Flip and 1,052 Composed Flip presents
+for the WYU PIDs. In the clipped arm, no WYU presents were classified
+by PresentMon. Raw DxgKrnl records 13,220 PresentHistoryDetailed starts
+with Model 2 (redirected flip), matching the DXGI start and stop counts.
+That token model identifies the presentation submission path. It does
+not establish the eventual scan-out mode for each frame.
+
+The following comparison uses all warmed GPU markers (2,000 frames
+per row and arm). Counts include frames intersecting at least one
+matched DMA interval from a DWM Node-0 hardware queue on the WYU
+adapter. Queue ownership was resolved independently from each ETL.
+
+| Phase | Shadows | Clipped p99 (ms) | Unobstructed p99 (ms) | Clipped / unobstructed DWM overlaps |
+| --- | --- | ---: | ---: | ---: |
+| Midday | Off | 10.8545 | 2.6546 | 48 / 7 |
+| Midday | On | 4.7986 | 2.8093 | 19 / 3 |
+| Low sun | Off | 10.8596 | 2.5315 | 43 / 0 |
+| Low sun | On | 4.8991 | 2.6918 | 15 / 0 |
+| Turn | Off | 4.9279 | 2.5360 | 18 / 0 |
+| Turn | On | 3.4224 | 2.7068 | 13 / 0 |
+
+Within the unobstructed trace, mode-verified midday p99 for
+Composed versus Independent Flip was 2.6987 versus 2.5658 ms
+off and 2.8305 versus 2.7275 ms on. DWM overlap counts were
+4/309 versus 3/1691 off and 0/323 versus 3/1677 on. All
+classified low-sun and turn frames used Independent Flip. Twenty
+turn samples lacked a matching PresentMon row and were excluded
+from mode-specific comparisons only.
+
+The unobstructed arm had lower p99 and fewer DWM overlaps for both
+shadow states. Because the clipped arm has no per-present scan-out
+classification, this is a comparison of the two window setups.
+The lower clipped-arm p99 with shadows enabled is an observation
+across separate wake and scheduling windows, not evidence that
+shadows speed up rendering.
