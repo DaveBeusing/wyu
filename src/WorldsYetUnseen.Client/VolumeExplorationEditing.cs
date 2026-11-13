@@ -140,6 +140,7 @@ internal sealed partial class VolumeExploration
         if (reservation?.TryTake() is not { } cut)
             return new(VolumeSlotStatus.Busy);
 
-        return await Task.Run(() => slot.Save(cut, token)).ConfigureAwait(false);
+        var environmentTick = _environmentTick;
+        return await Task.Run(() => slot.Save(cut, environmentTick, token)).ConfigureAwait(false);
     }
 }

@@ -87,7 +87,7 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
             .Select(static name => Guid.ParseExact(name!, "N")).Where(static id => id != Guid.Empty).Order().ToArray()
         : [];
 
-    internal VolumeSlotResult Save(VolumeCheckpointCut cut, CancellationToken token)
+    internal VolumeSlotResult Save(VolumeCheckpointCut cut, ulong environmentTick, CancellationToken token)
     {
         var transferred = false;
         try
@@ -109,9 +109,10 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
                 }
             }
 
-            var admitted = _writer.TryAdmit(cut, 1, static (root, buffer) => root.State is CaveInventory caveState
+            var admitted = _writer.TryAdmit(cut, 1, (root, buffer) => root.State is CaveInventory caveState
                 ? caveState.Write(buffer.Span) : ProceduralLanding.Write(
-                (root.State as GameHost.ExplorationRoot)?.Landing, root.Player, root.Terrain.TerrainRevision, buffer.Span));
+                (root.State as GameHost.ExplorationRoot)?.Landing, root.Player, root.Terrain.TerrainRevision,
+                environmentTick, buffer.Span));
             if (admitted != VolumeCaptureAdmission.Accepted)
                 return new(admitted switch
                 {

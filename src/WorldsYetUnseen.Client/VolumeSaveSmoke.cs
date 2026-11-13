@@ -97,7 +97,9 @@ internal sealed partial class VolumeExploration
         using var lease = terrain.TryRead() ?? throw new InvalidOperationException("Missing checkpoint collision.");
         var checkpoint = slot?.Checkpoint ?? throw new InvalidOperationException("Missing checkpoint.");
         if (checkpoint.Generation != 2 || checkpoint.Player != state ||
-            _published.TerrainRevision != checkpoint.TerrainRevision)
+            _published.TerrainRevision != checkpoint.TerrainRevision ||
+            ProceduralLanding.Read(checkpoint, out var landing, out var environmentTick) != SaveGameValidation.Valid ||
+            landing is not null || environmentTick != _environmentTick)
             throw new InvalidOperationException("Checkpoint generation, terrain revision or pose changed.");
         var bytes = new byte[lease.EditOverlayBytes];
         if (!lease.TryWriteEditOverlay(bytes, out var written) || written != bytes.Length ||

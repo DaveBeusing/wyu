@@ -15,6 +15,7 @@ internal static class Program
             (nameof(RejectedActionsPreserveProgress), RejectedActionsPreserveProgress),
             (nameof(CapturedProgressSurvivesLaterActions), CapturedProgressSurvivesLaterActions),
             (nameof(ReferenceBiomeTests.TwoSeedParity), ReferenceBiomeTests.TwoSeedParity),
+            (nameof(ReferenceWeatherTests.TransitionsAndBudget), ReferenceWeatherTests.TransitionsAndBudget),
             (nameof(ReferencePlanetTests.SeedAudit), ReferencePlanetTests.SeedAudit),
             (nameof(ReferencePlanetTests.ChartContinuity), ReferencePlanetTests.ChartContinuity),
             (nameof(ReferencePlanetTests.PublishedSpawnAndLanding), ReferencePlanetTests.PublishedSpawnAndLanding),
