@@ -145,3 +145,24 @@ identify the source of the stalls. The instrumented candidate passed all
 six focused shadow tests on WARP and NVIDIA, including edit-first-Present
 pixels. The production package pin remains the original verified archive.
 These results do not qualify continuously changing shadow transforms.
+
+## DxgKrnl correlation capture
+
+The calibrated candidate logs six raw GPU markers with PID, logical
+submission fence, sequence and the direct-queue GPU/QPC clock anchor.
+Apply eng/groundwork-wp15-calibrated-timestamps.patch in place of the
+previous patch. Run eng/Trace-ReferenceSunlight.ps1 with the instrumented
+client from an elevated PowerShell. It captures WPR GPU activity and
+writes markers-qpc.csv alongside the ETL and replay logs. The logical
+fence identifies a renderer submission within that run.
+
+Five timestamp-only 1080p NVIDIA A/B pairs reproduced individual
+relative p99 failures in midday pair 4 (+16.86%), low sun pair 5
+(+20.71%) and turns in pairs 4 and 5 (+15.87%, +15.84%). Pooled GPU
+budgets passed. Large terrain timing spikes also occurred with WP15
+disabled, including 2.314 ms in the low-sun off variant. Some long
+frames had normal terrain timing. The marked intervals therefore do
+not establish an expensive shadow pass or identify a scheduler cause.
+
+The local Windows session denied both WPR GPU and direct DxgKrnl ETW.
+The elevated trace and causal fix are pending.
