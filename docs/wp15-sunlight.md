@@ -265,3 +265,23 @@ to when Windows promoted the window and how much background work was
 present. It does not isolate the presentation mode as the cause of
 the lower p99. No new trace or display configuration was needed for
 this within-capture comparison.
+
+### Separate flip captures
+
+The flip-comparison runner records separate ETLs with the same 1080p
+client build and shadow-off/on route. The composed run uses a static
+layered panel over the game client to request composition. The independent
+run leaves the client unobstructed. PresentMon decodes both ETLs offline.
+Windows can choose a different mode even when the intended setup is active.
+Use only frames with the matching decoded presentation mode and report any
+promotion or fallback. The layered panel itself is an additional compositor
+input in the composed run. Keep the desktop quiet and use the same NVIDIA
+output for both runs.
+
+Run eng/Trace-ReferenceSunlightFlipComparison.ps1 from elevated PowerShell
+with the calibrated client and PresentMon paths and a fresh output directory.
+The client must include the flip probe and the calibrated renderer DLL.
+The two recording folders include raw ETL, PresentMon output, calibrated
+GPU markers and both shadow variants. The runner prints a completion line
+after both recordings have been saved. The separately recorded comparisons
+are pending.

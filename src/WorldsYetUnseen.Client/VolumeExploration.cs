@@ -125,6 +125,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var state = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
         if (scripted && Environment.GetEnvironmentVariable("WYU_WP15_PROBE") is "route" or "measure")
         {
+            using var composition = Environment.GetEnvironmentVariable("WYU_WP15_FLIP") == "composed"
+                ? new AlphaOverlay(activateOwner: false) : null;
+            if (composition is not null)
+                composition.Menu = "WP15 composed flip";
             await VerifySunlightAsync(terrain, renderHost.Active, state, token).ConfigureAwait(false);
             return;
         }
