@@ -18,4 +18,4 @@ supported checkpoint during construction or after landing.
 The [build and verification guide](docs/build-bootstrap.md) covers the
 installer, verified packages and developer smoke modes. The
 [shared roadmap](https://github.com/DaveBeusing/Groundwork/blob/master/docs/roadmap.md) tracks milestone status.
-The [world vision](docs/World_Vision.md) describes the longer-term design.
+The [world vision](docs/World_Vision_Consolidated.md) describes the longer-term design.
