@@ -62,7 +62,7 @@ function Test-LandedInterruption([string]$Root, [string]$WriterAssembly, [switch
             if (!$writer.HasExited) { $writer.Kill(); $writer.WaitForExit(5000) | Out-Null }
             $writer.Dispose()
         }
-        $lock?.Dispose()
+        if ($lock) { $lock.Dispose() }
         $env:WYU_LANDED_AFTER_PUBLISH = $priorProbe
     }
     $after = @(Get-FileHash -LiteralPath $a,$b | ForEach-Object Hash)

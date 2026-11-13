@@ -597,8 +597,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var direction = Unit(point);
         var radius = Descriptor.RadiusMeters;
         var surface = Scale(direction, radius);
-        var elevation = planet.Field.SampleLandform(Descriptor.SampleAt(surface).Vertex).Elevation /
-            (double)PlanetDensityField.UnitsPerCell;
+        var elevation = 0d;
+        for (var pass = 0; pass < 3; pass++)
+        {
+            elevation = planet.Field.SampleLandform(Descriptor.SampleAt(surface).Vertex).Elevation /
+                (double)PlanetDensityField.UnitsPerCell;
+            surface = Scale(direction, radius + elevation);
+        }
         point = Scale(direction, radius + elevation) with { X = 128 };
         await LoadAsync(terrain, renderer, point, state.Heading, PlanetLocalFrame.Create(point), token).ConfigureAwait(false);
         var publication = _published;
@@ -607,7 +612,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         using (var collision = terrain.TryRead() ?? throw new InvalidOperationException("Missing region walk collision."))
         {
             var hits = new VolumeRayHit[4];
-            var ray = collision.Raycast(Add(start, Scale(up, 3)), Add(start, Scale(up, -3)), hits);
+            var ray = collision.Raycast(Add(start, Scale(up, 6)), Add(start, Scale(up, -6)), hits);
             if (ray.Status != VolumeQueryStatus.Contact || ray.Count != 1)
                 throw new InvalidOperationException($"Region walk start has no unique surface ({ray.Status}).");
             start = Add(hits[0].Position, Scale(up, 0.35));
