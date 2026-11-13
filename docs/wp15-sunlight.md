@@ -285,3 +285,34 @@ The two recording folders include raw ETL, PresentMon output, calibrated
 GPU markers and both shadow variants. The runner prints a completion line
 after both recordings have been saved. The separately recorded comparisons
 are pending.
+
+### Separate 1080p NVIDIA captures
+
+Both ETLs from flip-20261113-232826 decoded without event loss. The
+layered panel did not hold Composed Flip. PresentMon reported 12,150 of
+13,200 presents as Hardware Composed: Independent Flip in the requested
+Composed capture and 12,151 of 13,200 in the requested Independent capture.
+All other presents were Composed Flip. Compare the actual modes within
+each capture. The two captures do not form a controlled mode A/B.
+
+The PID/sequence/present-wait join matched 11,955/12,000 warmed frames in
+the panel capture and 11,979/12,000 in the unobstructed capture. Per-trace
+device and hardware-queue rundown identifies DWM Node 0 on the WYU adapter.
+Overlap counts use paired DMA start/end events for those queues.
+
+| Capture | Shadows | Midday p99 Composed / Independent (ms) | DWM overlaps Composed / Independent |
+| --- | --- | ---: | ---: |
+| With panel | Off | 2.7168 / 2.5716 | 0/305 / 6/1,670 |
+| With panel | On | 2.8823 / 2.7267 | 2/325 / 0/1,675 |
+| Unobstructed | Off | 2.6392 / 2.5661 | 0/310 / 1/1,690 |
+| Unobstructed | On | 2.8066 / 2.7271 | 0/319 / 2/1,681 |
+
+The observed midday p99 is lower under Independent Flip in all four
+comparisons. Overlap counts show no consistent decrease. The panel capture
+includes a 19.4828 ms Independent Flip frame with shadows off and DWM
+overlap, as well as a 9.2853 ms Composed Flip frame with shadows on and DWM
+overlap. Low sun and turns had only Independent Flip among matched frames,
+with zero DWM overlaps in either capture. Their p99 values were effectively
+unchanged across captures: about 2.531/2.692 ms off/on at low sun and
+2.536/2.707 ms during turns. These observations do not establish that
+changing the presentation mode reduces DWM overlaps or long-frame risk.
