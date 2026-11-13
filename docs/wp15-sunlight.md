@@ -229,3 +229,39 @@ This supports a scheduling-contention hypothesis for both variants.
 The ETL does not show that the DWM packet occupied the engine for its
 entire timestamp window or establish which dependency delayed WYU.
 No additional replay or renderer change was made for this trace review.
+
+### Composed Flip versus Hardware Composed Independent Flip
+
+PresentMon 2.6 decoded presentation modes offline from the same NVIDIA
+1080p ETL. The border-decorated window switched modes during the trace.
+The measured midday ranges contain both modes with shadows off and on.
+Low sun and turns contain only Independent Flip after warm-up. Results
+compare observed presentation modes within one capture.
+
+The join uses the WYU PID, the preceding DxgKrnl present-side wait packet
+whose fence value matches the frame sequence, and the nearest PresentMon
+CPU start within -0.1 to +0.5 ms of that wait. It admits each Present once.
+11,980 of 12,000 measured frames matched. DWM overlap means a matching
+start/end DMA progress-fence interval on the identified DWM node-0
+queue intersects the calibrated GPU frame. Counts cover that queue alone.
+
+| Midday shadows | PresentMon mode | Frames | Frame GPU p99 (ms) | DWM overlaps | Frames above 3.8 ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Off | Composed: Flip | 329 | 2.7162 | 0 | 0 |
+| Off | Hardware Composed: Independent Flip | 1,671 | 2.5658 | 3 | 3 |
+| On | Composed: Flip | 320 | 2.9012 | 1 | 1 |
+| On | Hardware Composed: Independent Flip | 1,680 | 2.7273 | 2 | 2 |
+
+Midday p99 is 5.5% lower off and 6.0% lower on in the Independent Flip
+samples. Overlaps are too sparse to establish a reduction, and slow
+frames persist in that mode. In particular 5-off/110 (8.635 ms) is
+Independent Flip and overlaps DWM; 5-on/57 (9.408 ms) is Composed Flip
+and overlaps DWM. The 20.025 ms 2-on/480 frame is also Independent Flip
+but is in the low-sun warm-up and excluded from the table.
+
+Independent Flip-only p99 off/on is 2.5311/2.6918 ms at low sun
+and 2.5366/2.7067 ms during turns. The observed comparison is sensitive
+to when Windows promoted the window and how much background work was
+present. It does not isolate the presentation mode as the cause of
+the lower p99. No new trace or display configuration was needed for
+this within-capture comparison.
