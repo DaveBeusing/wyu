@@ -315,12 +315,12 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement remained open across a terrain view change.");
         var mask = ++_sequence;
-        var maskSky = Atmosphere(flightCamera is { } craftPosition ? FlightEye(craftPosition) : WalkingEye(position),
-            flightTick ?? _environmentTick)?.Sky ?? Sky;
+        var camera = flightCamera is { } craft ? FlightCamera(view, craft, heading, flightTick ?? _environmentTick) :
+            Camera(view, position, heading);
         if (overlay is not null)
             overlay.Menu = ActiveCaveClimbHint ?? $"Loading planet terrain\n\n{PlanetName}\nSeed {Descriptor.Seed}\nGenerator {Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
         if (rendererReady is null)
-            RequireFrame(renderer.TrySubmitVolumeMask(view, mask, maskSky));
+            RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, camera.Sky));
         var selection = returnTerrain?.Selection ?? SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
         if (_selection is null || selection.Minimum != _selection.Minimum)
             _windows++;
@@ -349,7 +349,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 var startupStarted = BiomeMeasurements.Start();
                 await rendererReady.ConfigureAwait(false);
                 BiomeMeasurements.Write("near-startup-wait", startupStarted);
-                RequireFrame(renderer.TrySubmitVolumeMask(view, mask, maskSky));
+                RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, camera.Sky));
             }
             catch
             {
@@ -394,8 +394,6 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             _transitions = CountTransitions(lease);
         }
         var sequence = ++_sequence;
-        var camera = flightCamera is { } craft ? FlightCamera(view, craft, heading, flightTick ?? _environmentTick) :
-            Camera(view, position, heading);
         RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, camera));
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
             pauseWhileMinimized: true).ConfigureAwait(false);
@@ -520,7 +518,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         direction = MathF.Cos(_pitch) * direction + MathF.Sin(_pitch) * up;
         var eye = WalkingEye(foot);
         var atmosphere = Atmosphere(eye, interpolation?.Tick ?? _environmentTick, interpolation?.Fraction ?? 0);
-        return ApplyAtmosphere(new(view, eye, direction, up, 1.0f, 0.08f, 150, Vector4.One, Sky), atmosphere);
+        return ApplySky(ApplyAtmosphere(new(view, eye, direction, up, 1.0f, 0.08f, 150, Vector4.One, Sky), atmosphere),
+            interpolation?.Tick ?? _environmentTick, interpolation?.Fraction ?? 0);
     }
 
     private static PlanetVector WalkingEye(PlanetVector foot) => Add(foot, Scale(Unit(foot), 1.65));
@@ -529,6 +528,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
 
     private ReferenceAtmosphere? Atmosphere(PlanetVector position, ulong tick, double fraction = 0) =>
         _weather?.Evaluate(position, tick, fraction);
+
+    private VolumeCamera ApplySky(VolumeCamera camera, ulong tick, double fraction) =>
+        reference is not null && ReferenceSky.Enabled ? camera with
+        {
+            Sky = ReferenceSky.Create(camera.Position, camera.Forward, camera.Up, camera.FieldOfView,
+                Descriptor.Seed, tick, fraction),
+        } : camera;
 
     private static VolumeCamera ApplyAtmosphere(VolumeCamera camera, ReferenceAtmosphere? weather)
     {
@@ -549,7 +555,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         state = await CommitInitialSmokePoseAsync(terrain, state, token).ConfigureAwait(false);
         var camera = Camera(terrain.View, state.Position, state.Heading) with
         {
-            Fog = null, Tint = Vector4.One, ClearColor = Sky,
+            Fog = null, Tint = Vector4.One, ClearColor = Sky, Sky = null,
         };
         var generation = _published.Generation;
         var height = ReferencePlanet.RadiusMeters;
@@ -659,7 +665,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
             var sequence = ++_sequence;
             RequireFrame(renderer.TrySubmitVolumeCamera(publication.Generation, sequence,
-                ApplyAtmosphere(center with { Position = position }, weather)));
+                ApplySky(ApplyAtmosphere(center with { Position = position }, weather), _environmentTick, 0)));
             await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
             Drain(terrain);
         }

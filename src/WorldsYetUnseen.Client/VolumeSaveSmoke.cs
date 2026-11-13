@@ -9,14 +9,15 @@ namespace WorldsYetUnseen.Client;
 
 internal static partial class GameHost
 {
-    private static async Task<VolumeWorldSlot> OpenVolumeSmokeSlotAsync(string root, string phase, CancellationToken token)
+    private static async Task<VolumeWorldSlot> OpenVolumeSmokeSlotAsync(string root, string phase, CancellationToken token,
+        ulong seed = 42)
     {
         var v2 = VolumeSmokeNamespace(root);
         if (phase == "init")
         {
             if (Directory.Exists(v2))
                 throw new InvalidOperationException("Volume save fixture must start with a fresh v2 namespace.");
-            return VolumeWorldSlot.Create(v2, 42);
+            return VolumeWorldSlot.Create(v2, seed);
         }
 
         var id = VolumeWorldSlot.List(v2).Single();

@@ -57,7 +57,8 @@ internal static partial class GameHost
             else if (caveSmoke is not null)
                 slot = await OpenCaveSmokeSlotAsync(saveRoot!, caveSmoke, token).ConfigureAwait(false);
             else if (saveSmoke is not null)
-                slot = await OpenVolumeSmokeSlotAsync(saveRoot!, saveSmoke is "flight" or "abort" ? "init" : saveSmoke, token)
+                slot = await OpenVolumeSmokeSlotAsync(saveRoot!, saveSmoke is "flight" or "abort" ? "init" : saveSmoke,
+                    token, flightSmoke ? smokeSeed ?? 42 : 42)
                     .ConfigureAwait(false);
             if (!scripted && slot is null)
             {
