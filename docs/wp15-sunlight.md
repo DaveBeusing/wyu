@@ -113,3 +113,35 @@ allocated zero managed bytes and issued at most two depth draws per frame
 with zero mesh rebuilds on the measured route. All six focused Groundwork
 shadow tests passed with the candidate, including WARP and NVIDIA
 Debug Layer/DRED readback and the first Present after an edit.
+
+## Reuse of identical cascade projections
+
+The GPU-local run still redrew two maps on every frame. The noon pass
+p95 was 0.530 ms, versus 0.178 ms at low sun. The next candidate keeps one
+rendered projection per cascade and skips recording a depth pass when
+the installed mesh object and light transform are identical. No extra
+depth maps are allocated. A replacement mesh invalidates both entries;
+a changed transform redraws its cascade. A quick turn still redraws
+when it changes a snapped projection. The terrain shader also opts into
+early depth/stencil rejection.
+
+Apply eng/groundwork-wp15-cached-timestamps.patch instead of the earlier
+timestamp patches to reproduce this candidate. Five 1080p NVIDIA A/B
+pairs again contributed 2,000 samples per variant and phase.
+
+| Phase | Extra GPU p95 / p99 (ms) | GPU frame delta p95 / p99 | Pooled budgets |
+| --- | ---: | ---: | --- |
+| Midday | 0.1587 / 0.1753 | +5.53% / +7.44% | Pass |
+| Low sun | 0.1581 / 0.1613 | +6.36% / +9.32% | Pass |
+| Quick turn | 0.1661 / 0.1702 | +6.73% / +7.22% | Pass |
+
+All absolute gates passed. The relative p99 gate failed for low sun in
+pair 1 (+29.63%) and turns in pairs 3 and 5 (+15.68%, +15.73%).
+The longest affected samples with terrain spikes had zero depth draws
+and timestamp intervals of at most 0.000064 ms around shadow recording.
+Several showed terrain intervals above 1.3 ms. The samples locate
+these spikes outside cascade rendering; the timestamp intervals do not
+identify the source of the stalls. The instrumented candidate passed all
+six focused shadow tests on WARP and NVIDIA, including edit-first-Present
+pixels. The production package pin remains the original verified archive.
+These results do not qualify continuously changing shadow transforms.
