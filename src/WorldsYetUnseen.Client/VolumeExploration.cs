@@ -544,6 +544,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private async Task MeasureAtmosphereAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
         PlanetWalkState state, CancellationToken token)
     {
+        state = await CommitInitialSmokePoseAsync(terrain, state, token).ConfigureAwait(false);
         var camera = Camera(terrain.View, state.Position, state.Heading) with
         {
             Fog = null, Tint = Vector4.One, ClearColor = Sky,
@@ -563,9 +564,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 };
                 var tick = phase == "dense" ? 60UL : ReferenceWeather.InitialTick + (ulong)frame;
                 var atmosphere = Atmosphere(point, tick);
+                var begin = await BeginAsync(token).ConfigureAwait(false);
+                terrain.BeginTick(begin);
+                Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
                 var sequence = ++_sequence;
                 RequireFrame(renderer.TrySubmitVolumeCamera(generation, sequence, ApplyAtmosphere(camera, atmosphere)));
                 await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+                Drain(terrain);
             }
             using var published = terrain.TryRead();
             if (published?.Info.Generation != generation || published.Info.TerrainRevision != _published.TerrainRevision)
