@@ -79,3 +79,37 @@ NVIDIA flight and Continue replay matched the landing sunlight and the
 Package G sky pixels at both handoffs. Clean locked restore from all ten
 archive packages, nine gameplay tests, headless startup and controlled
 shutdown passed.
+
+## GPU-local geometry experiment
+
+The original midday run spent 2.475 ms p95 in the two shadow passes.
+Supplying an optimized depth-clear value alone measured 2.473 ms p95
+on the same fixture. With the same clear value and terrain vertex and
+index data in a GPU_UPLOAD heap, the passes measured 0.534 ms p95 in the
+profiling run. The result points to mesh fetch from the original upload
+heap as the dominant cost. The prototype checks OPTIONS16 and falls back
+to UPLOAD where GPU_UPLOAD is unsupported. It preserves geometry size,
+cascade dimensions, filtering and residency selection. Both A/B variants
+use the same heap policy so the relative comparison isolates WP15.
+
+Apply eng/groundwork-wp15-optimized-timestamps.patch in place of the
+original timestamp patch to reproduce the candidate. The WYU shipping
+pin remains 0.1.0-dev.43505500368.1. The optimization is an experimental
+Groundwork patch pending package integration.
+
+Five new paired NVIDIA replays used the same 1920 × 1080 Release route,
+seed, driver and warm-up. Each pooled phase has 2,000 frames per variant.
+
+| Phase | Extra terrain GPU p95 / p99 (ms) | Shadow passes p95 / p99 (ms) | GPU frame delta p95 / p99 | Cascade CPU p99 (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Midday | 0.7356 / 0.7631 | 0.5298 / 0.5572 | +24.57% / +23.31% | 0.0312 |
+| Low sun | 0.3836 / 0.3852 | 0.1782 / 0.1787 | +15.73% / +15.64% | 0.0749 |
+| Quick turn | 0.3926 / 0.3939 | 0.1792 / 0.1797 | +16.08% / +16.08% | 0.0423 |
+
+The absolute 1.5/2.0 ms gate held in every phase and pair. The pooled
+relative +10%/+15% gate failed in all phases, with midday the largest
+remaining gap. Both maps still total 8 MiB. The warmed cascade section
+allocated zero managed bytes and issued at most two depth draws per frame
+with zero mesh rebuilds on the measured route. All six focused Groundwork
+shadow tests passed with the candidate, including WARP and NVIDIA
+Debug Layer/DRED readback and the first Present after an edit.
