@@ -49,16 +49,19 @@ internal sealed partial class VolumeExploration
         }
 
         var checkpoint = slot?.Checkpoint ?? throw new InvalidOperationException("Missing landed checkpoint.");
-        if (checkpoint.Generation != 2 || checkpoint.Player != player ||
+        var installed = phase == "resume-installed";
+        if (checkpoint.Generation != (installed ? 3UL : 2UL) || checkpoint.Player != player ||
             ProceduralLanding.Read(checkpoint, out var decoded, out var environmentTick) != SaveGameValidation.Valid ||
-            decoded is not { } landed || environmentTick != ReferenceWeather.InitialTick + (ulong)landed.FlightTick ||
+            decoded is not { } landed || environmentTick != ReferenceWeather.InitialTick + (ulong)landed.FlightTick + (installed ? 60UL : 0UL) ||
             environmentTick != _environmentTick)
             throw new InvalidOperationException("Landed checkpoint differs from the current player or flight state.");
         var camera = Camera(terrain.View, player.Position, player.Heading);
-        if (phase == "interrupt")
+        if (phase is "interrupt" or "interrupt-installed")
         {
             _environmentTick = checked(_environmentTick + 60);
             var write = await SaveAsync(terrain, token).ConfigureAwait(false);
+            if (phase == "interrupt-installed")
+                throw new InvalidOperationException($"The after-install probe did not suspend the writer ({write.Status}).");
             if (write is not { Status: VolumeSlotStatus.Indeterminate, Member: "volume.a" } ||
                 write.Error?.Message != "NTFS checkpoint rename failed." || !slot!.HasPendingWrite)
                 throw new InvalidOperationException($"Expected blocked landed checkpoint publication ({write.Status}, {write.Member}).");
@@ -66,7 +69,7 @@ internal sealed partial class VolumeExploration
             await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
             return;
         }
-        if (phase == "resume")
+        if (phase is "resume" or "resume-installed")
         {
             VerifyEnvironmentPayload(checkpoint, landed);
             using var lease = terrain.TryRead() ?? throw new InvalidOperationException("Missing restored terrain.");

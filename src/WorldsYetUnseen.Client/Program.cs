@@ -12,7 +12,7 @@ internal static class Program
         if (args is ["--new-world"] || args is ["--planet-playtest", _] or ["--planet-playtest", _, "graphics" or "budget"] ||
             args is ["--volume-smoke", _, "warp" or "hardware"] ||
             args is ["--volume-save-smoke", "init" or "restore" or "interrupt" or "verify" or "protected", _] ||
-            args is ["--volume-flight-smoke", "flight" or "resume" or "abort" or "preflight" or "interrupt", _, "warp" or "hardware"])
+            args is ["--volume-flight-smoke", "flight" or "resume" or "abort" or "preflight" or "interrupt" or "interrupt-installed" or "resume-installed", _, "warp" or "hardware"])
             return await RunExplorationAsync(args).ConfigureAwait(false);
 
         string? diagnosticCase = null;

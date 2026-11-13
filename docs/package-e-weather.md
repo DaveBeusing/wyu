@@ -27,12 +27,21 @@ boundaries, segment rollover, cache history, and altitude fade. The Windows
 exploration and flight scripts check renderer handoff, landing and Continue.
 The volume save and cave scripts exercise NTFS recovery and cave regression.
 
-The Windows region fixture presents camera positions at x = 127.9999, 128 and
-128.0001 m against one terrain publication. The flight replay checks matching
+The Windows region fixture walks across x = 128 m with committed movement
+steps and also presents x = 127.9999, 128 and 128.0001 m against the same
+terrain publication. The flight replay checks matching
 near/orbit daylight at the handoffs, zero orbital fog and its return at landing.
 On NVIDIA, the replay blocks the third save's NTFS rename after a landed
 checkpoint, terminates the writer and verifies the old checkpoint and fog
-after restart. This tests interruption before installation.
+after restart. For interruption after installation, pass
+`-AfterInstallAssembly` to `eng/Test-ProceduralFlight.ps1` with a diagnostic
+copy of the same client. Build its Groundwork persistence assembly from the
+pinned source commit and suspend generation 3 in `VolumeCheckpointSlot`
+immediately before the `AfterPublish` observer, after the installed file's
+handle has closed. Gate the probe on `WYU_LANDED_AFTER_PUBLISH=1`, write
+`WP11 LANDED AFTER INSTALL READY` and flush stdout before suspending.
+The test kills only that writer and opens the installed generation twice
+with the normal pinned client.
 
 `eng/Measure-ReferenceWeather.ps1 -PresentMon <path-to-PresentMon.exe>`
 runs paired NVIDIA replays with the same seed-42 spawn view, resolution and
@@ -49,8 +58,9 @@ set `WYU_PACKAGE_E_MEASURE=1`, `WYU_WP13_MEASURE=on` and
 The `PACKAGE E TIMESTAMP PAIRS` line gives the first sequence and frame count
 per phase. The run alternates variants every frame, reverses their order every
 44 frames, and evaluates both frames of a pair at the same weather sample.
-Discard the first 880 frames per phase and divide the remaining 4,400 into
-five blocks of 880 frames. The renderer probe brackets the terrain draw with
+Start five fresh processes. Each phase presents 1,056 frames per process.
+Discard the first 176 frames per phase in each process, leaving 440 samples
+per variant per phase and 2,200 across all five runs. The renderer probe brackets the terrain draw with
 D3D12 timestamp queries. The released Groundwork package remains pinned.
 
 Run the capture from an administrator PowerShell or an account in Performance

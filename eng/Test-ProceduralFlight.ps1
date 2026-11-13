@@ -1,5 +1,6 @@
 param(
-    [string]$Assembly = (Join-Path $PSScriptRoot '../artifacts/bin/WorldsYetUnseen.Client/release/WorldsYetUnseen.Client.dll')
+    [string]$Assembly = (Join-Path $PSScriptRoot '../artifacts/bin/WorldsYetUnseen.Client/release/WorldsYetUnseen.Client.dll'),
+    [string]$AfterInstallAssembly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,7 +25,7 @@ function Invoke-FlightPhase([string]$Phase, [string]$Root, [string]$Adapter) {
     return $output
 }
 
-function Test-LandedInterruption([string]$Root) {
+function Test-LandedInterruption([string]$Root, [string]$WriterAssembly, [switch]$AfterInstall) {
     $slots = @(Get-ChildItem -LiteralPath (Join-Path $Root 'v2') -Directory)
     if ($slots.Count -ne 1) { throw 'Expected one landed slot.' }
     $slot = $slots[0]
@@ -33,19 +34,23 @@ function Test-LandedInterruption([string]$Root) {
     $intent = Join-Path $slot.FullName 'volume.intent'
     $before = @(Get-FileHash -LiteralPath $a,$b | ForEach-Object Hash)
     $priorIntent = if (Test-Path -LiteralPath $intent) { (Get-FileHash -LiteralPath $intent).Hash }
-    $log = Join-Path $Root 'landed-interrupt.stdout'
-    $errors = Join-Path $Root 'landed-interrupt.stderr'
+    $phase = if ($AfterInstall) { 'interrupt-installed' } else { 'interrupt' }
+    $marker = if ($AfterInstall) { 'WP11 LANDED AFTER INSTALL READY' } else { 'WP11 LANDED INTERRUPT READY' }
+    $log = Join-Path $Root "$phase.stdout"
+    $errors = Join-Path $Root "$phase.stderr"
     $writer = $null
-    $lock = [IO.File]::Open($a, 'Open', 'Read', 'ReadWrite')
+    $lock = if (!$AfterInstall) { [IO.File]::Open($a, 'Open', 'Read', 'ReadWrite') }
+    $priorProbe = $env:WYU_LANDED_AFTER_PUBLISH
     try {
+        if ($AfterInstall) { $env:WYU_LANDED_AFTER_PUBLISH = '1' }
         $writer = Start-Process -FilePath (Get-Command dotnet).Source -ArgumentList @(
-            ('"' + $client + '"'), '--volume-flight-smoke', 'interrupt', ('"' + $Root + '"'), 'hardware'
+            ('"' + $WriterAssembly + '"'), '--volume-flight-smoke', $phase, ('"' + $Root + '"'), 'hardware'
         ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $errors
         $deadline = [DateTime]::UtcNow.AddSeconds(90)
-        while (!(Select-String -LiteralPath $log -SimpleMatch 'WP11 LANDED INTERRUPT READY' -Quiet)) {
+        while (!(Select-String -LiteralPath $log -SimpleMatch $marker -Quiet)) {
             if ($writer.HasExited -or [DateTime]::UtcNow -ge $deadline) {
                 Get-Content -LiteralPath $log,$errors | Write-Host
-                throw 'Landed writer did not reach the blocked rename.'
+                throw "Landed writer did not reach $phase."
             }
             Start-Sleep -Milliseconds 100
         }
@@ -57,10 +62,13 @@ function Test-LandedInterruption([string]$Root) {
             if (!$writer.HasExited) { $writer.Kill(); $writer.WaitForExit(5000) | Out-Null }
             $writer.Dispose()
         }
-        $lock.Dispose()
+        $lock?.Dispose()
+        $env:WYU_LANDED_AFTER_PUBLISH = $priorProbe
     }
     $after = @(Get-FileHash -LiteralPath $a,$b | ForEach-Object Hash)
-    if (($after -join ' ') -cne ($before -join ' ')) { throw 'Landed interruption changed a committed member.' }
+    if ($after[1] -cne $before[1] -or ($AfterInstall.IsPresent -eq ($after[0] -ceq $before[0]))) {
+        throw "Unexpected checkpoint member hashes after $phase."
+    }
 }
 
 $reference = $null
@@ -82,12 +90,25 @@ foreach ($adapter in @('warp', 'hardware')) {
         throw "The landed checkpoint changed after restart on $adapter."
     }
     if ($adapter -eq 'hardware') {
-        Test-LandedInterruption $root
+        Test-LandedInterruption $root $client
         $recovered = @(Invoke-FlightPhase 'resume' $root $adapter | Where-Object { $_ -cmatch '^(WP11|PACKAGE E) LANDED ' })
         if (($recovered -join "`n") -cne ($landed -join "`n")) {
             throw 'Landed checkpoint or fog changed after interrupted publication.'
         }
         Write-Host 'PASS: Interrupted landed publication preserved the prior checkpoint and reconstructed fog.'
+        if ($AfterInstallAssembly) {
+            $probe = (Resolve-Path -LiteralPath $AfterInstallAssembly).Path
+            Test-LandedInterruption $root $probe -AfterInstall
+            $new = @(Invoke-FlightPhase 'resume-installed' $root $adapter |
+                Where-Object { $_ -cmatch '^(WP11|PACKAGE E) LANDED ' })
+            $again = @(Invoke-FlightPhase 'resume-installed' $root $adapter |
+                Where-Object { $_ -cmatch '^(WP11|PACKAGE E) LANDED ' })
+            if ($new.Count -ne 2 -or $new[0] -cne $landed[0].Replace('generation=2', 'generation=3') -or
+                $new[1] -ceq $landed[1] -or ($new -join "`n") -cne ($again -join "`n")) {
+                throw 'Installed landing did not restore the new clock, unchanged pose, and repeatable fog.'
+            }
+            Write-Host 'PASS: Process exit after NTFS installation restored the new landed checkpoint and fog.'
+        }
     }
 }
 

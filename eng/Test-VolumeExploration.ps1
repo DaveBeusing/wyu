@@ -15,10 +15,6 @@ foreach ($seed in @('42', '20261111')) {
         if ($exitCode -ne 0 -or $output -cnotcontains 'PASS: WYU WP11 exploration, rebase and native shutdown.') {
             throw "Exploration failed for seed $seed on $adapter (exit $exitCode)."
         }
-        if ($env:WYU_PACKAGE_E -cne 'off' -and
-            $output -cnotcontains 'PASS: Package E region boundary presented continuously at x=128.') {
-            throw "Missing region-boundary presentation for seed $seed on $adapter."
-        }
 
         $checkpoints = @($output | Where-Object { $_ -cmatch '^WP11 (spawn|route) seed=' })
         if ($checkpoints.Count -ne 3) {
@@ -34,3 +30,25 @@ foreach ($seed in @('42', '20261111')) {
 }
 
 Write-Host 'PASS: Both WP11 seed routes matched across fresh WARP and NVIDIA processes.'
+
+$priorWalk = $env:WYU_PACKAGE_E_WALK
+try {
+    $env:WYU_PACKAGE_E_WALK = '1'
+    foreach ($seed in '42','20261111') {
+        $expected = $null
+        foreach ($adapter in 'warp','hardware') {
+            $output = @(& dotnet $client --volume-smoke $seed $adapter)
+            $exitCode = $LASTEXITCODE
+            $output | Write-Host
+            $walk = @($output | Where-Object { $_ -cmatch '^PACKAGE E WALK ' })
+            if ($exitCode -ne 0 -or $walk.Count -ne 1 -or
+                $output -cnotcontains 'PASS: Package E region boundary presented continuously at x=128.' -or
+                ($null -ne $expected -and $walk[0] -cne $expected)) {
+                throw "Region walk failed for seed $seed on $adapter."
+            }
+            $expected = $walk[0]
+        }
+    }
+} finally {
+    $env:WYU_PACKAGE_E_WALK = $priorWalk
+}

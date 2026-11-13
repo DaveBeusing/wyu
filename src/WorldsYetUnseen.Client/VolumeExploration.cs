@@ -128,6 +128,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             await MeasureAtmosphereAsync(terrain, renderHost.Active, state, token).ConfigureAwait(false);
             return;
         }
+        if (scripted && _weather is not null && Environment.GetEnvironmentVariable("WYU_PACKAGE_E_WALK") == "1")
+        {
+            await VerifyWeatherBoundaryAsync(terrain, renderHost.Active, state, token).ConfigureAwait(false);
+            return;
+        }
         diagnostics?.Enter("Exploration");
         diagnostics?.Write(slot?.Checkpoint is null ? "spawn" : "continue", FormattableString.Invariant(
             $"seed={Descriptor.Seed} generator={Descriptor.GeneratorVersion} revision={_published.TerrainRevision} generation={slot?.Checkpoint?.Generation ?? 0}"));
@@ -152,8 +157,6 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             if (StrideAt(_selection!, startBrick) != 1 || StrideAt(_selection!, nextBrick) != 2 || _transitions == 0)
                 throw new InvalidOperationException("The scripted route must start beside a generated 2:1 boundary.");
             WriteCheckpoint("spawn", state);
-            if (_weather is not null)
-                await VerifyWeatherBoundaryAsync(terrain, renderHost.Active, state, token).ConfigureAwait(false);
         }
         var steps = 0;
         var exercisedWindow = false;
@@ -551,11 +554,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var generation = _published.Generation;
         var height = ReferencePlanet.RadiusMeters;
         var timestampPairs = Environment.GetEnvironmentVariable("WYU_PACKAGE_E_TIMESTAMP_PAIRS") == "1";
-        foreach (var phase in timestampPairs ? new[] { "dense", "boundary" } : new[] { "clear", "dense", "boundary" })
+        foreach (var phase in new[] { "clear", "dense", "boundary" })
         {
             var start = Stopwatch.GetTimestamp();
             var firstSequence = _sequence + 1;
-            var count = timestampPairs ? 5280 : 420;
+            var count = timestampPairs ? 1056 : 420;
             for (var frame = 0; frame < count; frame++)
             {
                 var sample = timestampPairs ? frame / 2 : frame;
@@ -597,9 +600,44 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var elevation = planet.Field.SampleLandform(Descriptor.SampleAt(surface).Vertex).Elevation /
             (double)PlanetDensityField.UnitsPerCell;
         point = Scale(direction, radius + elevation) with { X = 128 };
-        var original = terrain.View.Frame;
         await LoadAsync(terrain, renderer, point, state.Heading, PlanetLocalFrame.Create(point), token).ConfigureAwait(false);
         var publication = _published;
+        var start = point with { X = 127.75 };
+        var up = Unit(start);
+        using (var collision = terrain.TryRead() ?? throw new InvalidOperationException("Missing region walk collision."))
+        {
+            var hits = new VolumeRayHit[4];
+            var ray = collision.Raycast(Add(start, Scale(up, 3)), Add(start, Scale(up, -3)), hits);
+            if (ray.Status != VolumeQueryStatus.Contact || ray.Count != 1)
+                throw new InvalidOperationException($"Region walk start has no unique surface ({ray.Status}).");
+            start = Add(hits[0].Position, Scale(up, 0.35));
+        }
+        var walker = state with { Position = start, Heading = East, Velocity = default };
+        var firstEye = WalkingEye(walker.Position).X;
+        var originalTick = _environmentTick;
+        for (var step = 0; step < 60 && WalkingEye(walker.Position).X <= 128; step++)
+        {
+            var begin = await BeginAsync(token).ConfigureAwait(false);
+            terrain.BeginTick(begin);
+            var movement = terrain.TryPlanMovement(walker, 1, 0, out var status)
+                ?? throw new InvalidOperationException($"Region walk held ({status}).");
+            var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
+            var prepared = terrain.TryPrepareMovement(movement, commit, [])
+                ?? throw new InvalidOperationException("Region walk could not prepare.");
+            if (Finish(commit, prepared).Status != BarrierStatus.Committed)
+                throw new InvalidOperationException("Region walk could not commit.");
+            walker = movement.Result.State;
+            _environmentTick = checked(_environmentTick + 1);
+            var sequence = ++_sequence;
+            RequireFrame(renderer.TrySubmitVolumeCamera(publication.Generation, sequence,
+                Camera(terrain.View, walker.Position, walker.Heading)));
+            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+            Drain(terrain);
+        }
+        if (firstEye >= 128 || WalkingEye(walker.Position).X <= 128)
+            throw new InvalidOperationException("The simulated walk did not cross the weather boundary.");
+        Console.WriteLine(FormattableString.Invariant(
+            $"PACKAGE E WALK seed={Descriptor.Seed} x={firstEye:R}->{WalkingEye(walker.Position).X:R} steps={_environmentTick - originalTick}"));
         var center = Camera(terrain.View, point, state.Heading);
         var eye = center.Position with { X = 128 };
         var expected = Atmosphere(eye, _environmentTick);
@@ -623,7 +661,6 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         using (var read = terrain.TryRead())
             if (read?.Info != publication)
                 throw new InvalidOperationException("Region weather changed the terrain publication.");
-        await LoadAsync(terrain, renderer, state.Position, state.Heading, original, token).ConfigureAwait(false);
         Console.WriteLine("PASS: Package E region boundary presented continuously at x=128.");
     }
 
