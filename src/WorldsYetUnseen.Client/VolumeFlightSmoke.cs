@@ -10,25 +10,39 @@ internal sealed partial class VolumeExploration
     internal async Task RunFlightSmokeAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost,
         string phase, CancellationToken token)
     {
+        var skyRoute = Environment.GetEnvironmentVariable("WYU_PACKAGE_G_SMOKE") == "1";
+        const ulong twilightTick = 35_500;
+        if (skyRoute && phase == "flight")
+            _environmentTick = twilightTick;
         var player = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
         if (phase is "flight" or "abort")
         {
             player = await CommitInitialSmokePoseAsync(terrain, player, token).ConfigureAwait(false);
-            var anchor = new PlanetVector(21, 4105, 16);
-            var center = FlightCoverageCenter(player.Position);
-            await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, terrain.View.Frame, token,
-                coverageCenter: center, supportCells: FlightSupportCells).ConfigureAwait(false);
-            if (!TryFlightPad(terrain, anchor, out var before, out _, out var blocked))
-                throw new InvalidOperationException($"Unedited comparison pad unavailable ({blocked}).");
-            if (!await EditAsync(terrain, renderHost.Active, player, new(21, 4105, 16), VolumeBrushOperation.Add,
-                    (ushort)ReferenceTerrainMaterial.OchreStone, token).ConfigureAwait(false))
-                throw new InvalidOperationException("The flight fixture could not edit its landing pad.");
-            await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, terrain.View.Frame, token,
-                coverageCenter: center, supportCells: FlightSupportCells).ConfigureAwait(false);
-            if (!TryFlightPad(terrain, anchor, out var after, out _, out blocked) || Length(after) - Length(before) < 0.5)
-                throw new InvalidOperationException($"The landing footprint did not move with the terrain edit ({blocked}).");
-            Console.WriteLine(FormattableString.Invariant(
-                $"WP11 FLIGHT PAD before={Length(before):R} edited={Length(after):R} revision={_published.TerrainRevision}"));
+            var anchor = skyRoute ? (PlanetVector?)null : new PlanetVector(21, 4105, 16);
+            if (skyRoute)
+            {
+                var twilight = Camera(terrain.View, player.Position, player.Heading);
+                if (twilight.Sky is null || twilight.Tint.X is <= 0.18f or >= 1f)
+                    throw new InvalidOperationException("The sky flight fixture did not start at twilight.");
+                Console.WriteLine(FormattableString.Invariant($"PACKAGE G twilight seed={Descriptor.Seed} tick={_environmentTick} tint={twilight.Tint.X:R}"));
+            }
+            else
+            {
+                var center = FlightCoverageCenter(player.Position);
+                await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, terrain.View.Frame, token,
+                    coverageCenter: center, supportCells: FlightSupportCells).ConfigureAwait(false);
+                if (!TryFlightPad(terrain, anchor!.Value, out var before, out _, out var blocked))
+                    throw new InvalidOperationException($"Unedited comparison pad unavailable ({blocked}).");
+                if (!await EditAsync(terrain, renderHost.Active, player, new(21, 4105, 16), VolumeBrushOperation.Add,
+                        (ushort)ReferenceTerrainMaterial.OchreStone, token).ConfigureAwait(false))
+                    throw new InvalidOperationException("The flight fixture could not edit its landing pad.");
+                await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, terrain.View.Frame, token,
+                    coverageCenter: center, supportCells: FlightSupportCells).ConfigureAwait(false);
+                if (!TryFlightPad(terrain, anchor.Value, out var after, out _, out blocked) || Length(after) - Length(before) < 0.5)
+                    throw new InvalidOperationException($"The landing footprint did not move with the terrain edit ({blocked}).");
+                Console.WriteLine(FormattableString.Invariant(
+                    $"WP11 FLIGHT PAD before={Length(before):R} edited={Length(after):R} revision={_published.TerrainRevision}"));
+            }
             RequireSmokeSave(await SaveAsync(terrain, token).ConfigureAwait(false), 1);
             var abort = phase == "abort";
             var flight = await FlyAsync(terrain, renderHost, player, anchor, true, token, abortAtFar: abort).ConfigureAwait(false);
@@ -52,7 +66,8 @@ internal sealed partial class VolumeExploration
         var installed = phase == "resume-installed";
         if (checkpoint.Generation != (installed ? 3UL : 2UL) || checkpoint.Player != player ||
             ProceduralLanding.Read(checkpoint, out var decoded, out var environmentTick) != SaveGameValidation.Valid ||
-            decoded is not { } landed || environmentTick != ReferenceWeather.InitialTick + (ulong)landed.FlightTick + (installed ? 60UL : 0UL) ||
+            decoded is not { } landed || environmentTick != (skyRoute ? twilightTick : ReferenceWeather.InitialTick) +
+                (ulong)landed.FlightTick + (installed ? 60UL : 0UL) ||
             environmentTick != _environmentTick)
             throw new InvalidOperationException("Landed checkpoint differs from the current player or flight state.");
         var camera = Camera(terrain.View, player.Position, player.Heading);
@@ -74,7 +89,7 @@ internal sealed partial class VolumeExploration
             VerifyEnvironmentPayload(checkpoint, landed);
             using var lease = terrain.TryRead() ?? throw new InvalidOperationException("Missing restored terrain.");
             var outer = planet.Descriptor.SampleAt(Scale(Unit(landed.Foot), FlightBoundary + 1));
-            if (lease.TryReadDensity(outer, out _))
+            if (!skyRoute && lease.TryReadDensity(outer, out _))
                 throw new InvalidOperationException("The restore fixture must omit the upper flight corridor.");
         }
         var digest = ConfirmRestoredLanding(terrain, landed);
@@ -83,6 +98,9 @@ internal sealed partial class VolumeExploration
             $"WP11 LANDED generation={checkpoint.Generation} tick={landed.FlightTick} revision={landed.Revision} overlay={digest} craft={foot.X:R},{foot.Y:R},{foot.Z:R} player={player.Position.X:R},{player.Position.Y:R},{player.Position.Z:R}"));
         Console.WriteLine(FormattableString.Invariant(
             $"PACKAGE E LANDED tick={environmentTick} tint={camera.Tint.X:R} fog={camera.Fog?.MaxOpacity:R} band={camera.Fog?.StartDepthMeters:R},{camera.Fog?.EndDepthMeters:R}"));
+        if (skyRoute && camera.Sky is { } sky)
+            Console.WriteLine(FormattableString.Invariant(
+                $"PACKAGE G landed seed={Descriptor.Seed} tick={environmentTick} sun={sky.SunDirection.Y:R},{sky.SunDirection.Z:R} eye={sky.EyeMeters.X:R},{sky.EyeMeters.Y:R},{sky.EyeMeters.Z:R}"));
     }
 
     private static void VerifyEnvironmentPayload(VolumeCheckpoint checkpoint, ProceduralLanding landed)

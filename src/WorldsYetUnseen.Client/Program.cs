@@ -12,7 +12,8 @@ internal static class Program
         if (args is ["--new-world"] || args is ["--planet-playtest", _] or ["--planet-playtest", _, "graphics" or "budget"] ||
             args is ["--volume-smoke", _, "warp" or "hardware"] ||
             args is ["--volume-save-smoke", "init" or "restore" or "interrupt" or "verify" or "protected", _] ||
-            args is ["--volume-flight-smoke", "flight" or "resume" or "abort" or "preflight" or "interrupt" or "interrupt-installed" or "resume-installed", _, "warp" or "hardware"])
+            args is ["--volume-flight-smoke", "flight" or "resume" or "abort" or "preflight" or "interrupt" or "interrupt-installed" or "resume-installed", _, "warp" or "hardware"] or
+                ["--volume-flight-smoke", "flight" or "resume", _, "warp" or "hardware", _])
             return await RunExplorationAsync(args).ConfigureAwait(false);
 
         string? diagnosticCase = null;
@@ -157,7 +158,13 @@ internal static class Program
                 GameHost.VerifyProtectedVolumeSmokeSlot(args[2]);
                 return 0;
             }
-            var warp = saveSmoke || scripted && args[^1] == "warp";
+            if (flightSmoke && args.Length == 5)
+            {
+                if (!ulong.TryParse(args[4], NumberStyles.None, CultureInfo.InvariantCulture, out var flightSeed))
+                    return 2;
+                seed = flightSeed;
+            }
+            var warp = saveSmoke || scripted && (flightSmoke ? args[3] : args[^1]) == "warp";
             await GameHost.RunExplorationAsync(seed, warp, diagnostics, stop.Token,
                 saveRoot: fixture is not null ? Path.Combine(fixture, "v2") : saveSmoke || flightSmoke ? args[2] : null,
                 saveSmoke: saveSmoke || flightSmoke ? args[1] : null, flightSmoke: flightSmoke)

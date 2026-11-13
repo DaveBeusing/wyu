@@ -223,17 +223,22 @@ internal static class ProceduralGlobe
         colors.Fill(0xff19eaffu);
     }
 
-    internal static RenderFrame Frame(ulong sequence, PlanetVector position, PlanetVector heading,
-        ReferenceAtmosphere? atmosphere = null)
+    internal const float FieldOfView = 1.05f;
+
+    internal static (Vector3 Forward, Vector3 Up) ViewBasis(PlanetVector position, PlanetVector heading)
     {
         var up = Vector3.Normalize(Float(position));
         var tangent = Float(heading) - up * Vector3.Dot(Float(heading), up);
         if (tangent.LengthSquared() < 0.01f)
             tangent = Vector3.Cross(up, MathF.Abs(up.Z) < 0.9f ? Vector3.UnitZ : Vector3.UnitX);
-        var forward = Vector3.Normalize(-up + Vector3.Normalize(tangent) * 0.65f);
-        return new(sequence, atmosphere?.Sky ?? Space, new RenderScene(Matrix4x4.Identity, atmosphere?.Tint ?? Vector4.One,
-            Matrix4x4.CreateLookTo(Float(position), forward, up), 1.05f, 1f, 10_000f));
+        return (Vector3.Normalize(-up + Vector3.Normalize(tangent) * 1.5f), up);
     }
+
+    internal static RenderFrame Frame(ulong sequence, VolumeCamera camera) =>
+        new(sequence, camera.Sky is not null || camera.Fog is not null ? camera.ClearColor : Space,
+            new RenderScene(Matrix4x4.Identity, camera.Tint,
+                Matrix4x4.CreateLookTo(Float(camera.Position), camera.Forward, camera.Up), FieldOfView, 1f, 10_000f))
+        { Sky = camera.Sky };
 
     internal static Vector3 Float(PlanetVector vector) => new((float)vector.X, (float)vector.Y, (float)vector.Z);
 }

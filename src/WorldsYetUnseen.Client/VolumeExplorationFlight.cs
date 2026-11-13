@@ -67,6 +67,8 @@ internal sealed partial class VolumeExploration
         }, token);
         var far = false;
         var usedFar = false;
+        var skySmoke = scripted && Environment.GetEnvironmentVariable("WYU_PACKAGE_G_SMOKE") == "1";
+        var orbitSkyChecked = false;
         var previousPhase = flight.Phase;
         using var returnCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
         FlightReturnTerrain? returnTerrain = null;
@@ -167,32 +169,38 @@ internal sealed partial class VolumeExploration
                     Math.Clamp(Stopwatch.GetElapsedTime(acceptedAt).TotalSeconds * 60, 0, 1);
                 var presentationTick = fraction == 1 ? tick : tick - 1;
                 var subTick = fraction == 1 ? 0 : fraction;
-                var eye = FlightEye(flight.State.Position);
-                var environment = Atmosphere(eye, presentationTick, subTick);
+                var camera = FlightCamera(terrain.View, flight.State.Position, player.Heading, presentationTick, subTick);
+                var orbit = ProceduralGlobe.Frame(sequence, camera);
                 if (scripted && _weather is not null)
                 {
-                    if (environment is not { } weather || (far && weather.FogOpacity != 0))
+                    if (camera.Fog is not { } fog || (far && fog.MaxOpacity != 0))
                         throw new InvalidOperationException("Flight weather did not fade at the orbit boundary.");
                     if (transition is not null)
                     {
-                        var near = FlightCamera(terrain.View, flight.State.Position, player.Heading, presentationTick, subTick);
-                        var orbit = ProceduralGlobe.Frame(sequence, flight.State.Position, player.Heading, environment);
-                        if (near.ClearColor != orbit.ClearColor || near.Tint != orbit.Scene!.Value.Tint)
+                        if (camera.ClearColor != orbit.ClearColor || camera.Tint != orbit.Scene!.Value.Tint ||
+                            camera.Sky != orbit.Sky)
                             throw new InvalidOperationException("Daylight changed at the renderer handoff.");
                     }
-                    if (flight.Phase == ProceduralFlightPhase.Landed && weather.FogOpacity <= 0)
+                    if (flight.Phase == ProceduralFlightPhase.Landed && fog.MaxOpacity <= 0)
                         throw new InvalidOperationException("Local fog did not return after descent.");
                 }
                 if (far)
-                    RequireFrame(renderer.TrySubmit(ProceduralGlobe.Frame(sequence, flight.State.Position, player.Heading,
-                        environment)));
+                    RequireFrame(renderer.TrySubmit(orbit));
                 else
-                    RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence,
-                        FlightCamera(terrain.View, flight.State.Position, player.Heading,
-                            presentationTick, subTick)));
+                    RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, camera));
                 if (scripted || flight.Phase == ProceduralFlightPhase.Landed)
                     await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
                         pauseWhileMinimized: true).ConfigureAwait(false);
+                if (skySmoke && (transition is not null || !orbitSkyChecked && flight.Phase == ProceduralFlightPhase.Orbit))
+                {
+                    var checkpoint = transition ?? "orbit";
+                    if (camera.Sky is not { } sky || !orbit.IsValid || sky != orbit.Sky ||
+                        (checkpoint == "orbit" && sky.EyeMeters.Length() <= sky.AtmosphereRadiusMeters))
+                        throw new InvalidOperationException($"Invalid sky at {checkpoint}.");
+                    orbitSkyChecked |= checkpoint == "orbit";
+                    Console.WriteLine(FormattableString.Invariant(
+                        $"PACKAGE G {checkpoint} seed={Descriptor.Seed} flightTick={flight.Tick} present={sequence} radius={sky.EyeMeters.Length():F3}"));
+                }
                 BiomeMeasurements.Write("orbit", frameStarted);
                 if (transition is not null)
                     BiomeMeasurements.Write(transition, transitionStarted);
@@ -393,11 +401,10 @@ internal sealed partial class VolumeExploration
     private VolumeCamera FlightCamera(VolumeViewIdentity view, PlanetVector position, PlanetVector heading, ulong tick,
         double fraction = 0)
     {
-        var up = Vector3.Normalize(ProceduralGlobe.Float(position));
-        var forward = Vector3.Normalize(-up + ProceduralGlobe.Float(heading) * 0.35f);
+        var (forward, up) = ProceduralGlobe.ViewBasis(position, heading);
         var eye = FlightEye(position);
-        return ApplyAtmosphere(new(view, eye, forward, up, 0.95f, 0.08f, 210, Vector4.One, Sky),
-            Atmosphere(eye, tick, fraction));
+        return ApplySky(ApplyAtmosphere(new(view, eye, forward, up, ProceduralGlobe.FieldOfView,
+            0.08f, 210, Vector4.One, Sky), Atmosphere(eye, tick, fraction)), tick, fraction);
     }
 
     private static void FlightTrace(string phase, ProceduralFlight flight, ulong revision, string digest)
