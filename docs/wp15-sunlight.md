@@ -197,3 +197,35 @@ budget passed in every pair and phase.
 | Midday | 0.1584 / 0.1612 | +6.22% / +5.26% |
 | Low sun | 0.1578 / 0.1603 | +6.37% / +6.31% |
 | Quick turn | 0.1658 / 0.1686 | +6.72% / +6.79% |
+
+### Queue and fence attribution in the existing trace
+
+Joining hardware-queue rundown to context and device rundown identifies
+kernel queue 18446609420371416192 as DWM PID 2616, node 0, on the same
+adapter and node as WYU's render context. Queue 18446609420346973520
+belongs to CSRSS PID 1848, also on node 0. The DMA submit event can carry
+a different PID from the device owner. The earlier ChatGPT.exe
+observation describes the submit event, while DWM owns that queue.
+
+| Replay / sequence | GPU frame / terrain (ms) | Nearby control frame / terrain (ms) | Queue evidence |
+| --- | ---: | ---: | --- |
+| 2-on / 480 | 20.025 / 0.273 | 477: 2.689 / 0.262 | DWM node-0 DMA progress fence 48928781 starts 0.548 ms before frame begin and completes 18.786 ms into the frame. |
+| 5-off / 110 | 8.635 / 6.176 | 108: 2.560 / 0.107 | DWM progress fences 48946777 and 48946784 complete within the terrain timestamp window. |
+| 5-on / 57 | 9.408 / 0.277 | 56: 2.837 / 0.261 | DWM progress fence 48948828 completes inside the frame, before terrain begins. |
+
+For 5-off/110, the DWM wait packet on node 0 uses DxgSyncObject
+18446609422247064512 at value 1950167. It retires at QPC 3424415444078.
+The WYU present-side wait uses DxgSyncObject 18446609421330338544 at
+value 110 and retires at QPC 3424415464252, after the GPU frame-end
+marker. The WYU present-side wait on 2-on/480 similarly retires after
+the frame-end marker. These packets use distinct sync objects. The
+preceding normal 2-on/477 frame also has the same three WYU GPU wait
+contexts and the same wait-object pointer as the slow frames. The
+captured wait event does not expose per-object target values for that
+array. No matching DWM-to-WYU wait/signal edge was established.
+
+The shared-node DWM queue is the recurring overlap in these examples.
+This supports a scheduling-contention hypothesis for both variants.
+The ETL does not show that the DWM packet occupied the engine for its
+entire timestamp window or establish which dependency delayed WYU.
+No additional replay or renderer change was made for this trace review.
