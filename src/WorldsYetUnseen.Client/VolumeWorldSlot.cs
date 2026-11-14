@@ -18,9 +18,20 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
     internal bool ReadOnly { get; private set; }
     internal bool HasPendingWrite => _retry;
 
-    internal const string DefaultProfileName = CavePlanet.ConnectedName;
+    internal static WorldProfile DefaultProfile => WorldProfile.Connected;
 
-    internal static VolumeWorldSlot CreateDefault(string root, ulong seed) => Create(root, seed, connected: true);
+    internal enum WorldProfile { Reference, Cave, Connected }
+
+    internal static string ProfileName(WorldProfile profile) => profile switch
+    {
+        WorldProfile.Reference => ReferencePlanet.DisplayName,
+        WorldProfile.Cave => CavePlanet.Name,
+        WorldProfile.Connected => CavePlanet.ConnectedName,
+        _ => throw new ArgumentOutOfRangeException(nameof(profile)),
+    };
+
+    internal static VolumeWorldSlot Create(string root, ulong seed, WorldProfile profile) =>
+        Create(root, seed, cave: profile == WorldProfile.Cave, connected: profile == WorldProfile.Connected);
 
     internal static ulong? ReadManifestSeed(string root, Guid id)
     {

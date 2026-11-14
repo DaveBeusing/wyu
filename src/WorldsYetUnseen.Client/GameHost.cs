@@ -172,23 +172,30 @@ internal static partial class GameHost
                     saveDirectory ??= Path.Combine(data, "WP07");
                     alphaDiagnostics?.Enter("SaveLoad");
                     new PrototypeCaption().Update("WYU | Checking save slot");
-                    prototypeSave = await PrototypeSave.OpenAsync(saveDirectory, runtime.RuntimeOwnership, cancellationToken,
-                            beforeLoad: alphaDiagnostics?.BeforeSaveLoad)
-                        .ConfigureAwait(false);
+                    var normalSave = saveDirectory;
+                    var testSave = Path.Combine(FreeTestWorldRoot(), "RescueMission");
+                    Task<PrototypeSave> LoadMission(bool isolated) => PrototypeSave.OpenAsync(
+                        isolated ? testSave : normalSave, runtime.RuntimeOwnership, cancellationToken,
+                        beforeLoad: alphaDiagnostics?.BeforeSaveLoad);
+                    if (alphaDiagnostics?.BeforeSaveLoad is not null)
+                        await LoadMission(false).ConfigureAwait(false);
                     new PrototypeCaption().Update("Worlds Yet Unseen");
                     alphaDiagnostics?.Enter("StartMenu");
-                    var startMenu = new AlphaStartMenu(window, prototypeSave, new AlphaSettingsStore(settingsDirectory!),
+                    var startMenu = new AlphaStartMenu(window, LoadMission, new AlphaSettingsStore(settingsDirectory!),
                         overlay!, performance!);
                     startGame = await startMenu.ChooseAsync(cancellationToken).ConfigureAwait(false);
+                    prototypeSave = startMenu.MissionSave;
+                    if (startMenu.TestMissionRequested)
+                        saveDirectory = testSave;
                     launchNewWorld = startMenu.NewWorldRequested;
                     launchFreeTestWorld = startMenu.FreeTestWorldRequested;
                     overlay!.Menu = null;
                     settings = startMenu.Settings;
-                    launchFlight = startGame && prototypeSave.Checkpoint is { Progress.BeaconOnline: true };
+                    launchFlight = startGame && prototypeSave?.Checkpoint is { Progress.BeaconOnline: true };
                     startGame &= !launchFlight;
                     if (startGame)
                     {
-                        var checkpoint = prototypeSave.Checkpoint;
+                        var checkpoint = prototypeSave!.Checkpoint;
                         walkable = new WalkableScene(runtime.RuntimeOwnership, checkpoint?.Pose ?? PrototypeWorld.Spawn,
                             checkpoint is { } selected ? PrototypeWorld.EffectiveTerrain(selected.Progress) : [],
                             snapshot: PrototypeWorld.Snapshot, bounds: PrototypeWorld.Recipe.Bounds, colorPrototype: true);

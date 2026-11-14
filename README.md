@@ -17,7 +17,8 @@ supported checkpoint during construction or after landing.
 
 ## Free Test World
 
-Choose **Free Test World** from the main menu. **New Test World** uses the
+Choose **Free Test World** from the main menu, then **Planet worlds** or an
+isolated rescue mission. **New Test World** uses the
 build's default world profile. Accept seed 42 or enter your own. Choose
 **Continue** there to reopen a test slot. Test saves are stored separately
 from the normal worlds.

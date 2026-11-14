@@ -5,7 +5,7 @@ using static WorldsYetUnseen.Client.PrototypeMenu;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave save, AlphaSettingsStore store,
+internal sealed class AlphaStartMenu(WindowsHostModule window, Func<bool, Task<PrototypeSave>> loadMission, AlphaSettingsStore store,
     AlphaOverlay overlay, AlphaPerformance performance)
 {
     private static readonly string[] Guidance =
@@ -19,6 +19,8 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
     private string? _notice;
     internal AlphaSettings Settings { get; private set; } = AlphaSettings.Defaults;
     internal bool FreeTestWorldRequested { get; private set; }
+    internal PrototypeSave? MissionSave { get; private set; }
+    internal bool TestMissionRequested { get; private set; }
     internal bool NewWorldRequested { get; private set; }
 
     internal async Task<bool> ChooseAsync(CancellationToken cancellationToken)
@@ -31,14 +33,12 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
             AlphaWindowSize.TryApply(Settings.Size);
         }
 
-        var canStart = save.InitialLoad.Status == SaveSlotStatus.Empty;
-        var canContinue = save.Checkpoint is not null;
-        var selected = canStart ? 0 : canContinue ? 1 : 2;
+        var selected = 0;
         var visible = true;
         while (IsOpen)
         {
             overlay.Menu = visible
-                ? $"WYU | {Option(0, "Start test mission", canStart)} | {Option(1, "Continue", canContinue)} | " +
+                ? $"WYU | {Option(0, "Start test mission", MissionSave is null || CanStart())} | {Option(1, "Continue", MissionSave is null || MissionSave.Checkpoint is not null)} | " +
                   $"{Option(2, "Settings")} | {Option(3, "Controls")} | {Option(4, "New World")} | {Option(5, "Free Test World")} | {Option(6, "Exit")} | {_notice ?? SlotStatus()} | Arrows / Enter"
                 : null;
             var input = await ReadAsync(cancellationToken).ConfigureAwait(false);
@@ -55,11 +55,18 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
 
             switch (selected)
             {
-                case 0 when canStart:
-                    await ShowGuidanceAsync(cancellationToken).ConfigureAwait(false);
-                    return IsOpen;
-                case 1 when canContinue:
-                    return true;
+                case 0:
+                case 1:
+                    MissionSave ??= await loadMission(false).ConfigureAwait(false);
+                    if (selected == 1 && MissionSave.Checkpoint is not null)
+                        return true;
+                    if (selected == 0 && CanStart())
+                    {
+                        await ShowGuidanceAsync(cancellationToken).ConfigureAwait(false);
+                        return IsOpen;
+                    }
+                    _notice = SlotStatus();
+                    break;
                 case 2:
                     await EditSettingsAsync(cancellationToken).ConfigureAwait(false);
                     break;
@@ -70,8 +77,24 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
                     NewWorldRequested = true;
                     return false;
                 case 5:
-                    FreeTestWorldRequested = true;
-                    return false;
+                    var choice = await ChooseTestModeAsync(cancellationToken).ConfigureAwait(false);
+                    if (choice == 0)
+                    {
+                        FreeTestWorldRequested = true;
+                        return false;
+                    }
+                    if (choice is 1 or 2)
+                    {
+                        MissionSave = await loadMission(true).ConfigureAwait(false);
+                        if ((choice == 1 && CanStart()) || (choice == 2 && MissionSave.Checkpoint is not null))
+                        {
+                            TestMissionRequested = true;
+                            return true;
+                        }
+                        _notice = SlotStatus();
+                        MissionSave = null;
+                    }
+                    break;
                 case 6:
                     return false;
             }
@@ -80,13 +103,33 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, PrototypeSave sav
 
         string Option(int index, string label, bool enabled = true) =>
             $"{(index == selected ? "> " : "")}{label}{(enabled ? "" : " (unavailable)")}";
-        string SlotStatus() => canStart ? "Empty slot" : save.Checkpoint is { Progress.BeaconOnline: true }
+        bool CanStart() => MissionSave?.InitialLoad.Status == SaveSlotStatus.Empty;
+
+        string SlotStatus() => MissionSave is not { } save ? "Select a mode" :
+            CanStart() ? "Empty slot" : save.Checkpoint is { Progress.BeaconOnline: true }
             ? "Rescue signal sent; Continue to flight"
-            : canContinue
+            : save.Checkpoint is not null
             ? save.InitialLoad.Recovery is { } recovery
                 ? $"Recovered checkpoint {save.Generation} ({recovery.FileName})"
                 : $"Checkpoint {save.Generation}"
             : $"Cannot load slot: {save.InitialLoad.Status}";
+    }
+
+    private async Task<int> ChooseTestModeAsync(CancellationToken token)
+    {
+        var selected = 0;
+        var options = new[] { "Planet worlds", "Start isolated rescue mission", "Continue isolated rescue mission" };
+        while (IsOpen)
+        {
+            overlay.Menu = $"Free Test World\n> {options[selected]}\nUp / Down / Enter | Esc to return";
+            var input = await ReadAsync(token).ConfigureAwait(false);
+            if (Pressed(input, InputControl.Escape))
+                break;
+            selected = Navigate(input, selected, options.Length);
+            if (Pressed(input, InputControl.Enter))
+                return selected;
+        }
+        return -1;
     }
 
     private bool IsOpen => window.Read().Phase == HostWindowPhase.Open;

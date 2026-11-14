@@ -621,7 +621,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     }
 
     private VolumeCamera ApplySunlight(VolumeCamera camera, ulong tick, double fraction) =>
-        _weather is not null && (ReferenceSunlight.Enabled || freeTestWorld) ? ReferenceSunlight.Apply(camera, tick, fraction) : camera;
+        _weather is not null && ReferenceSunlight.Enabled ? ReferenceSunlight.Apply(camera, tick, fraction) : camera;
 
     private VolumeCamera ApplySky(VolumeCamera camera, ulong tick, double fraction) =>
         reference is not null && ReferenceSky.Enabled ? camera with
