@@ -18,6 +18,25 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
     internal bool ReadOnly { get; private set; }
     internal bool HasPendingWrite => _retry;
 
+    internal const string DefaultProfileName = CavePlanet.ConnectedName;
+
+    internal static VolumeWorldSlot CreateDefault(string root, ulong seed) => Create(root, seed, connected: true);
+
+    internal static ulong? ReadManifestSeed(string root, Guid id)
+    {
+        try
+        {
+            using var manifest = new FileStream(ManifestPath(root, id), FileMode.Open, FileAccess.Read, FileShare.Read);
+            Span<byte> prefix = stackalloc byte[16];
+            if (manifest.Length < prefix.Length)
+                return null;
+            manifest.ReadExactly(prefix);
+            return prefix[..6].SequenceEqual("WYUVOL"u8) ? BinaryPrimitives.ReadUInt64LittleEndian(prefix[8..]) : null;
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
     internal static VolumeWorldSlot Create(string root, ulong seed, bool cave = false, bool connected = false)
     {
         Directory.CreateDirectory(root);
@@ -57,7 +76,7 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
             if ((!cave && !bytes[..8].SequenceEqual("WYUVOL01"u8)) || new Guid(bytes[16..]) == Guid.Empty)
                 return null;
             var seed = BinaryPrimitives.ReadUInt64LittleEndian(bytes[8..]);
-            if (cave && seed != CavePlanet.Seed)
+            if (cave && !connected && seed != CavePlanet.Seed)
                 return null;
             var geology = cave ? new CavePlanet(id, seed, connected) : null;
             var planet = cave ? null : new ReferencePlanet(id, seed);

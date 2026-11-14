@@ -77,17 +77,18 @@ internal static partial class GameHost
         if (mode == HostMode.Prototype)
             settingsDirectory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "WorldsYetUnseen", "Alpha");
-        var (flightDirectory, restoreFocus, newWorld) = await RunStageAsync(mode, saveDirectory, settingsDirectory,
+        var (flightDirectory, restoreFocus, newWorld, freeTestWorld) = await RunStageAsync(mode, saveDirectory, settingsDirectory,
             false, false, diagnostics, cancellationToken)
             .ConfigureAwait(false);
-        if (newWorld && !cancellationToken.IsCancellationRequested)
-            await RunExplorationAsync(null, false, diagnostics, cancellationToken, settingsDirectory).ConfigureAwait(false);
+        if ((newWorld || freeTestWorld) && !cancellationToken.IsCancellationRequested)
+            await RunExplorationAsync(null, false, diagnostics, cancellationToken, settingsDirectory,
+                freeTestWorld: freeTestWorld).ConfigureAwait(false);
         else if (flightDirectory is not null && !cancellationToken.IsCancellationRequested)
             await RunStageAsync(HostMode.Flight, flightDirectory, settingsDirectory, true, restoreFocus, diagnostics, cancellationToken)
                 .ConfigureAwait(false);
     }
 
-    private static async Task<(string? FlightDirectory, bool RestoreFocus, bool NewWorld)> RunStageAsync(HostMode mode, string? saveDirectory,
+    private static async Task<(string? FlightDirectory, bool RestoreFocus, bool NewWorld, bool FreeTestWorld)> RunStageAsync(HostMode mode, string? saveDirectory,
         string? settingsDirectory, bool alphaFlight, bool restoreFocus, AlphaDiagnostics? alphaDiagnostics,
         CancellationToken hostCancellation)
     {
@@ -113,6 +114,7 @@ internal static partial class GameHost
         var startGame = true;
         var launchFlight = false;
         var launchNewWorld = false;
+        var launchFreeTestWorld = false;
         var handoffFocus = false;
         WalkableScene? walkable = mode switch
         {
@@ -179,6 +181,7 @@ internal static partial class GameHost
                         overlay!, performance!);
                     startGame = await startMenu.ChooseAsync(cancellationToken).ConfigureAwait(false);
                     launchNewWorld = startMenu.NewWorldRequested;
+                    launchFreeTestWorld = startMenu.FreeTestWorldRequested;
                     overlay!.Menu = null;
                     settings = startMenu.Settings;
                     launchFlight = startGame && prototypeSave.Checkpoint is { Progress.BeaconOnline: true };
@@ -265,6 +268,7 @@ internal static partial class GameHost
             {
                 launchFlight = false;
                 launchNewWorld = false;
+                launchFreeTestWorld = false;
                 alphaDiagnostics?.Write("window-close");
             }
         }
@@ -299,7 +303,7 @@ internal static partial class GameHost
                 requireNvidia: mode == HostMode.PlanetSmoke || IsFlightSmoke(mode));
         if (success is not null)
             Console.WriteLine(success);
-        return (launchFlight ? Path.Combine(saveDirectory!, $"flight-{prototypeSave!.Lineage:N}") : null, handoffFocus, launchNewWorld);
+        return (launchFlight ? Path.Combine(saveDirectory!, $"flight-{prototypeSave!.Lineage:N}") : null, handoffFocus, launchNewWorld, launchFreeTestWorld);
     }
 
     private static async Task<bool> WatchWindowCloseAsync(WindowsHostModule window, CancellationTokenSource stage)

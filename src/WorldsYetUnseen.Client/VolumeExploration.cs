@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
@@ -16,7 +17,8 @@ namespace WorldsYetUnseen.Client;
 internal sealed class PlanetLoadException(string message) : InvalidOperationException(message);
 
 internal sealed partial class VolumeExploration(WorldSafetyPorts world, ReferencePlanet? reference, WindowsHostModule window,
-    AlphaOverlay? overlay, PrototypeMouseLook? mouse, VolumeWorldSlot? slot, AlphaDiagnostics? diagnostics)
+    AlphaOverlay? overlay, PrototypeMouseLook? mouse, VolumeWorldSlot? slot, AlphaDiagnostics? diagnostics,
+    bool freeTestWorld = false)
 {
     private long MeshBytes => cave is null ? 10 * 1024 * 1024 : 32 * 1024 * 1024;
     private long NativeBytes => cave is null ? 16 * 1024 * 1024 : 32 * 1024 * 1024;
@@ -35,6 +37,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private ulong _sequence;
     private float _yaw, _pitch = -0.2f;
     private bool _debug;
+    private bool _testMenu;
+    private int _testAction;
+    private bool? _testFog;
+    private readonly string? _testBuild = freeTestWorld ? typeof(VolumeExploration).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown" : null;
     private VolumeStreamingSelection? _selection;
     private VolumePublicationInfo _published;
     private int _transitions, _views, _windows, _fineBricks;
@@ -61,13 +68,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     }
 
     internal static async Task<ulong?> ChooseSeedAsync(WindowsHostModule window, AlphaOverlay overlay,
-        CancellationToken token)
+        CancellationToken token, string profile = ReferencePlanet.DisplayName, ulong? defaultSeed = null)
     {
         var seed = "";
         string? error = null;
         while (true)
         {
-            overlay.Menu = $"WYU\n\nNew World\n{ReferencePlanet.DisplayName}\n\nSeed\n{(seed.Length == 0 ? "Random" : seed)}\n\nType up to 20 digits\nEnter to explore\nBackspace to edit\nEsc to exit\n\n{error}";
+            overlay.Menu = $"WYU\n\nNew World\n{profile}\n\nSeed\n{(seed.Length == 0 ? defaultSeed?.ToString(CultureInfo.InvariantCulture) ?? "Random" : seed)}\n\nType up to 20 digits\nEnter to explore\nBackspace to edit\nEsc to exit\n\n{error}";
             await Task.Delay(16, token).ConfigureAwait(false);
             foreach (var item in window.Capture().Events)
             {
@@ -85,7 +92,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 if (key is not (InputControl.Enter or InputControl.NumpadEnter))
                     continue;
                 if (seed.Length == 0)
-                    return BitConverter.ToUInt64(RandomNumberGenerator.GetBytes(sizeof(ulong)));
+                    return defaultSeed ?? BitConverter.ToUInt64(RandomNumberGenerator.GetBytes(sizeof(ulong)));
                 if (ulong.TryParse(seed, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed))
                     return parsed;
                 error = "Seed must be between 0 and 18446744073709551615.";
@@ -163,6 +170,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             Notice("WASD to explore | E mine | Q fill\nF5 save | F10 save and quit");
         else if (slot is not null)
             Notice("E remove | Q add | 1/2 material\nF5 save | F6 flight | F10 save and quit");
+        if (freeTestWorld)
+            Notice($"{PlanetName} | F1 diagnostics | F2 test actions\nE remove | Q fill | F5 save | F6 flight");
         var start = state.Position;
         if (placementGate is not null)
             VerifyPropCollisionCuts(start);
@@ -182,7 +191,14 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         {
             var input = window.Capture();
             var renderer = renderHost.Active;
-            if (!scripted && PrototypeMenu.Pressed(input, InputControl.Escape))
+            if (freeTestWorld && PrototypeMenu.Pressed(input, InputControl.F2))
+            {
+                _testMenu = !_testMenu;
+                if (!_testMenu && overlay is not null)
+                    overlay.Menu = null;
+                previousFrame = Stopwatch.GetTimestamp();
+            }
+            if (!scripted && !_testMenu && PrototypeMenu.Pressed(input, InputControl.Escape))
                 return;
             if (PrototypeMenu.Pressed(input, InputControl.F1))
                 _debug = !_debug;
@@ -193,9 +209,15 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 return;
             var drawable = RequireHealthyRenderer(rendered).Surface == RenderSurfaceState.Drawable;
             var focused = window.Read().Focused && !input.TransitionLoss;
-            mouse?.Update(drawable && focused, ref _yaw, ref _pitch);
+            mouse?.Update(drawable && focused && !_testMenu, ref _yaw, ref _pitch);
             if (!drawable || (!scripted && !focused))
                 continue;
+
+            if (_testMenu)
+            {
+                await HandleTestMenuAsync(input, token).ConfigureAwait(false);
+                continue;
+            }
 
             var now = Stopwatch.GetTimestamp();
             var frameTime = Stopwatch.GetElapsedTime(previousFrame, now);
@@ -306,7 +328,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 overlay.Menu = ActiveCaveClimbHint ?? CurrentNotice ?? (prepared is null ? $"Movement held\n{status}" : cave is null ? null : CaveHint(terrain, state));
                 var statistics = terrain.Statistics;
                 overlay.Performance = _debug ? FormattableString.Invariant(
-                    $"Seed {Descriptor.Seed} / gen {Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions / LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} / GPU {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms / {status}\nX {state.Position.X:F1} Y {state.Position.Y:F1} Z {state.Position.Z:F1} / origin {_published.View.Frame.Revision}") : null;
+                    $"{(_testBuild is null ? "" : $"Test World | {PlanetName}\nBuild {_testBuild}\nF2 test actions\n")}Seed {Descriptor.Seed} / gen {Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions / LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} / GPU {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms / {status}\nX {state.Position.X:F1} Y {state.Position.Y:F1} Z {state.Position.Z:F1} / origin {_published.View.Frame.Revision}") : null;
             }
             if (scripted && steps % 240 == 0)
                 WriteCheckpoint("route", state);
@@ -583,7 +605,14 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private static PlanetVector FlightEye(PlanetVector position) => Add(position, Scale(Unit(position), 2.6));
 
     private ReferenceAtmosphere? Atmosphere(PlanetVector position, ulong tick, double fraction = 0) =>
-        _weather?.Evaluate(position, tick, fraction);
+        _weather?.Evaluate(position, tick, fraction) is { } weather
+            ? _testFog switch
+            {
+                true => weather with { FogOpacity = 0.9f * (float)Math.Clamp((72 - (Length(position) - Descriptor.RadiusMeters)) / 40, 0, 1), FogStart = 24, FogEnd = 128 },
+                false => weather with { FogOpacity = 0 },
+                null => weather,
+            }
+            : null;
 
     private VolumeCamera ApplyNearEnvironment(VolumeCamera camera, ulong tick, double fraction)
     {
@@ -592,7 +621,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     }
 
     private VolumeCamera ApplySunlight(VolumeCamera camera, ulong tick, double fraction) =>
-        _weather is not null && ReferenceSunlight.Enabled ? ReferenceSunlight.Apply(camera, tick, fraction) : camera;
+        _weather is not null && (ReferenceSunlight.Enabled || freeTestWorld) ? ReferenceSunlight.Apply(camera, tick, fraction) : camera;
 
     private VolumeCamera ApplySky(VolumeCamera camera, ulong tick, double fraction) =>
         reference is not null && ReferenceSky.Enabled ? camera with
@@ -798,4 +827,81 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     }
 
     private sealed record ExplorationObserver(WorldId World) : IWorldObserverState;
+
+    private static readonly string[] WeatherTestActions =
+        ["Daylight", "Night", "Clear weather", "Dense fog", "Regional weather"];
+    private static readonly string[] CaveTestActions = ["Grant 16 Ember ore"];
+
+    private async Task HandleTestMenuAsync(InputSnapshot input, CancellationToken token)
+    {
+        if (PrototypeMenu.Pressed(input, InputControl.Escape))
+        {
+            _testMenu = false;
+            if (overlay is not null)
+                overlay.Menu = null;
+            return;
+        }
+
+        // Build the list only while the menu is open. Profiles expose the features their live paths support.
+        var actions = (_weather is not null, cave is not null) switch
+        {
+            (true, _) => WeatherTestActions,
+            (_, true) => CaveTestActions,
+            _ => Array.Empty<string>(),
+        };
+        if (actions.Length > 0)
+        {
+            if (PrototypeMenu.Pressed(input, InputControl.Up))
+                _testAction = (_testAction + actions.Length - 1) % actions.Length;
+            if (PrototypeMenu.Pressed(input, InputControl.Down))
+                _testAction = (_testAction + 1) % actions.Length;
+            if (PrototypeMenu.Pressed(input, InputControl.Enter))
+                await ApplyTestActionAsync(token).ConfigureAwait(false);
+        }
+
+        if (overlay is not null)
+        {
+            var profileHelp = cave is not null
+                ? "Choose Far Horizon for time, weather, vegetation and lighting."
+                : "Choose Ember Caves or Ember Ridges for cave mining and ore.";
+            var selection = actions.Length == 0 ? "No setup actions available." : $"> {actions[_testAction]}";
+            overlay.Menu = $"Free Test World | {PlanetName}\n{selection}\n{CurrentNotice}\n{profileHelp}\nUp / Down / Enter | F2 or Esc to resume";
+        }
+    }
+
+    private async Task ApplyTestActionAsync(CancellationToken token)
+    {
+        if (_weather is not null)
+        {
+            switch (_testAction)
+            {
+                case 0: _environmentTick = ReferenceWeather.InitialTick; break;
+                case 1: _environmentTick = ReferenceWeather.InitialTick + 18_000; break;
+                case 2: _testFog = false; break;
+                case 3: _testFog = true; break;
+                case 4: _testFog = null; break;
+            }
+            return;
+        }
+
+        if (slot?.ReadOnly != false || _ports.Committed.Read().Root is not VolumeWorldRoot { State: CaveInventory inventory } root ||
+            inventory.Ore > int.MaxValue - 16 || inventory.OreInventoryRevision == ulong.MaxValue)
+        {
+            Notice("Ore grant unavailable.");
+            return;
+        }
+
+        await BeginAsync(token).ConfigureAwait(false);
+        var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
+        var pending = world.State.Read().PendingFaultGeneration;
+        var grant = inventory with { Ore = inventory.Ore + 16, OreInventoryRevision = inventory.OreInventoryRevision + 1 };
+        var prepared = _ports.Preparation.TryPrepare(new BarrierPublicationDraft(commit, root.WithState(grant), pending, [])).Publication;
+        if (prepared is null)
+        {
+            Finish(commit);
+            Notice("Ore grant held.");
+            return;
+        }
+        Notice(Finish(commit, prepared).Status == BarrierStatus.Committed ? $"Inventory: {CaveOre} ore" : "Ore grant held.");
+    }
 }
