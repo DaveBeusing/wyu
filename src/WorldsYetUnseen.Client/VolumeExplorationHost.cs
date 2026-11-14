@@ -99,7 +99,10 @@ internal static partial class GameHost
             if (!scripted)
                 mouse = new PrototypeMouseLook(window, settings);
             var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics);
-            if (planet is not null && (!scripted || BiomeMeasurements.UseBiomes))
+            var propsSmoke = scripted && Environment.GetEnvironmentVariable("WYU_WP16_SMOKE") == "1";
+            if (planet is not null && (propsSmoke || !scripted && Environment.GetEnvironmentVariable("WYU_WP16") != "off"))
+                exploration.Props = renderHost.Props = new ReferenceProps(planet);
+            if (planet is not null && (!scripted || BiomeMeasurements.UseBiomes || propsSmoke))
                 renderHost.SetBiomes(new ReferenceBiomes(planet));
             if (planet is not null)
             {
@@ -145,6 +148,8 @@ internal static partial class GameHost
             mouse?.Dispose();
             overlay?.Dispose();
             slot?.Dispose();
+            if (renderHost.Props is { } props)
+                await props.StopAsync().ConfigureAwait(false);
             terrain?.Stop();
             renderer = renderHost.Current;
             if (renderer?.Read() is { } graphics &&
