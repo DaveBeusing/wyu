@@ -77,8 +77,8 @@ internal sealed partial class VolumeExploration
                 };
         }
         return below
-            ? FormattableString.Invariant($"Ember Caves | Ore {CaveOre}\n{_caveAim}\nE mine | Q fill\nF5 save | F10 save and quit\n{CaveExitHint(state)}")
-            : FormattableString.Invariant($"Ember Caves | Ore {CaveOre}\nCave mouth {Length(Subtract(CavePlanet.Entrance, state.Position)):F1} m\nFollow the ramp ahead | W to walk");
+            ? FormattableString.Invariant($"{PlanetName} | Ore {CaveOre}\n{_caveAim}\nE mine | Q fill\nF5 save | F10 save and quit\n{CaveExitHint(state)}")
+            : FormattableString.Invariant($"{PlanetName} | Ore {CaveOre}\nCave mouth {Length(Subtract(CavePlanet.Entrance, state.Position)):F1} m\nFollow the ramp ahead | W to walk");
     }
 
     private static string CaveExitHint(PlanetWalkState state) =>
@@ -100,9 +100,15 @@ internal sealed partial class VolumeExploration
         return draft;
     }
 
-    internal async Task RunCaveSmokeAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
+    internal async Task RunCaveSmokeAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost,
         string phase, CancellationToken token)
     {
+        var renderer = renderHost.Active;
+        if (Connected)
+        {
+            phase = phase[3..];
+
+        }
         var state = await OpenTerrainAsync(terrain, renderer, token).ConfigureAwait(false);
         if (phase == "init")
         {
@@ -148,6 +154,8 @@ internal sealed partial class VolumeExploration
         if (checkpoint.Generation != 1 || checkpoint.Player != state || checkpoint.TerrainRevision != _published.TerrainRevision ||
             CaveOre <= 0 || !HasCaveRoof(terrain, state))
             throw new InvalidOperationException("The saved cave inventory, revision or underground pose did not restore.");
+        if (Connected && IsConfirmedLaunchSurface(terrain, state.Position))
+            throw new InvalidOperationException("An underground V3 checkpoint was accepted for takeoff.");
         var eye = Camera(terrain.View, state.Position, state.Heading).Position;
         if (Length(eye) >= CavePlanet.Radius || !lease.TryReadDensity(Descriptor.SampleAt(eye), out var caveAir) || caveAir <= 0)
             throw new InvalidOperationException("The checkpoint is not inside generated air below the surface.");
@@ -214,9 +222,84 @@ internal sealed partial class VolumeExploration
                 Camera(terrain.View, state.Position, state.Heading)));
             await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
             Console.WriteLine(FormattableString.Invariant($"WP12 cave reached supported surface: {state.Position.X:R},{state.Position.Y:R},{state.Position.Z:R}"));
+            if (Connected)
+            {
+                var landing = await FlyAsync(terrain, renderHost, state, null, scripted: true, token).ConfigureAwait(false);
+                if (landing.Quit || CaveOre <= 0 || _published.TerrainRevision != checkpoint.TerrainRevision)
+                    throw new InvalidOperationException("V3 flight did not retain the edited cave and inventory.");
+                Console.WriteLine("PASS: WP17 V3 orbit and return retained cave edits and ore.");
+
+            }
         }
     }
 
+    internal async Task VerifyConnectedProfilesAsync(VolumeStreamingCoordinator terrain,
+        Groundwork.Rendering.RenderMeshPair globe, CancellationToken token)
+    {
+        var field = cave!.Field;
+        var points = new (PlanetVector Direction, double Height)[3];
+        FindFeatures(globe.First.Mesh.Positions);
+        FindFeatures(globe.Second.Mesh.Positions[..^4]); // Omit the landing marker.
+        string[] names = ["ridge", "main", "tributary"];
+        for (var i = 0; i < names.Length; i++)
+        {
+            var (direction, height) = points[i];
+            if (Math.Abs(height) < 0.4)
+                throw new InvalidOperationException($"The generated orbit mesh does not resolve the V3 {names[i]}.");
+            var position = Scale(direction, Descriptor.RadiusMeters);
+            var axis = Math.Abs(direction.X) < 0.8 ? East : new PlanetVector(0, 1, 0);
+            var heading = Unit(Subtract(axis, Scale(direction, Dot(axis, direction))));
+            var selection = SelectTerrain(position, heading);
+            var frame = PlanetLocalFrame.Create(position);
+            if (frame.Revision <= terrain.View.Frame.Revision && !terrain.View.Frame.TryRebase(position, out frame))
+                throw new InvalidOperationException("Could not rebase the profile fixture.");
+            var view = terrain.ChangeView(frame, terrain.View.RendererEpoch);
+            if (!terrain.ConfirmMask(view))
+                throw new InvalidOperationException("Could not confirm the profile fixture mask.");
+            var revision = i == 0 ? 0UL : 1UL;
+            var admission = terrain.TryStage(VolumeWorkClass.Movement, selection, revision, 1, MeshBytes,
+                Charge(selection), Field, out var work);
+            if (admission != VolumeAdmission.Accepted || work is null)
+                throw TerrainAdmissionFailure(admission);
+            using var ownedWork = work;
+            if (!await ExecuteTerrainAsync(work, token).ConfigureAwait(false))
+                throw new InvalidOperationException("Could not generate the near profile mesh.");
+            await BeginAsync(token).ConfigureAwait(false);
+            var candidates = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
+            var prepared = terrain.TryPreparePublication(work.Generation, candidates, [])
+                ?? throw new InvalidOperationException("Could not prepare publication of the near profile mesh.");
+            if (Finish(candidates, prepared).Status != BarrierStatus.Committed)
+                throw new InvalidOperationException("Could not publish the near profile mesh.");
+            Drain(terrain);
+            using var lease = terrain.TryRead() ?? throw new InvalidOperationException("Missing published near terrain.");
+            var hits = new VolumeRayHit[8];
+            var ray = lease.Raycast(Add(position, Scale(direction, 6)), Add(position, Scale(direction, -6)), hits, CaveQueries);
+            if (ray.Status != VolumeQueryStatus.Contact || ray.Count == 0)
+                throw new InvalidOperationException($"Published near mesh did not resolve the V3 {names[i]} ({ray.Status}).");
+            var near = Length(hits[0].Position) - Descriptor.RadiusMeters;
+            if (Math.Sign(near) != Math.Sign(height) || Math.Abs(near - height) > 0.12)
+                throw new InvalidOperationException($"V3 {names[i]} mesh height mismatch: {near:R} / {height:R}.");
+            Console.WriteLine(FormattableString.Invariant($"WP17 mesh profile {names[i]}: near={near:F4} m orbit={height:F4} m."));
+        }
+
+        void FindFeatures(ReadOnlySpan<Vector3> vertices)
+        {
+            foreach (var vertex in vertices)
+            {
+                // Exclude the cave route around +X, where this baseline has no edits.
+                if (vertex.X > 0.98 * Descriptor.RadiusMeters)
+                    continue;
+                var position = new PlanetVector(vertex.X, vertex.Y, vertex.Z);
+                var relief = field.SampleConnectedRelief(Descriptor.SampleAt(position).Vertex);
+                var height = Length(position) - Descriptor.RadiusMeters;
+                var index = height > 0 ? 0 : relief.MainValley > relief.Tributary ? 1 : 2;
+                if (index == 2 && relief.Tributary <= relief.MainValley)
+                    continue;
+                if (Math.Abs(height) > Math.Abs(points[index].Height))
+                    points[index] = (Unit(position), height);
+            }
+        }
+    }
     private static bool HasCaveRoof(VolumeStreamingCoordinator terrain, PlanetWalkState state)
     {
         if (Length(state.Position) > CavePlanet.Radius - QualificationDepth)

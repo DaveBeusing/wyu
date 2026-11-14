@@ -6,7 +6,7 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
-        if (args is ["--cave-smoke", "init" or "resume", _])
+        if (args is ["--cave-smoke", "init" or "resume" or "v3-init" or "v3-resume", _])
             return await RunCaveSmokeAsync(args[1], args[2]).ConfigureAwait(false);
 
         if (args is ["--new-world"] || args is ["--planet-playtest", _] or ["--planet-playtest", _, "graphics" or "budget"] ||

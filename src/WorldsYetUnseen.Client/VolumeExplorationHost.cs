@@ -119,7 +119,7 @@ internal static partial class GameHost
             diagnostics?.Enter("PlanetTerrain");
             reason = HostStopReason.RuntimeFault;
             if (caveSmoke is not null)
-                await exploration.RunCaveSmokeAsync(terrain, renderer, caveSmoke, token).ConfigureAwait(false);
+                await exploration.RunCaveSmokeAsync(terrain, renderHost, caveSmoke, token).ConfigureAwait(false);
             else if (flightSmoke)
                 await exploration.RunFlightSmokeAsync(terrain, renderHost, saveSmoke!, token).ConfigureAwait(false);
             else if (saveSmoke is null)
@@ -186,6 +186,37 @@ internal static partial class GameHost
         }
     }
 
+    internal static async Task VerifyConnectedProfilesAsync(WindowsHostModule window, VolumeWorldSlot slot,
+        Groundwork.Rendering.RenderMeshPair globe, CancellationToken token)
+    {
+        // The profile sites are away from the route. Publish them without changing the saved player's coverage.
+        var clock = TimeProvider.System;
+        var timeout = TimeSpan.FromSeconds(10);
+        var timing = new RuntimeTimingLimits(timeout, timeout, timeout);
+        var budget = new ProcessResourceBudget(new ProcessResourceLimits(1, RuntimeQuota));
+        using var reservation = budget.TryReserveRuntime(RuntimeQuota)
+            ?? throw new InvalidOperationException("Could not reserve the connected relief profile runtime.");
+        var runtime = RuntimeSafetyAuthority.Create(clock, timing, reservation);
+        VolumeStreamingCoordinator? terrain = null;
+        try
+        {
+            if (!runtime.TryAllocateWorldId(out var id))
+                throw new InvalidOperationException("Could not allocate the connected relief profile world.");
+            var world = runtime.OpenWorld(id, WorldQuota,
+                new BarrierSupervisorPolicy(WorldQuota.Diagnostics.RequiredEvidenceRecords), new CaveInventory(id, 0, 1),
+                new ExplorationJobScope(), slot.Checkpoint?.Tick ?? 0);
+            var exploration = new VolumeExploration(world, null, window, null, null, slot, null);
+            terrain = exploration.CreateTerrain(restore: false);
+            await exploration.VerifyConnectedProfilesAsync(terrain, globe, token).ConfigureAwait(false);
+        }
+        finally
+        {
+            terrain?.Stop();
+            await StopAsync(runtime, clock, null, null, null, new EcsStorageBudget(StorageBytes),
+                null, null, HostStopReason.ExternalCancellation).ConfigureAwait(false);
+        }
+    }
+
     private static string DefaultVolumeRoot() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WorldsYetUnseen", "WP11", "v2");
 
@@ -195,11 +226,13 @@ internal static partial class GameHost
         var slots = VolumeWorldSlot.List(root);
         var selected = 0;
         var caveOption = slots.Length + 1;
-        var optionCount = caveOption + 1;
+        var connectedOption = caveOption + 1;
+        var optionCount = connectedOption + 1;
         string? notice = null;
         while (true)
         {
-            var label = selected == 0 ? "New World" : selected == caveOption
+            var label = selected == 0 ? "New World" : selected == connectedOption
+                ? $"New V3 World\n{CavePlanet.ConnectedName} · seed {CavePlanet.Seed}" : selected == caveOption
                 ? $"New Cave World\n{CavePlanet.Name} · seed {CavePlanet.Seed}" : $"Continue {selected}/{slots.Length}\n{slots[selected - 1]:N}";
             var guidance = selected == 0 ? "Up for Cave World\n" : "";
             overlay.Menu = $"WYU\n\nPlanet worlds\n\n> {label}\n\n{guidance}Up / Down to choose\nEnter to open\nEsc to exit\n\n{notice}";
@@ -214,6 +247,8 @@ internal static partial class GameHost
             if (!PrototypeMenu.Pressed(input, InputControl.Enter))
                 continue;
 
+            if (selected == connectedOption)
+                return await Task.Run(() => VolumeWorldSlot.Create(root, CavePlanet.Seed, connected: true)).ConfigureAwait(false);
             if (selected == caveOption)
                 return await Task.Run(() => VolumeWorldSlot.Create(root, CavePlanet.Seed, cave: true)).ConfigureAwait(false);
 

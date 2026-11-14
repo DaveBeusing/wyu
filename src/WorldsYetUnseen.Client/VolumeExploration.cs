@@ -40,12 +40,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private int _transitions, _views, _windows, _fineBricks;
 
     private CavePlanet? cave => slot?.Cave;
+    private bool Connected => cave?.Descriptor.GeneratorVersion == PlanetGeologyField.ConnectedGeneratorVersion;
     private ReferencePlanet planet => reference ?? throw new InvalidOperationException("This world uses cave geology.");
     private PlanetDescriptor Descriptor => cave?.Descriptor ?? planet.Descriptor;
     private IPlanetBrickSource Field => (IPlanetBrickSource?)cave?.Field ?? planet.Field;
-    private string PlanetName => cave is null ? ReferencePlanet.DisplayName : CavePlanet.Name;
+    private string PlanetName => cave is null ? ReferencePlanet.DisplayName : Connected ? CavePlanet.ConnectedName : CavePlanet.Name;
 
-    internal VolumeStreamingCoordinator CreateTerrain()
+    internal VolumeStreamingCoordinator CreateTerrain(bool restore = true)
     {
         var unit = Charge(SelectTerrain(cave is null ? new(16, ReferencePlanet.RadiusMeters, 16) : CavePlanet.SurfaceProbe, East));
         var baseline = unit.Retained + unit.Retained;
@@ -53,7 +54,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var movement = diagnostics?.LimitPlanetStreaming == true ? unit with { CpuBytes = unit.CpuBytes - 1 } : unit;
         var limits = new VolumeStreamingLimits(baseline + unit + unit + unit + unit,
             baseline, movement, unit, unit, unit, 12, 12, 256);
-        return slot?.Checkpoint is { } checkpoint
+        return restore && slot?.Checkpoint is { } checkpoint
             ? checkpoint.RestoreTerrain(world, Field, limits, OverlayLimit,
                 cave is null ? VolumeWorldSlot.SupportsMaterial : CavePlanet.SupportsMaterial)
             : new VolumeStreamingCoordinator(world, Field, limits, OverlayLimit);
@@ -217,7 +218,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                     return;
                 continue;
             }
-            if (cave is null && !scripted && PrototypeMenu.Pressed(input, InputControl.F6))
+            if (!scripted && PrototypeMenu.Pressed(input, InputControl.F6) && (cave is null || Connected))
             {
                 mouse?.Update(false, ref _yaw, ref _pitch);
                 var result = await FlyAsync(terrain, renderHost, state, null, false, token).ConfigureAwait(false);

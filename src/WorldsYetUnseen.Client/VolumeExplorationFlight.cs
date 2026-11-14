@@ -18,7 +18,7 @@ internal sealed partial class VolumeExploration
     private const double GearRadius = 0.4;
     private const double GearHeight = 1.25;
     private static readonly VolumeQueryLimits FlightQueries = new(8_000_000, 128);
-    private double FlightBoundary => planet.Descriptor.RadiusMeters + FlightOuterHeight;
+    private double FlightBoundary => Descriptor.RadiusMeters + FlightOuterHeight;
 
     private async Task<(PlanetWalkState Player, bool Quit)> FlyAsync(VolumeStreamingCoordinator terrain,
         ProceduralRenderHost renderHost, PlanetWalkState player, PlanetVector? scriptedAnchor, bool scripted,
@@ -28,6 +28,14 @@ internal sealed partial class VolumeExploration
             _ports.Committed.Read().Root is not VolumeWorldRoot { Player: not null })
         {
             Notice("Flight needs a writable world and a verified player pose.");
+            return (player, false);
+        }
+
+        if (Connected && !IsConfirmedLaunchSurface(terrain, player.Position))
+        {
+            if (scripted)
+                throw new InvalidOperationException("V3 takeoff requires a confirmed surface position.");
+            Notice("Takeoff requires a confirmed surface position.");
             return (player, false);
         }
 
@@ -56,13 +64,15 @@ internal sealed partial class VolumeExploration
             return (player, false);
         }
         var revision = _published.TerrainRevision;
-        var flight = new ProceduralFlight(planet.Descriptor.RadiusMeters, pad, player.Heading);
+        var flight = new ProceduralFlight(Descriptor.RadiusMeters, pad, player.Heading);
         if (scripted)
             FlightTrace("launch", flight, revision, digest);
         var globeTask = Task.Run(() =>
         {
             var buildSample = BiomeMeasurements.StartBuild();
-            var globe = ProceduralGlobe.Build(planet, pad, renderHost.Biomes, token);
+            var globe = cave is { } geology
+                ? ProceduralGlobe.Build(Descriptor, geology.Field.SampleLandform, geology.Field.SampleMaterial, pad, null, token)
+                : ProceduralGlobe.Build(planet, pad, renderHost.Biomes, token);
             BiomeMeasurements.WriteBuild("globe-build", buildSample);
             return globe;
         }, token);
@@ -272,6 +282,8 @@ internal sealed partial class VolumeExploration
         Notice("Touchdown confirmed. F5 saves this landing.");
         if (scripted)
             FlightTrace("touchdown", flight, revision, digest);
+        if (scripted && Connected)
+            await GameHost.VerifyConnectedProfilesAsync(window, slot!, await globeTask.ConfigureAwait(false), token).ConfigureAwait(false);
         return (position, false);
     }
 
@@ -302,7 +314,9 @@ internal sealed partial class VolumeExploration
         var draft = terrain.TryPlanMovement(player, 0, 0, out var status)
             ?? throw new InvalidOperationException($"Ground return could not be admitted ({status}).");
         var candidates = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
-        var prepared = terrain.TryPrepareMovement(draft, candidates, [], new GameHost.ExplorationRoot(begin.World, landing))
+        var state = Connected ? ((VolumeWorldRoot)_ports.Committed.Read().Root).State :
+            new GameHost.ExplorationRoot(begin.World, landing);
+        var prepared = terrain.TryPrepareMovement(draft, candidates, [], state)
             ?? throw new InvalidOperationException("Landing state could not be prepared.");
         if (Finish(candidates, prepared).Status != BarrierStatus.Committed)
             throw new InvalidOperationException("Landing state did not commit.");
@@ -314,7 +328,7 @@ internal sealed partial class VolumeExploration
     {
         using var lease = terrain.TryRead();
         if (lease is null || lease.Info != _published || lease.Info.TerrainRevision != landed.Revision ||
-            lease.EditLineage != planet.Descriptor || !HasFineLandingCoverage(landed.Foot))
+            lease.EditLineage != Descriptor || !HasFineLandingCoverage(landed.Foot))
             throw new InvalidDataException("The saved touchdown lacks its committed terrain revision.");
         // The checkpoint records a grounded craft. Only the local contact needs rebuilding on Continue.
         var up = Unit(landed.Foot);
@@ -329,6 +343,34 @@ internal sealed partial class VolumeExploration
             slot?.Checkpoint is not { } checkpoint || !bytes.AsSpan().SequenceEqual(checkpoint.Overlay))
             throw new InvalidDataException("The saved touchdown overlay differs from the rebuilt terrain.");
         return Convert.ToHexStringLower(SHA256.HashData(bytes));
+    }
+
+    private bool IsConfirmedLaunchSurface(VolumeStreamingCoordinator terrain, PlanetVector foot)
+    {
+        using var lease = terrain.TryRead();
+        if (lease is null || lease.Info != _published || lease.Info.View != terrain.View)
+            return false;
+        var up = Unit(foot);
+        var exterior = Math.Max(Descriptor.RadiusMeters + CavePlanet.MaximumConnectedRelief, Length(foot));
+        var overlay = new byte[lease.EditOverlayBytes];
+        if (!lease.TryWriteEditOverlay(overlay, out var written) || written != overlay.Length)
+            return false;
+        for (var offset = 8; offset < overlay.Length; offset += 32)
+        {
+            var row = overlay.AsSpan(offset, 24);
+            var vertex = new PlanetVector(BinaryPrimitives.ReadInt64LittleEndian(row),
+                BinaryPrimitives.ReadInt64LittleEndian(row[8..]), BinaryPrimitives.ReadInt64LittleEndian(row[16..]));
+            exterior = Math.Max(exterior, Length(Scale(vertex, Descriptor.CellSizeMeters)));
+        }
+        // Start beyond the edited sample envelope. Require published air and complete query coverage.
+        var outer = Scale(up, exterior + 4 * Descriptor.CellSizeMeters);
+        if (!lease.TryReadDensity(Descriptor.SampleAt(outer), out var density) || density <= 0)
+            return false;
+        Span<VolumeRayHit> hits = stackalloc VolumeRayHit[8];
+        var ray = lease.Raycast(outer, Add(foot, Scale(up, -0.25)), hits, CaveQueries);
+        return ray.Status == VolumeQueryStatus.Contact && ray.Count > 0 &&
+            Length(Subtract(hits[0].Position, foot)) <= 0.25 && Dot(hits[0].Normal, up) >= 0.87 &&
+            lease.Sweep(CaveBody(foot), default, CaveQueries).Status == VolumeQueryStatus.Clear;
     }
 
     private static PlanetVector FlightCoverageCenter(PlanetVector position) => Add(position, Scale(Unit(position), 26));
@@ -351,7 +393,7 @@ internal sealed partial class VolumeExploration
         digest = "";
         blocked = "terrain is not presented";
         using var lease = terrain.TryRead();
-        if (lease is null || lease.Info != _published || lease.EditLineage != planet.Descriptor)
+        if (lease is null || lease.Info != _published || lease.EditLineage != Descriptor)
             return false;
         var overlayBytes = new byte[lease.EditOverlayBytes];
         if (!lease.TryWriteEditOverlay(overlayBytes, out var written) || written != overlayBytes.Length)
@@ -363,7 +405,7 @@ internal sealed partial class VolumeExploration
             var row = overlayBytes.AsSpan(offset, 24);
             var vertex = new PlanetVector(BinaryPrimitives.ReadInt64LittleEndian(row),
                 BinaryPrimitives.ReadInt64LittleEndian(row[8..]), BinaryPrimitives.ReadInt64LittleEndian(row[16..]));
-            if (Length(vertex) > planet.Descriptor.RadiusMeters + 64)
+            if (Length(vertex) > Descriptor.RadiusMeters + 64)
                 return false;
         }
 
@@ -395,8 +437,8 @@ internal sealed partial class VolumeExploration
             return false;
         // Four metres enclose the local sweep, gear and its radius on every axis.
         var extent = new PlanetVector(4, 4, 4);
-        var lower = planet.Descriptor.SampleAt(Subtract(pad, extent)).Vertex.Locate().Brick;
-        var upper = planet.Descriptor.SampleAt(Add(pad, extent)).Vertex.Locate().Brick;
+        var lower = Descriptor.SampleAt(Subtract(pad, extent)).Vertex.Locate().Brick;
+        var upper = Descriptor.SampleAt(Add(pad, extent)).Vertex.Locate().Brick;
         for (var z = lower.Z; z <= upper.Z; z++)
         for (var y = lower.Y; y <= upper.Y; y++)
         for (var x = lower.X; x <= upper.X; x++)
