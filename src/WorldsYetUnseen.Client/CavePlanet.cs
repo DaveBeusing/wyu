@@ -27,7 +27,7 @@ internal sealed class CavePlanet
 
     internal CavePlanet(Guid world, ulong seed, bool connected = false)
     {
-        if (seed != Seed)
+        if (!connected && seed != Seed)
             throw new ArgumentOutOfRangeException(nameof(seed), "Ember Caves uses the verified seed 42.");
         Descriptor = new(world, PlanetId, seed,
             connected ? PlanetGeologyField.ConnectedGeneratorVersion : PlanetGeologyField.GeneratorVersion,

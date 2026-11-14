@@ -39,7 +39,18 @@ internal sealed partial class VolumeExploration
     private async Task<PlanetWalkState> OpenCaveTerrainAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
         CancellationToken token)
     {
-        var probe = CavePlanet.SurfaceProbe;
+        foreach (var offset in new[] { 0, -2, 2, -4, 4, -6, 6 })
+        {
+            var probe = CavePlanet.SurfaceProbe with { Z = CavePlanet.SurfaceProbe.Z + offset };
+            if (await TryOpenCaveSpawnAsync(terrain, renderer, probe, token).ConfigureAwait(false) is { } spawn)
+                return spawn;
+        }
+        throw new PlanetLoadException("No verified cave spawn for this seed. Reopen the world selector and try another seed.");
+    }
+
+    private async Task<PlanetWalkState?> TryOpenCaveSpawnAsync(VolumeStreamingCoordinator terrain,
+        D3D12Renderer renderer, PlanetVector probe, CancellationToken token)
+    {
         await LoadAsync(terrain, renderer, probe, CavePlanet.Heading, PlanetLocalFrame.Create(probe), token)
             .ConfigureAwait(false);
         using var lease = terrain.TryRead() ?? throw new PlanetLoadException("Cave entrance terrain is unavailable.");
@@ -47,12 +58,12 @@ internal sealed partial class VolumeExploration
         Span<VolumeRayHit> hits = stackalloc VolumeRayHit[8];
         var floor = lease.Raycast(probe with { X = probe.X + 4 }, probe with { X = probe.X - 12 }, hits, CaveQueries);
         if (floor.Status != VolumeQueryStatus.Contact || Dot(hits[0].Normal, up) <= 0)
-            throw new PlanetLoadException($"The cave entrance has no verified surface spawn ({floor.Status}, support {Dot(hits[0].Normal, up):F3}).");
+            return null;
         var foot = hits[0].Position with { X = hits[0].Position.X + 0.055 };
         if (lease.Sweep(CaveBody(foot), default, CaveQueries).Status != VolumeQueryStatus.Clear)
-            throw new PlanetLoadException("The cave entrance spawn has insufficient clearance.");
+            return null;
         if (lease.Sweep(CaveBody(foot), Scale(up, -0.1), CaveQueries).Status != VolumeQueryStatus.Contact)
-            throw new PlanetLoadException("The cave entrance spawn has no verified floor support.");
+            return null;
         return new PlanetWalkState(foot, CavePlanet.Heading, default);
     }
 

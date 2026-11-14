@@ -1,3 +1,5 @@
+using Groundwork.Persistence;
+using WorldsYetUnseen.Gameplay;
 using Groundwork.Core;
 using Groundwork.Diagnostics;
 using Groundwork.Ecs;
@@ -77,17 +79,18 @@ internal static partial class GameHost
         if (mode == HostMode.Prototype)
             settingsDirectory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "WorldsYetUnseen", "Alpha");
-        var (flightDirectory, restoreFocus, newWorld) = await RunStageAsync(mode, saveDirectory, settingsDirectory,
+        var (flightDirectory, restoreFocus, newWorld, freeTestWorld) = await RunStageAsync(mode, saveDirectory, settingsDirectory,
             false, false, diagnostics, cancellationToken)
             .ConfigureAwait(false);
-        if (newWorld && !cancellationToken.IsCancellationRequested)
-            await RunExplorationAsync(null, false, diagnostics, cancellationToken, settingsDirectory).ConfigureAwait(false);
+        if ((newWorld || freeTestWorld) && !cancellationToken.IsCancellationRequested)
+            await RunExplorationAsync(null, false, diagnostics, cancellationToken, settingsDirectory,
+                freeTestWorld: freeTestWorld).ConfigureAwait(false);
         else if (flightDirectory is not null && !cancellationToken.IsCancellationRequested)
             await RunStageAsync(HostMode.Flight, flightDirectory, settingsDirectory, true, restoreFocus, diagnostics, cancellationToken)
                 .ConfigureAwait(false);
     }
 
-    private static async Task<(string? FlightDirectory, bool RestoreFocus, bool NewWorld)> RunStageAsync(HostMode mode, string? saveDirectory,
+    private static async Task<(string? FlightDirectory, bool RestoreFocus, bool NewWorld, bool FreeTestWorld)> RunStageAsync(HostMode mode, string? saveDirectory,
         string? settingsDirectory, bool alphaFlight, bool restoreFocus, AlphaDiagnostics? alphaDiagnostics,
         CancellationToken hostCancellation)
     {
@@ -113,6 +116,7 @@ internal static partial class GameHost
         var startGame = true;
         var launchFlight = false;
         var launchNewWorld = false;
+        var launchFreeTestWorld = false;
         var handoffFocus = false;
         WalkableScene? walkable = mode switch
         {
@@ -170,22 +174,42 @@ internal static partial class GameHost
                     saveDirectory ??= Path.Combine(data, "WP07");
                     alphaDiagnostics?.Enter("SaveLoad");
                     new PrototypeCaption().Update("WYU | Checking save slot");
-                    prototypeSave = await PrototypeSave.OpenAsync(saveDirectory, runtime.RuntimeOwnership, cancellationToken,
-                            beforeLoad: alphaDiagnostics?.BeforeSaveLoad)
-                        .ConfigureAwait(false);
+                    var normalSave = saveDirectory;
+                    string TestSave(int setup) => Path.Combine(FreeTestWorldRoot(), $"RescueMission-{setup}");
+                    async Task<PrototypeSave> LoadMission(int setup)
+                    {
+                        var opened = await PrototypeSave.OpenAsync(setup == 0 ? normalSave : TestSave(setup),
+                            runtime.RuntimeOwnership, cancellationToken, beforeLoad: alphaDiagnostics?.BeforeSaveLoad)
+                            .ConfigureAwait(false);
+                        if (setup >= 2 && opened.InitialLoad.Status == SaveSlotStatus.Empty)
+                        {
+                            var deposits = DepositMask.West | DepositMask.Seam | DepositMask.East;
+                            if (!PrototypeProgress.TryRestore(deposits, setup == 2 ? 0 : 3, setup == 4, out var progress) ||
+                                !opened.RequestSave(new PrototypeCheckpoint(PrototypeWorld.Spawn, progress)) ||
+                                (await opened.WaitForSaveAsync(cancellationToken).ConfigureAwait(false)).Status != SaveSlotStatus.Committed)
+                                throw new InvalidOperationException("Could not prepare the isolated rescue setup.");
+                        }
+                        return opened;
+                    }
+                    if (alphaDiagnostics?.BeforeSaveLoad is not null)
+                        await LoadMission(0).ConfigureAwait(false);
                     new PrototypeCaption().Update("Worlds Yet Unseen");
                     alphaDiagnostics?.Enter("StartMenu");
-                    var startMenu = new AlphaStartMenu(window, prototypeSave, new AlphaSettingsStore(settingsDirectory!),
+                    var startMenu = new AlphaStartMenu(window, LoadMission, new AlphaSettingsStore(settingsDirectory!),
                         overlay!, performance!);
                     startGame = await startMenu.ChooseAsync(cancellationToken).ConfigureAwait(false);
+                    prototypeSave = startMenu.MissionSave;
+                    if (startMenu.TestMissionSetup != 0)
+                        saveDirectory = TestSave(startMenu.TestMissionSetup);
                     launchNewWorld = startMenu.NewWorldRequested;
+                    launchFreeTestWorld = startMenu.FreeTestWorldRequested;
                     overlay!.Menu = null;
                     settings = startMenu.Settings;
-                    launchFlight = startGame && prototypeSave.Checkpoint is { Progress.BeaconOnline: true };
+                    launchFlight = startGame && prototypeSave?.Checkpoint is { Progress.BeaconOnline: true };
                     startGame &= !launchFlight;
                     if (startGame)
                     {
-                        var checkpoint = prototypeSave.Checkpoint;
+                        var checkpoint = prototypeSave!.Checkpoint;
                         walkable = new WalkableScene(runtime.RuntimeOwnership, checkpoint?.Pose ?? PrototypeWorld.Spawn,
                             checkpoint is { } selected ? PrototypeWorld.EffectiveTerrain(selected.Progress) : [],
                             snapshot: PrototypeWorld.Snapshot, bounds: PrototypeWorld.Recipe.Bounds, colorPrototype: true);
@@ -265,6 +289,7 @@ internal static partial class GameHost
             {
                 launchFlight = false;
                 launchNewWorld = false;
+                launchFreeTestWorld = false;
                 alphaDiagnostics?.Write("window-close");
             }
         }
@@ -299,7 +324,7 @@ internal static partial class GameHost
                 requireNvidia: mode == HostMode.PlanetSmoke || IsFlightSmoke(mode));
         if (success is not null)
             Console.WriteLine(success);
-        return (launchFlight ? Path.Combine(saveDirectory!, $"flight-{prototypeSave!.Lineage:N}") : null, handoffFocus, launchNewWorld);
+        return (launchFlight ? Path.Combine(saveDirectory!, $"flight-{prototypeSave!.Lineage:N}") : null, handoffFocus, launchNewWorld, launchFreeTestWorld);
     }
 
     private static async Task<bool> WatchWindowCloseAsync(WindowsHostModule window, CancellationTokenSource stage)

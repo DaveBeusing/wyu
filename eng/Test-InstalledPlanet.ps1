@@ -105,9 +105,15 @@ function Press([int]$Key) {
     Start-Sleep -Milliseconds 85
 }
 
-function Enter-Seed([string]$Seed) {
+function Select-ReferenceProfile {
     Wait-Panel '*Planet worlds*New World*'
+    Press 38
+    Wait-Panel '*New Far Horizon World*'
     Press 13
+}
+
+function Enter-Seed([string]$Seed) {
+    Select-ReferenceProfile
     Wait-Panel '*Type up to 20 digits*'
     foreach ($digit in $Seed.ToCharArray()) { Press ([int]$digit) }
     Press 13

@@ -14,7 +14,7 @@ internal static partial class GameHost
 {
     internal static async Task RunExplorationAsync(ulong? smokeSeed, bool useWarp, AlphaDiagnostics? diagnostics,
         CancellationToken cancellationToken, string? settingsDirectory = null,
-        string? saveRoot = null, string? saveSmoke = null, bool flightSmoke = false, string? caveSmoke = null)
+        string? saveRoot = null, string? saveSmoke = null, bool flightSmoke = false, string? caveSmoke = null, bool freeTestWorld = false)
     {
         var clock = TimeProvider.System;
         var timeout = TimeSpan.FromSeconds(10);
@@ -56,7 +56,8 @@ internal static partial class GameHost
                 AlphaWindowSize.TryApply(settings.Size);
             }
             if (!scripted)
-                slot = await ChooseVolumeSlotAsync(window, overlay!, saveRoot ?? DefaultVolumeRoot(), token).ConfigureAwait(false);
+                slot = await ChooseVolumeSlotAsync(window, overlay!, saveRoot ?? (freeTestWorld ? Path.Combine(FreeTestWorldRoot(), "v2") : DefaultVolumeRoot()),
+                    token, freeTestWorld).ConfigureAwait(false);
             else if (caveSmoke is not null)
                 slot = await OpenCaveSmokeSlotAsync(saveRoot!, caveSmoke, token).ConfigureAwait(false);
             else if (saveSmoke is not null)
@@ -98,7 +99,7 @@ internal static partial class GameHost
                 ? new ReferencePlanet(new Guid("d89e4d83-1228-4780-b2c4-1af37f48468e"), smokeSeed!.Value) : null);
             if (!scripted)
                 mouse = new PrototypeMouseLook(window, settings);
-            var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics);
+            var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld);
             var propsSmoke = scripted && Environment.GetEnvironmentVariable("WYU_WP16_SMOKE") == "1";
             if (planet is not null && (propsSmoke || !scripted && Environment.GetEnvironmentVariable("WYU_WP16") != "off"))
                 exploration.Props = renderHost.Props = new ReferenceProps(planet);
@@ -220,22 +221,30 @@ internal static partial class GameHost
     private static string DefaultVolumeRoot() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WorldsYetUnseen", "WP11", "v2");
 
+    private static string FreeTestWorldRoot() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WorldsYetUnseen", "TestWorlds");
+
     private static async Task<VolumeWorldSlot?> ChooseVolumeSlotAsync(WindowsHostModule window, AlphaOverlay overlay,
-        string root, CancellationToken token)
+        string root, CancellationToken token, bool freeTestWorld = false)
     {
         var slots = VolumeWorldSlot.List(root);
+        var defaultProfile = VolumeWorldSlot.DefaultProfile;
         var selected = 0;
         var caveOption = slots.Length + 1;
         var connectedOption = caveOption + 1;
-        var optionCount = connectedOption + 1;
+        var referenceOption = connectedOption + 1;
+        var optionCount = referenceOption + 1;
+        ulong? replacementSeed = null;
         string? notice = null;
         while (true)
         {
-            var label = selected == 0 ? "New World" : selected == connectedOption
+            var label = selected == 0 ? (freeTestWorld ? $"New Test World\n{VolumeWorldSlot.ProfileName(defaultProfile)}" : "New World") :
+                selected == referenceOption ? "New Far Horizon World\nBiomes, weather, sky, shadows and vegetation" : selected == connectedOption
                 ? $"New V3 World\n{CavePlanet.ConnectedName} · seed {CavePlanet.Seed}" : selected == caveOption
                 ? $"New Cave World\n{CavePlanet.Name} · seed {CavePlanet.Seed}" : $"Continue {selected}/{slots.Length}\n{slots[selected - 1]:N}";
-            var guidance = selected == 0 ? "Up for Cave World\n" : "";
-            overlay.Menu = $"WYU\n\nPlanet worlds\n\n> {label}\n\n{guidance}Up / Down to choose\nEnter to open\nEsc to exit\n\n{notice}";
+            var guidance = selected == 0 ? (freeTestWorld ? "Up for Far Horizon features\n" : "Up for Far Horizon\n") : "";
+            var menuTitle = freeTestWorld ? "Free Test World" : "Planet worlds";
+            overlay.Menu = $"WYU\n\n{menuTitle}\n\n> {label}\n\n{guidance}Up / Down to choose\nEnter to open\nEsc to exit\n\n{notice}";
             await Task.Delay(16, token).ConfigureAwait(false);
             var input = window.Capture();
             if (PrototypeMenu.Pressed(input, InputControl.Escape))
@@ -248,15 +257,19 @@ internal static partial class GameHost
                 continue;
 
             if (selected == connectedOption)
-                return await Task.Run(() => VolumeWorldSlot.Create(root, CavePlanet.Seed, connected: true)).ConfigureAwait(false);
+                return await Task.Run(() => VolumeWorldSlot.Create(root, CavePlanet.Seed, VolumeWorldSlot.WorldProfile.Connected)).ConfigureAwait(false);
             if (selected == caveOption)
-                return await Task.Run(() => VolumeWorldSlot.Create(root, CavePlanet.Seed, cave: true)).ConfigureAwait(false);
+                return await Task.Run(() => VolumeWorldSlot.Create(root, CavePlanet.Seed, VolumeWorldSlot.WorldProfile.Cave)).ConfigureAwait(false);
 
-            if (selected == 0)
+            if (selected == 0 || selected == referenceOption)
             {
-                var seed = await VolumeExploration.ChooseSeedAsync(window, overlay, token).ConfigureAwait(false);
+                var profile = selected == 0 ? defaultProfile : VolumeWorldSlot.WorldProfile.Reference;
+                ulong? seed = profile == VolumeWorldSlot.WorldProfile.Cave ? CavePlanet.Seed :
+                    await VolumeExploration.ChooseSeedAsync(window, overlay, token,
+                    VolumeWorldSlot.ProfileName(profile),
+                    freeTestWorld ? (replacementSeed ?? CavePlanet.Seed) : null).ConfigureAwait(false);
                 if (seed is { } value)
-                    return await Task.Run(() => VolumeWorldSlot.Create(root, value)).ConfigureAwait(false);
+                    return await Task.Run(() => VolumeWorldSlot.Create(root, value, profile)).ConfigureAwait(false);
                 continue;
             }
             var opened = await Task.Run(() =>
@@ -274,7 +287,11 @@ internal static partial class GameHost
                 VolumeSlotStatus.Busy or VolumeSlotStatus.Indeterminate => "This world is busy or still recovering. Try again.",
                 _ => $"Cannot continue: {opened.status}."
             };
-            notice += "\nChoose New World for a separate slot.";
+            replacementSeed = freeTestWorld && opened.status == VolumeSlotStatus.Incompatible
+                ? VolumeWorldSlot.ReadManifestSeed(root, slots[selected - 1]) : null;
+            notice += replacementSeed is { } originalSeed
+                ? $"\nChoose New Test World to start a separate slot with seed {originalSeed}."
+                : "\nChoose a new world for a separate slot.";
         }
     }
 
