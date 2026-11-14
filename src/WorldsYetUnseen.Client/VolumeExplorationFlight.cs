@@ -218,7 +218,7 @@ internal sealed partial class VolumeExploration
                 if (far)
                     RequireFrame(renderer.TrySubmit(orbit));
                 else
-                    RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, camera));
+                    RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, ApplySunlight(camera, presentationTick, subTick)));
                 if (scripted || flight.Phase == ProceduralFlightPhase.Landed)
                     await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
                         pauseWhileMinimized: true).ConfigureAwait(false);

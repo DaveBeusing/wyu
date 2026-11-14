@@ -22,9 +22,10 @@ internal sealed partial class VolumeExploration
             if (skyRoute)
             {
                 var twilight = Camera(terrain.View, player.Position, player.Heading);
-                if (twilight.Sky is null || twilight.Tint.X is <= 0.18f or >= 1f)
+                var daylight = Atmosphere(twilight.Position, _environmentTick)?.Tint.X;
+                if (twilight.Sky is null || daylight is null or <= 0.18f or >= 1f)
                     throw new InvalidOperationException("The sky flight fixture did not start at twilight.");
-                Console.WriteLine(FormattableString.Invariant($"PACKAGE G twilight seed={Descriptor.Seed} tick={_environmentTick} tint={twilight.Tint.X:R}"));
+                Console.WriteLine(FormattableString.Invariant($"PACKAGE G twilight seed={Descriptor.Seed} tick={_environmentTick} tint={daylight:R}"));
             }
             else
             {
@@ -97,7 +98,10 @@ internal sealed partial class VolumeExploration
         Console.WriteLine(FormattableString.Invariant(
             $"WP11 LANDED generation={checkpoint.Generation} tick={landed.FlightTick} revision={landed.Revision} overlay={digest} craft={foot.X:R},{foot.Y:R},{foot.Z:R} player={player.Position.X:R},{player.Position.Y:R},{player.Position.Z:R}"));
         Console.WriteLine(FormattableString.Invariant(
-            $"PACKAGE E LANDED tick={environmentTick} tint={camera.Tint.X:R} fog={camera.Fog?.MaxOpacity:R} band={camera.Fog?.StartDepthMeters:R},{camera.Fog?.EndDepthMeters:R}"));
+            $"PACKAGE E LANDED tick={environmentTick} tint={Atmosphere(camera.Position, environmentTick)?.Tint.X:R} fog={camera.Fog?.MaxOpacity:R} band={camera.Fog?.StartDepthMeters:R},{camera.Fog?.EndDepthMeters:R}"));
+        if (camera.Sunlight is { } light)
+            Console.WriteLine(FormattableString.Invariant(
+                $"WP15 LANDED seed={Descriptor.Seed} tick={environmentTick} sun={light.Direction.Y:R},{light.Direction.Z:R} direct={light.Direct.X:R} ambient={light.Ambient.X:R} shadows={camera.TerrainShadows}"));
         if (skyRoute && camera.Sky is { } sky)
             Console.WriteLine(FormattableString.Invariant(
                 $"PACKAGE G landed seed={Descriptor.Seed} tick={environmentTick} sun={sky.SunDirection.Y:R},{sky.SunDirection.Z:R} eye={sky.EyeMeters.X:R},{sky.EyeMeters.Y:R},{sky.EyeMeters.Z:R}"));

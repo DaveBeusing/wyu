@@ -1,0 +1,161 @@
+diff --git a/src/Groundwork.Rendering.D3D12/DrawTiming.cs b/src/Groundwork.Rendering.D3D12/DrawTiming.cs
+new file mode 100644
+index 0000000..7ecb411
+--- /dev/null
++++ b/src/Groundwork.Rendering.D3D12/DrawTiming.cs
+@@ -0,0 +1,75 @@
++using TerraFX.Interop.DirectX;
++using static Groundwork.Rendering.D3D12.GpuNative;
++using static TerraFX.Interop.Windows.Windows;
++
++namespace Groundwork.Rendering.D3D12;
++
++internal sealed unsafe partial class GpuDevice
++{
++    private sealed class DrawTiming : IDisposable
++    {
++        internal ID3D12QueryHeap* Heap;
++        internal ID3D12Resource* Data;
++        internal ulong Sequence;
++        internal double CpuMs;
++        internal long Allocated;
++        internal ulong ShadowBytes;
++        internal int ShadowDraws;
++        internal ulong GeometryBuilds;
++        private const uint Slots = 6;
++
++        internal void Mark(ID3D12GraphicsCommandList* commands, uint index) =>
++            commands->EndQuery(Heap, D3D12_QUERY_TYPE.D3D12_QUERY_TYPE_TIMESTAMP, index);
++
++        internal void Resolve(ID3D12GraphicsCommandList* commands, ulong sequence)
++        {
++            Mark(commands, 5);
++            commands->ResolveQueryData(Heap, D3D12_QUERY_TYPE.D3D12_QUERY_TYPE_TIMESTAMP, 0, Slots, Data, 0);
++            Sequence = sequence;
++        }
++        private readonly ulong _frequency;
++
++        internal DrawTiming(ID3D12Device* device, ID3D12CommandQueue* queue)
++        {
++            ulong frequency;
++            Check(queue->GetTimestampFrequency(&frequency), "Get timestamp frequency");
++            _frequency = frequency;
++            var desc = new D3D12_QUERY_HEAP_DESC { Type = D3D12_QUERY_HEAP_TYPE.D3D12_QUERY_HEAP_TYPE_TIMESTAMP, Count = Slots };
++            fixed (ID3D12QueryHeap** heap = &Heap)
++                Check(device->CreateQueryHeap(&desc, __uuidof<ID3D12QueryHeap>(), (void**)heap), "Create timestamp heap");
++            try
++            {
++                Data = CreateResource(device, D3D12_HEAP_TYPE.D3D12_HEAP_TYPE_READBACK, Buffer(Slots * 8),
++                    D3D12_RESOURCE_STATES.D3D12_RESOURCE_STATE_COPY_DEST);
++            }
++            catch
++            {
++                Release(Heap);
++                throw;
++            }
++        }
++
++        internal void WriteSample()
++        {
++            if (Sequence == 0)
++                return;
++            ulong* values;
++            var range = new D3D12_RANGE { End = Slots * 8 };
++            Check(Data->Map(0, &range, (void**)&values), "Map timestamp data");
++            var frame = (values[5] - values[0]) * 1000d / _frequency;
++            var shadow = (values[2] - values[1]) * 1000d / _frequency;
++            var terrain = (values[4] - values[3]) * 1000d / _frequency;
++            range = default;
++            Data->Unmap(0, &range);
++            Console.WriteLine(FormattableString.Invariant(
++                $"WP15 GPU {Sequence},{frame:F6},{shadow:F6},{terrain:F6},{CpuMs:F6},{Allocated},{ShadowBytes},{ShadowDraws},{GeometryBuilds}"));
++            Sequence = 0;
++        }
++
++        public void Dispose()
++        {
++            Release(Data);
++            Release(Heap);
++        }
++    }
++}
+diff --git a/src/Groundwork.Rendering.D3D12/GpuDevice.cs b/src/Groundwork.Rendering.D3D12/GpuDevice.cs
+index 3dfd06e..c543bc9 100644
+--- a/src/Groundwork.Rendering.D3D12/GpuDevice.cs
++++ b/src/Groundwork.Rendering.D3D12/GpuDevice.cs
+@@ -158 +158,4 @@ internal sealed unsafe partial class GpuDevice : IDisposable
+-        Record(context.Commands, target, frame, subsequent, readback);
++        context.Timing?.WriteSample();
++        if (frame.Scene.HasValue && ActiveMeshGeometry is not null)
++            context.Timing ??= new(_device, _queue);
++        Record(context.Commands, target, frame, subsequent, readback, frame.Scene.HasValue ? context.Timing : null);
+@@ -268,0 +272,3 @@ internal sealed unsafe partial class GpuDevice : IDisposable
++        {
++            if (_fence != null && IsIdle && !IsRemoved)
++                frame.Timing?.WriteSample();
+@@ -269,0 +276 @@ internal sealed unsafe partial class GpuDevice : IDisposable
++        }
+@@ -317,0 +325 @@ internal sealed unsafe partial class GpuDevice : IDisposable
++        internal DrawTiming? Timing;
+@@ -331,0 +340,5 @@ internal sealed unsafe partial class GpuDevice : IDisposable
++            if (Timing is { } timing)
++            {
++                timing.Dispose();
++                Timing = null;
++            }
+diff --git a/src/Groundwork.Rendering.D3D12/GpuMeshGeometry.cs b/src/Groundwork.Rendering.D3D12/GpuMeshGeometry.cs
+index 0d45588..5a14713 100644
+--- a/src/Groundwork.Rendering.D3D12/GpuMeshGeometry.cs
++++ b/src/Groundwork.Rendering.D3D12/GpuMeshGeometry.cs
+@@ -10,0 +11 @@ internal sealed unsafe partial class GpuDevice
++    private ulong _probeGeometryBuilds;
+@@ -36,0 +38 @@ internal sealed unsafe partial class GpuDevice
++        _probeGeometryBuilds++;
+@@ -202,0 +205,2 @@ internal sealed unsafe partial class GpuDevice
++                {
++                    _owner._probeShadowDraws++;
+@@ -203,0 +208 @@ internal sealed unsafe partial class GpuDevice
++                }
+diff --git a/src/Groundwork.Rendering.D3D12/GpuPipeline.cs b/src/Groundwork.Rendering.D3D12/GpuPipeline.cs
+index 450bc79..fc51cf7 100644
+--- a/src/Groundwork.Rendering.D3D12/GpuPipeline.cs
++++ b/src/Groundwork.Rendering.D3D12/GpuPipeline.cs
+@@ -185 +185 @@ internal sealed unsafe partial class GpuDevice
+-        RenderScene? subsequent, Readback? readback)
++        RenderScene? subsequent, Readback? readback, DrawTiming? timing)
+@@ -186,0 +187 @@ internal sealed unsafe partial class GpuDevice
++        timing?.Mark(commands, 0);
+@@ -193,0 +195,3 @@ internal sealed unsafe partial class GpuDevice
++        timing?.Mark(commands, 1);
++        var allocated = GC.GetAllocatedBytesForCurrentThread();
++        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+@@ -194,0 +199,10 @@ internal sealed unsafe partial class GpuDevice
++        if (timing is not null)
++        {
++            timing.CpuMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
++            timing.Allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
++            timing.ShadowBytes = _probeShadowBytes;
++            timing.ShadowDraws = _probeShadowDraws;
++            timing.GeometryBuilds = _probeGeometryBuilds;
++            _probeShadowDraws = 0;
++            timing.Mark(commands, 2);
++        }
+@@ -219,0 +234 @@ internal sealed unsafe partial class GpuDevice
++            timing?.Mark(commands, 3);
+@@ -220,0 +236 @@ internal sealed unsafe partial class GpuDevice
++            timing?.Mark(commands, 4);
+@@ -229,0 +246,2 @@ internal sealed unsafe partial class GpuDevice
++
++        timing?.Resolve(commands, frame.Sequence);
+diff --git a/src/Groundwork.Rendering.D3D12/GpuShadows.cs b/src/Groundwork.Rendering.D3D12/GpuShadows.cs
+index ca3a0ba..ee5fb5d 100644
+--- a/src/Groundwork.Rendering.D3D12/GpuShadows.cs
++++ b/src/Groundwork.Rendering.D3D12/GpuShadows.cs
+@@ -20,0 +21,2 @@ internal sealed unsafe partial class GpuDevice
++    private ulong _probeShadowBytes;
++    private int _probeShadowDraws;
+@@ -30 +32,3 @@ internal sealed unsafe partial class GpuDevice
+-        if (_device->GetResourceAllocationInfo(1, 1, &desc).SizeInBytes > 8 * 1024 * 1024)
++        var shadowAllocation = _device->GetResourceAllocationInfo(1, 1, &desc).SizeInBytes;
++        _probeShadowBytes = 2 * shadowAllocation;
++        if (shadowAllocation > 8 * 1024 * 1024)
