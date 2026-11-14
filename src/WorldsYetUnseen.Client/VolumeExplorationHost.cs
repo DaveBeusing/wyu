@@ -56,7 +56,7 @@ internal static partial class GameHost
                 AlphaWindowSize.TryApply(settings.Size);
             }
             if (!scripted)
-                slot = await ChooseVolumeSlotAsync(window, overlay!, saveRoot ?? (freeTestWorld ? FreeTestWorldRoot() : DefaultVolumeRoot()),
+                slot = await ChooseVolumeSlotAsync(window, overlay!, saveRoot ?? (freeTestWorld ? Path.Combine(FreeTestWorldRoot(), "v2") : DefaultVolumeRoot()),
                     token, freeTestWorld).ConfigureAwait(false);
             else if (caveSmoke is not null)
                 slot = await OpenCaveSmokeSlotAsync(saveRoot!, caveSmoke, token).ConfigureAwait(false);

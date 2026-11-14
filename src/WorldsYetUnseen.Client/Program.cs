@@ -167,7 +167,7 @@ internal static class Program
             }
             var warp = saveSmoke || scripted && (flightSmoke ? args[3] : args[^1]) == "warp";
             await GameHost.RunExplorationAsync(seed, warp, diagnostics, stop.Token,
-                saveRoot: fixture is not null ? Path.Combine(fixture, freeTestWorld ? "test-worlds" : "v2") : saveSmoke || flightSmoke ? args[2] : null,
+                saveRoot: fixture is not null ? freeTestWorld ? Path.Combine(fixture, "test-worlds", "v2") : Path.Combine(fixture, "v2") : saveSmoke || flightSmoke ? args[2] : null,
                 saveSmoke: saveSmoke || flightSmoke ? args[1] : null, flightSmoke: flightSmoke, freeTestWorld: freeTestWorld)
                 .ConfigureAwait(false);
             diagnostics?.Write("exit");
