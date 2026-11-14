@@ -20,6 +20,12 @@ internal sealed class ReferenceProps(ReferencePlanet planet)
     private readonly Dictionary<PropCellKey, LatticeCoordinate[]> _supports = [];
     private D3D12PropCells? _stream;
     private VolumePublicationInfo _previous;
+    private VolumeStreamingSelection? _selection;
+    private PlacementWork? _pending;
+    private PlacementRun? _running;
+    internal Task? PlacementGateForSmoke { get; set; }
+    internal bool PlacementActive => _running is not null;
+    internal int Failed { get; private set; }
 
     internal int CoverageCount { get; private set; }
     internal int Staged { get; private set; }
@@ -33,24 +39,30 @@ internal sealed class ReferenceProps(ReferencePlanet planet)
         renderer.AttachPropCells(stream);
         _stream = stream;
         _previous = default;
+        _selection = null;
+        Supersede();
         _supports.Clear();
     }
 
-    internal async Task RefreshAsync(VolumeStreamingCoordinator terrain, VolumePublicationInfo publication,
-        PlanetVector position, VolumeBrushIntent? edit, CancellationToken token)
+    internal void Refresh(VolumeStreamingCoordinator terrain, VolumePublicationInfo publication,
+        VolumeStreamingSelection selection, PlanetVector position, VolumeBrushIntent? edit, CancellationToken token)
     {
         if (_stream is not { } stream)
             return;
 
+        Supersede();
         var cells = Coverage(position);
         var overlap = _previous.TerrainRevision == publication.TerrainRevision && _previous.View.RendererEpoch == publication.View.RendererEpoch;
         var coverage = cells.ToArray();
         // A coverage change can change collision detail. Resample support rather than keeping a placement
         // from the old collision mesh. The renderer has already masked that generation.
+        var sameCut = SameCollisionCut(_selection, selection);
         var canReuse = edit.HasValue && _previous.View.RendererEpoch == publication.View.RendererEpoch &&
-            publication.TerrainRevision == _previous.TerrainRevision + 1;
+            publication.TerrainRevision == _previous.TerrainRevision + 1 && sameCut;
         HashSet<PropCellKey>? invalidated = null;
-        if (canReuse)
+        if (!sameCut || overlap)
+            invalidated = new(coverage);
+        else if (canReuse)
         {
             var change = edit!.Value;
             invalidated = [];
@@ -61,40 +73,110 @@ internal sealed class ReferenceProps(ReferencePlanet planet)
         stream.Publish(new(terrain.WorldIdentity, publication.View.RendererEpoch, publication.TerrainRevision, publication.Generation),
             coverage, invalidated);
         var next = new Dictionary<PropCellKey, LatticeCoordinate[]>();
-        var requests = new List<PropCellRequest>(coverage.Length);
+        var wanted = new List<PropCellKey>(coverage.Length);
         foreach (var key in coverage)
         {
-            if (invalidated is not null && !invalidated.Contains(key) && _supports.TryGetValue(key, out var prior))
+            if (canReuse && invalidated is not null && !invalidated.Contains(key) && _supports.TryGetValue(key, out var prior))
                 next.Add(key, prior);
-            else if (stream.TryRequest(key, Candidates, out var request) == PropCellResult.Accepted)
-                requests.Add(request);
-        }
-        try
-        {
-            var sample = await Task.Run(() => Sample(terrain, publication, requests, token), token).ConfigureAwait(false);
-            foreach (var cell in sample)
-            {
-                if (stream.TryStage(cell.Request, new(cell.Origin.X, cell.Origin.Y, cell.Origin.Z), cell.Placements)
-                    != PropCellResult.Accepted)
-                    continue;
-                if (cell.Placements.Length != 0)
-                    next.Add(cell.Request.Cell, cell.Supports);
-            }
-        }
-        finally
-        {
-            foreach (var request in requests)
-                stream.CompleteWorker(request);
+            else
+                wanted.Add(key);
         }
         CoverageCount = coverage.Length;
-        Staged += requests.Count(request => next.ContainsKey(request.Cell));
-        Retired += _supports.Keys.Count(key => !overlap || !next.ContainsKey(key));
+        Retired += _supports.Keys.Count(key => invalidated?.Contains(key) == true || !coverage.Contains(key) ||
+            !overlap && !next.ContainsKey(key));
         _supports.Clear();
         foreach (var (key, supports) in next)
             _supports.Add(key, supports);
         _previous = publication;
+        _selection = selection;
+        _pending = new(terrain, stream, publication, wanted, PlacementGateForSmoke, token);
+        Pump();
     }
 
+    internal void Pump()
+    {
+        if (_running is { } run)
+        {
+            if (!run.Result.IsCompleted)
+                return;
+            Finish(run);
+        }
+
+        if (_pending is not { } work)
+            return;
+        _pending = null;
+        var requests = new List<PropCellRequest>(work.Cells.Count);
+        foreach (var key in work.Cells)
+            if (work.Stream.TryRequest(key, Candidates, out var request) == PropCellResult.Accepted)
+                requests.Add(request);
+        if (requests.Count == 0)
+            return;
+
+        var cancel = CancellationTokenSource.CreateLinkedTokenSource(work.Token);
+        var result = Task.Run(async () =>
+        {
+            if (work.Gate is { } gate)
+                await gate.WaitAsync(cancel.Token).ConfigureAwait(false);
+            return Sample(work.Terrain, work.Publication, requests, cancel.Token);
+        }, cancel.Token);
+        _running = new(work, requests, cancel, result);
+    }
+
+    private void Finish(PlacementRun run)
+    {
+        _running = null;
+        try
+        {
+            var sample = run.Result.GetAwaiter().GetResult();
+            if (run.Cancel.IsCancellationRequested || run.Work.Publication != _previous ||
+                run.Work.Stream != _stream)
+                return;
+            foreach (var cell in sample)
+            {
+                if (run.Work.Stream.TryStage(cell.Request, new(cell.Origin.X, cell.Origin.Y, cell.Origin.Z), cell.Placements)
+                    != PropCellResult.Accepted || cell.Placements.Length == 0)
+                    continue;
+                _supports[cell.Request.Cell] = cell.Supports;
+                Staged++;
+            }
+        }
+        catch (OperationCanceledException) when (run.Cancel.IsCancellationRequested) { }
+        catch (Exception)
+        {
+            Failed++;
+        }
+        finally
+        {
+            foreach (var request in run.Requests)
+                run.Work.Stream.CompleteWorker(request);
+            run.Cancel.Dispose();
+        }
+    }
+
+    private void Supersede()
+    {
+        _pending = null;
+        _running?.Cancel.Cancel();
+    }
+
+    internal async Task StopAsync()
+    {
+        Supersede();
+        if (_running is { } run)
+        {
+            await ((Task)run.Result).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            Finish(run);
+        }
+    }
+
+    internal static bool SameCollisionCut(VolumeStreamingSelection? previous, VolumeStreamingSelection next) =>
+        previous is not null && previous.Descriptor == next.Descriptor && previous.Minimum == next.Minimum && previous.Width == next.Width &&
+        previous.RequiresFineCoverage == next.RequiresFineCoverage && previous.Requests.SequenceEqual(next.Requests);
+
+    private sealed record PlacementWork(VolumeStreamingCoordinator Terrain, D3D12PropCells Stream,
+        VolumePublicationInfo Publication, List<PropCellKey> Cells, Task? Gate, CancellationToken Token);
+    private sealed record PlacementRun(PlacementWork Work, List<PropCellRequest> Requests,
+        CancellationTokenSource Cancel, Task<List<Cell>> Result);
     private static List<PropCellKey> Coverage(PlanetVector position)
     {
         // Face coordinates are half-open. A chart owns a candidate only when its signed dominant axis matches.

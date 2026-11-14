@@ -65,6 +65,8 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     {
         if (_runtime is not { } runtime)
             return;
+        if (Props is { } props)
+            await props.StopAsync().ConfigureAwait(false);
         var renderer = Current;
         var deadline = runtime.StopControl.RequestStop(HostStopReason.ExternalCancellation);
         if (renderer is not null)

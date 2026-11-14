@@ -125,6 +125,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     internal async Task ExploreAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost, bool scripted,
         CancellationToken token)
     {
+        var placementGate = scripted && Props is not null
+            ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) : null;
+        if (placementGate is not null)
+            Props!.PlacementGateForSmoke = placementGate.Task;
         var state = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
         if (scripted && Environment.GetEnvironmentVariable("WYU_WP15_PROBE") is "route" or "measure")
         {
@@ -159,6 +163,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         else if (slot is not null)
             Notice("E remove | Q add | 1/2 material\nF5 save | F6 flight | F10 save and quit");
         var start = state.Position;
+        if (placementGate is not null)
+            VerifyPropCollisionCuts(start);
         var startBrick = Descriptor.SampleAt(start).Vertex.Locate().Brick;
         var nextBrick = startBrick with { Z = startBrick.Z + 1 };
         if (scripted)
@@ -256,6 +262,14 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 state = draft!.Result.State;
                 _environmentTick = nextEnvironmentTick;
                 steps++;
+                if (steps == 12 && placementGate is not null)
+                {
+                    if (!Props!.PlacementActive || placementGate.Task.IsCompleted || Props.Staged != 0)
+                        throw new InvalidOperationException("WP16 placement gate did not hold optional work during movement.");
+                    Props.PlacementGateForSmoke = null;
+                    placementGate.SetResult();
+                    Console.WriteLine("WP16 movement committed 12 ticks while prop placement was blocked.");
+                }
             }
             else if (scripted)
                 throw new InvalidOperationException($"Scripted movement held at step {steps} ({status}).");
@@ -267,6 +281,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var camera = Camera(terrain.View, state.Position, state.Heading,
                 prepared is not null && outcome.Status == BarrierStatus.Committed && cave is null
                     ? (_environmentTick - 1, fraction) : null);
+            Props?.Pump();
             var frame = ++_sequence;
             var presentStarted = scripted ? BiomeMeasurements.Start() : 0;
             RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, frame, camera));
@@ -426,12 +441,25 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement reopened before the next BeginTick.");
         if (Props is { } props)
-            await props.RefreshAsync(terrain, _published, position, edit, token).ConfigureAwait(false);
+            props.Refresh(terrain, _published, selection, position, edit, token);
         _selection = selection;
         _fineBricks = CountFineBricks(selection);
         _views++;
         Drain(terrain);
         return true;
+    }
+
+    private void VerifyPropCollisionCuts(PlanetVector position)
+    {
+        var original = _selection!;
+        var same = SelectTerrain(position, East);
+        var shifted = VolumeStreamingSelection.Select(Descriptor, Add(position, new(0, 0, 64)), East);
+        var lod = VolumeStreamingSelection.Select(Descriptor, position, Scale(East, -1));
+        if (!ReferenceProps.SameCollisionCut(original, same) ||
+            ReferenceProps.SameCollisionCut(original, shifted) ||
+            original.Minimum != lod.Minimum || ReferenceProps.SameCollisionCut(original, lod))
+            throw new InvalidOperationException("WP16 collision revalidation did not distinguish a shifted window and a LOD-only change.");
+        Console.WriteLine("WP16 edit reuse rejected both a shifted collision window and a LOD-only change.");
     }
 
     private static PlanetLoadException TerrainAdmissionFailure(VolumeAdmission result) =>

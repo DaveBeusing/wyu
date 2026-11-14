@@ -148,6 +148,8 @@ internal static partial class GameHost
             mouse?.Dispose();
             overlay?.Dispose();
             slot?.Dispose();
+            if (renderHost.Props is { } props)
+                await props.StopAsync().ConfigureAwait(false);
             terrain?.Stop();
             renderer = renderHost.Current;
             if (renderer?.Read() is { } graphics &&
