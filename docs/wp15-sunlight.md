@@ -392,3 +392,30 @@ p95 passed everywhere. Relative p99 exceeded +15% in midday pair 3
 (+83.45%) and low-sun pair 2 (+28.83%); the pooled low-sun result also
 missed at +15.02%. The timing-only run does not establish the cause
 of these outliers. The flip investigation stays closed.
+
+### Outlier review and five-pair repeat on the pinned source
+
+At midday in pair 3, the fifth-slowest shadow-on sample (344) set p99:
+4.9375 ms frame, 2.3657 ms terrain, zero cascade draws. The maximum
+(sample 21) reached 15.2769 ms with 12.7665 ms inside the terrain
+timestamp interval. Two other slow samples had ordinary terrain
+intervals of approximately 0.25 ms. At low sun in pair 2, sample 305
+set shadow-on p99 at 3.2638 ms with 0.2615 ms terrain and zero cascade
+draws. The largest shadow-off frame in that phase took 4.5345 ms, of
+which 2.1129 ms fell inside its terrain interval.
+
+These timestamps locate the delays relative to the draw markers.
+They cannot distinguish extra GPU execution from queue interruption
+without a simultaneous scheduler trace. Prior DxgKrnl overlap findings
+are from different runs. No renderer fix is claimed.
+
+A fresh set of five 1080p NVIDIA pairs used the same WYU binary and
+same timing-only renderer built from the pinned 20871f4 archive source.
+All 15 individual phase checks and all three pooled phase checks passed
+both GPU budgets. The previous excursions did not recur at p99.
+
+| Phase | Extra GPU p95 / p99 (ms) | Relative GPU frame p95 / p99 |
+| --- | ---: | ---: |
+| Midday | 0.1583 / 0.1610 | +6.22% / +4.61% |
+| Low sun | 0.1577 / 0.1596 | +6.37% / +6.31% |
+| Turn | 0.1658 / 0.1684 | +6.74% / +6.64% |
