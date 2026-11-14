@@ -264,7 +264,8 @@ internal static partial class GameHost
             if (selected == 0 || selected == referenceOption)
             {
                 var profile = selected == 0 ? defaultProfile : VolumeWorldSlot.WorldProfile.Reference;
-                var seed = await VolumeExploration.ChooseSeedAsync(window, overlay, token,
+                ulong? seed = profile == VolumeWorldSlot.WorldProfile.Cave ? CavePlanet.Seed :
+                    await VolumeExploration.ChooseSeedAsync(window, overlay, token,
                     VolumeWorldSlot.ProfileName(profile),
                     freeTestWorld ? (replacementSeed ?? CavePlanet.Seed) : null).ConfigureAwait(false);
                 if (seed is { } value)

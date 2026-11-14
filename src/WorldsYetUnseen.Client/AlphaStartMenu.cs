@@ -5,7 +5,7 @@ using static WorldsYetUnseen.Client.PrototypeMenu;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class AlphaStartMenu(WindowsHostModule window, Func<bool, Task<PrototypeSave>> loadMission, AlphaSettingsStore store,
+internal sealed class AlphaStartMenu(WindowsHostModule window, Func<int, Task<PrototypeSave>> loadMission, AlphaSettingsStore store,
     AlphaOverlay overlay, AlphaPerformance performance)
 {
     private static readonly string[] Guidance =
@@ -20,7 +20,7 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, Func<bool, Task<P
     internal AlphaSettings Settings { get; private set; } = AlphaSettings.Defaults;
     internal bool FreeTestWorldRequested { get; private set; }
     internal PrototypeSave? MissionSave { get; private set; }
-    internal bool TestMissionRequested { get; private set; }
+    internal int TestMissionSetup { get; private set; }
     internal bool NewWorldRequested { get; private set; }
 
     internal async Task<bool> ChooseAsync(CancellationToken cancellationToken)
@@ -57,7 +57,7 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, Func<bool, Task<P
             {
                 case 0:
                 case 1:
-                    MissionSave ??= await loadMission(false).ConfigureAwait(false);
+                    MissionSave ??= await loadMission(0).ConfigureAwait(false);
                     if (selected == 1 && MissionSave.Checkpoint is not null)
                         return true;
                     if (selected == 0 && CanStart())
@@ -83,12 +83,12 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, Func<bool, Task<P
                         FreeTestWorldRequested = true;
                         return false;
                     }
-                    if (choice is 1 or 2)
+                    if (choice > 0)
                     {
-                        MissionSave = await loadMission(true).ConfigureAwait(false);
-                        if ((choice == 1 && CanStart()) || (choice == 2 && MissionSave.Checkpoint is not null))
+                        MissionSave = await loadMission(choice).ConfigureAwait(false);
+                        if (CanStart() || MissionSave.Checkpoint is not null)
                         {
-                            TestMissionRequested = true;
+                            TestMissionSetup = choice;
                             return true;
                         }
                         _notice = SlotStatus();
@@ -118,7 +118,7 @@ internal sealed class AlphaStartMenu(WindowsHostModule window, Func<bool, Task<P
     private async Task<int> ChooseTestModeAsync(CancellationToken token)
     {
         var selected = 0;
-        var options = new[] { "Planet worlds", "Start isolated rescue mission", "Continue isolated rescue mission" };
+        var options = new[] { "Planet worlds", "Open isolated rescue mission", "Rescue setup: three stone", "Rescue setup: built beacon", "Rescue setup: ready for flight" };
         while (IsOpen)
         {
             overlay.Menu = $"Free Test World\n> {options[selected]}\nUp / Down / Enter | Esc to return";

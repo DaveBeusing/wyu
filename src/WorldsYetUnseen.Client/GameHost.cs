@@ -1,3 +1,5 @@
+using Groundwork.Persistence;
+using WorldsYetUnseen.Gameplay;
 using Groundwork.Core;
 using Groundwork.Diagnostics;
 using Groundwork.Ecs;
@@ -173,20 +175,32 @@ internal static partial class GameHost
                     alphaDiagnostics?.Enter("SaveLoad");
                     new PrototypeCaption().Update("WYU | Checking save slot");
                     var normalSave = saveDirectory;
-                    var testSave = Path.Combine(FreeTestWorldRoot(), "RescueMission");
-                    Task<PrototypeSave> LoadMission(bool isolated) => PrototypeSave.OpenAsync(
-                        isolated ? testSave : normalSave, runtime.RuntimeOwnership, cancellationToken,
-                        beforeLoad: alphaDiagnostics?.BeforeSaveLoad);
+                    string TestSave(int setup) => Path.Combine(FreeTestWorldRoot(), $"RescueMission-{setup}");
+                    async Task<PrototypeSave> LoadMission(int setup)
+                    {
+                        var opened = await PrototypeSave.OpenAsync(setup == 0 ? normalSave : TestSave(setup),
+                            runtime.RuntimeOwnership, cancellationToken, beforeLoad: alphaDiagnostics?.BeforeSaveLoad)
+                            .ConfigureAwait(false);
+                        if (setup >= 2 && opened.InitialLoad.Status == SaveSlotStatus.Empty)
+                        {
+                            var deposits = DepositMask.West | DepositMask.Seam | DepositMask.East;
+                            if (!PrototypeProgress.TryRestore(deposits, setup == 2 ? 0 : 3, setup == 4, out var progress) ||
+                                !opened.RequestSave(new PrototypeCheckpoint(PrototypeWorld.Spawn, progress)) ||
+                                (await opened.WaitForSaveAsync(cancellationToken).ConfigureAwait(false)).Status != SaveSlotStatus.Committed)
+                                throw new InvalidOperationException("Could not prepare the isolated rescue setup.");
+                        }
+                        return opened;
+                    }
                     if (alphaDiagnostics?.BeforeSaveLoad is not null)
-                        await LoadMission(false).ConfigureAwait(false);
+                        await LoadMission(0).ConfigureAwait(false);
                     new PrototypeCaption().Update("Worlds Yet Unseen");
                     alphaDiagnostics?.Enter("StartMenu");
                     var startMenu = new AlphaStartMenu(window, LoadMission, new AlphaSettingsStore(settingsDirectory!),
                         overlay!, performance!);
                     startGame = await startMenu.ChooseAsync(cancellationToken).ConfigureAwait(false);
                     prototypeSave = startMenu.MissionSave;
-                    if (startMenu.TestMissionRequested)
-                        saveDirectory = testSave;
+                    if (startMenu.TestMissionSetup != 0)
+                        saveDirectory = TestSave(startMenu.TestMissionSetup);
                     launchNewWorld = startMenu.NewWorldRequested;
                     launchFreeTestWorld = startMenu.FreeTestWorldRequested;
                     overlay!.Menu = null;
