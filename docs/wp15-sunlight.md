@@ -364,3 +364,31 @@ classification, this is a comparison of the two window setups.
 The lower clipped-arm p99 with shadows enabled is an observation
 across separate wake and scheduling windows, not evidence that
 shadows speed up rendering.
+
+## Verified archive with GPU-local meshes and cascade reuse
+
+The consumer pins 0.1.0-dev.43527092534.1, produced by green Groundwork
+master 20871f43a809aa81c6347e4ab93b163fca9df1df (Windows CI 43527092534,
+attempt 1). Fresh locked restore of all ten packages, nine gameplay tests,
+headless startup and controlled shutdown passed.
+
+Five Windows Release A/B pairs used the existing seed 42 and three-phase
+replay at 1920 × 1080 on the NVIDIA RTX PRO 5000 Blackwell Laptop. The
+qualification copy used the exact producer source with the
+eng/groundwork-wp15-archive-timestamps.patch instrumentation applied via
+git apply --unidiff-zero. Only the measured copy used that DLL. It retains
+the merged renderer and adds timing and counters, without the experimental
+early-depth shader attribute or optimized clear from the previous probe.
+Each pooled phase contains 2,000 samples per variant.
+
+| Phase | Extra GPU p95 / p99 (ms) | Relative GPU frame p95 / p99 |
+| --- | ---: | ---: |
+| Midday | 0.1585 / 0.1623 | +5.92% / +7.49% |
+| Low sun | 0.1579 / 0.1617 | +6.36% / +15.02% |
+| Turn | 0.1661 / 0.1696 | +6.72% / -6.89% |
+
+The absolute 1.5/2.0 ms budget passed in all pairs and phases. Relative
+p95 passed everywhere. Relative p99 exceeded +15% in midday pair 3
+(+83.45%) and low-sun pair 2 (+28.83%); the pooled low-sun result also
+missed at +15.02%. The timing-only run does not establish the cause
+of these outliers. The flip investigation stays closed.
