@@ -895,9 +895,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
         var pending = world.State.Read().PendingFaultGeneration;
         var grant = inventory with { Ore = inventory.Ore + 16, OreInventoryRevision = inventory.OreInventoryRevision + 1 };
-        var prepared = _ports.Preparation.TryPrepare(new BarrierPublicationDraft(commit, root.WithState(grant), pending, [])).Publication;
+        var changed = root.WithState(grant);
+        var permit = _ports.RootChanges.TryReserve(commit, changed);
+        var prepared = permit is null ? null : _ports.Preparation.TryPrepare(
+            new BarrierPublicationDraft(commit, changed, pending, [], permit)).Publication;
         if (prepared is null)
         {
+            permit?.Revoke();
             Finish(commit);
             Notice("Ore grant held.");
             return;
