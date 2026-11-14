@@ -40,10 +40,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private int _transitions, _views, _windows, _fineBricks;
 
     private CavePlanet? cave => slot?.Cave;
+    private bool Connected => cave?.Descriptor.GeneratorVersion == PlanetGeologyField.ConnectedGeneratorVersion;
     private ReferencePlanet planet => reference ?? throw new InvalidOperationException("This world uses cave geology.");
     private PlanetDescriptor Descriptor => cave?.Descriptor ?? planet.Descriptor;
     private IPlanetBrickSource Field => (IPlanetBrickSource?)cave?.Field ?? planet.Field;
-    private string PlanetName => cave is null ? ReferencePlanet.DisplayName : CavePlanet.Name;
+    private string PlanetName => cave is null ? ReferencePlanet.DisplayName : Connected ? CavePlanet.ConnectedName : CavePlanet.Name;
 
     internal VolumeStreamingCoordinator CreateTerrain()
     {
@@ -217,7 +218,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                     return;
                 continue;
             }
-            if (cave is null && !scripted && PrototypeMenu.Pressed(input, InputControl.F6))
+            if ((cave is null || Connected && !HasCaveRoof(terrain, state)) && !scripted && PrototypeMenu.Pressed(input, InputControl.F6))
             {
                 mouse?.Update(false, ref _yaw, ref _pitch);
                 var result = await FlyAsync(terrain, renderHost, state, null, false, token).ConfigureAwait(false);

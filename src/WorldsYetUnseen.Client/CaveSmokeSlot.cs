@@ -10,18 +10,21 @@ internal static partial class GameHost
         if (!File.Exists(Path.Combine(fixture, "wyu-cave-smoke.fixture")))
             throw new InvalidOperationException("Cave smoke requires an isolated fixture directory.");
         var volume = Path.Combine(fixture, "v2");
+        var connected = phase.StartsWith("v3-", StringComparison.Ordinal);
+        if (connected)
+            phase = phase[3..];
         if (phase == "init")
         {
             if (Directory.Exists(volume))
                 throw new InvalidOperationException("Cave smoke must start with a fresh world.");
-            return VolumeWorldSlot.Create(volume, CavePlanet.Seed, cave: true);
+            return VolumeWorldSlot.Create(volume, CavePlanet.Seed, cave: true, connected: connected);
         }
         ArgumentOutOfRangeException.ThrowIfNotEqual(phase, "resume");
         var id = VolumeWorldSlot.List(volume).Single();
         for (var attempt = 0; attempt < 40; attempt++)
         {
             var slot = VolumeWorldSlot.Open(volume, id, out var status);
-            if (slot?.Cave is not null)
+            if (slot?.Cave is { } cave && (cave.Descriptor.GeneratorVersion == 3) == connected)
                 return slot;
             slot?.Dispose();
             if (status is not (VolumeSlotStatus.Busy or VolumeSlotStatus.Indeterminate))

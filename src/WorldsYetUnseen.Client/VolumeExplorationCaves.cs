@@ -77,8 +77,8 @@ internal sealed partial class VolumeExploration
                 };
         }
         return below
-            ? FormattableString.Invariant($"Ember Caves | Ore {CaveOre}\n{_caveAim}\nE mine | Q fill\nF5 save | F10 save and quit\n{CaveExitHint(state)}")
-            : FormattableString.Invariant($"Ember Caves | Ore {CaveOre}\nCave mouth {Length(Subtract(CavePlanet.Entrance, state.Position)):F1} m\nFollow the ramp ahead | W to walk");
+            ? FormattableString.Invariant($"{PlanetName} | Ore {CaveOre}\n{_caveAim}\nE mine | Q fill\nF5 save | F10 save and quit\n{CaveExitHint(state)}")
+            : FormattableString.Invariant($"{PlanetName} | Ore {CaveOre}\nCave mouth {Length(Subtract(CavePlanet.Entrance, state.Position)):F1} m\nFollow the ramp ahead | W to walk");
     }
 
     private static string CaveExitHint(PlanetWalkState state) =>
@@ -100,9 +100,15 @@ internal sealed partial class VolumeExploration
         return draft;
     }
 
-    internal async Task RunCaveSmokeAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
+    internal async Task RunCaveSmokeAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost,
         string phase, CancellationToken token)
     {
+        var renderer = renderHost.Active;
+        if (Connected)
+        {
+            phase = phase[3..];
+            VerifyConnectedProfiles();
+        }
         var state = await OpenTerrainAsync(terrain, renderer, token).ConfigureAwait(false);
         if (phase == "init")
         {
@@ -214,6 +220,57 @@ internal sealed partial class VolumeExploration
                 Camera(terrain.View, state.Position, state.Heading)));
             await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
             Console.WriteLine(FormattableString.Invariant($"WP12 cave reached supported surface: {state.Position.X:R},{state.Position.Y:R},{state.Position.Z:R}"));
+            if (Connected)
+            {
+                var landing = await FlyAsync(terrain, renderHost, state, null, scripted: true, token).ConfigureAwait(false);
+                if (landing.Quit || CaveOre <= 0 || _published.TerrainRevision != checkpoint.TerrainRevision)
+                    throw new InvalidOperationException("V3 flight did not retain the edited cave and inventory.");
+                Console.WriteLine("PASS: WP17 V3 orbit and return retained cave edits and ore.");
+            }
+        }
+    }
+
+    private void VerifyConnectedProfiles()
+    {
+        var field = cave!.Field;
+        var ridge = 0L;
+        var main = 0L;
+        var branch = 0L;
+        var crestPoint = default(LatticeCoordinate);
+        var mainPoint = default(LatticeCoordinate);
+        var branchPoint = default(LatticeCoordinate);
+        var mainFloor = 0L;
+        for (var z = -256; z < 256; z += 2)
+        for (var x = -256; x < 256; x += 2)
+        {
+            var vertex = new LatticeCoordinate(x, (long)Descriptor.RadiusMeters, z);
+            var relief = field.SampleConnectedRelief(vertex);
+            var height = field.SampleLandform(vertex).Elevation;
+            if (height > ridge)
+                (ridge, crestPoint) = (height, vertex);
+            main = Math.Max(main, relief.MainValley);
+            if (relief.MainValley > relief.Tributary && height < mainFloor)
+                (mainFloor, mainPoint) = (height, vertex);
+            if (relief.Tributary > relief.MainValley && -height > branch)
+                (branch, branchPoint) = (-height, vertex);
+        }
+        if (ridge <= 0 || mainFloor >= 0 || branch <= 0)
+            throw new InvalidOperationException("V3 ridge, main valley or tributary is missing.");
+        VerifyOrbitProfile("ridge", crestPoint, positive: true);
+        VerifyOrbitProfile("main", mainPoint, positive: false);
+        VerifyOrbitProfile("tributary", branchPoint, positive: false);
+        Console.WriteLine($"WP17 profiles ridge={ridge} main={main} tributary={branch} (1/256 cell).");
+
+        void VerifyOrbitProfile(string name, LatticeCoordinate point, bool positive)
+        {
+            var direction = Unit(new(point.X, point.Y, point.Z));
+            var canonical = Descriptor.SampleAt(Scale(direction, Descriptor.RadiusMeters)).Vertex;
+            var expected = field.SampleLandform(canonical).Elevation / (double)PlanetDensityField.UnitsPerCell;
+            var sample = ProceduralGlobe.Sample(Descriptor, field.SampleLandform, field.SampleMaterial, direction, null);
+            var actual = Length(new(sample.Position.X, sample.Position.Y, sample.Position.Z)) - Descriptor.RadiusMeters;
+            if ((expected > 0) != positive || Math.Abs(expected - actual) > 0.04)
+                throw new InvalidOperationException($"V3 globe {name} relief disagrees with the canonical field: {expected:R} / {actual:R}.");
+            Console.WriteLine(FormattableString.Invariant($"WP17 orbit profile {name}: field={expected:F4} m globe={actual:F4} m."));
         }
     }
 

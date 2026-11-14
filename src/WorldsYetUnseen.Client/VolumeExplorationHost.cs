@@ -119,7 +119,7 @@ internal static partial class GameHost
             diagnostics?.Enter("PlanetTerrain");
             reason = HostStopReason.RuntimeFault;
             if (caveSmoke is not null)
-                await exploration.RunCaveSmokeAsync(terrain, renderer, caveSmoke, token).ConfigureAwait(false);
+                await exploration.RunCaveSmokeAsync(terrain, renderHost, caveSmoke, token).ConfigureAwait(false);
             else if (flightSmoke)
                 await exploration.RunFlightSmokeAsync(terrain, renderHost, saveSmoke!, token).ConfigureAwait(false);
             else if (saveSmoke is null)
@@ -195,11 +195,13 @@ internal static partial class GameHost
         var slots = VolumeWorldSlot.List(root);
         var selected = 0;
         var caveOption = slots.Length + 1;
-        var optionCount = caveOption + 1;
+        var connectedOption = caveOption + 1;
+        var optionCount = connectedOption + 1;
         string? notice = null;
         while (true)
         {
-            var label = selected == 0 ? "New World" : selected == caveOption
+            var label = selected == 0 ? "New World" : selected == connectedOption
+                ? $"New V3 World\n{CavePlanet.ConnectedName} · seed {CavePlanet.Seed}" : selected == caveOption
                 ? $"New Cave World\n{CavePlanet.Name} · seed {CavePlanet.Seed}" : $"Continue {selected}/{slots.Length}\n{slots[selected - 1]:N}";
             var guidance = selected == 0 ? "Up for Cave World\n" : "";
             overlay.Menu = $"WYU\n\nPlanet worlds\n\n> {label}\n\n{guidance}Up / Down to choose\nEnter to open\nEsc to exit\n\n{notice}";
@@ -214,6 +216,8 @@ internal static partial class GameHost
             if (!PrototypeMenu.Pressed(input, InputControl.Enter))
                 continue;
 
+            if (selected == connectedOption)
+                return await Task.Run(() => VolumeWorldSlot.Create(root, CavePlanet.Seed, connected: true)).ConfigureAwait(false);
             if (selected == caveOption)
                 return await Task.Run(() => VolumeWorldSlot.Create(root, CavePlanet.Seed, cave: true)).ConfigureAwait(false);
 

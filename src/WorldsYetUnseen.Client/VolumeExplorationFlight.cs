@@ -18,7 +18,7 @@ internal sealed partial class VolumeExploration
     private const double GearRadius = 0.4;
     private const double GearHeight = 1.25;
     private static readonly VolumeQueryLimits FlightQueries = new(8_000_000, 128);
-    private double FlightBoundary => planet.Descriptor.RadiusMeters + FlightOuterHeight;
+    private double FlightBoundary => Descriptor.RadiusMeters + FlightOuterHeight;
 
     private async Task<(PlanetWalkState Player, bool Quit)> FlyAsync(VolumeStreamingCoordinator terrain,
         ProceduralRenderHost renderHost, PlanetWalkState player, PlanetVector? scriptedAnchor, bool scripted,
@@ -56,13 +56,15 @@ internal sealed partial class VolumeExploration
             return (player, false);
         }
         var revision = _published.TerrainRevision;
-        var flight = new ProceduralFlight(planet.Descriptor.RadiusMeters, pad, player.Heading);
+        var flight = new ProceduralFlight(Descriptor.RadiusMeters, pad, player.Heading);
         if (scripted)
             FlightTrace("launch", flight, revision, digest);
         var globeTask = Task.Run(() =>
         {
             var buildSample = BiomeMeasurements.StartBuild();
-            var globe = ProceduralGlobe.Build(planet, pad, renderHost.Biomes, token);
+            var globe = cave is { } geology
+                ? ProceduralGlobe.Build(Descriptor, geology.Field.SampleLandform, geology.Field.SampleMaterial, pad, null, token)
+                : ProceduralGlobe.Build(planet, pad, renderHost.Biomes, token);
             BiomeMeasurements.WriteBuild("globe-build", buildSample);
             return globe;
         }, token);
@@ -302,7 +304,9 @@ internal sealed partial class VolumeExploration
         var draft = terrain.TryPlanMovement(player, 0, 0, out var status)
             ?? throw new InvalidOperationException($"Ground return could not be admitted ({status}).");
         var candidates = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
-        var prepared = terrain.TryPrepareMovement(draft, candidates, [], new GameHost.ExplorationRoot(begin.World, landing))
+        var state = Connected ? ((VolumeWorldRoot)_ports.Committed.Read().Root).State :
+            new GameHost.ExplorationRoot(begin.World, landing);
+        var prepared = terrain.TryPrepareMovement(draft, candidates, [], state)
             ?? throw new InvalidOperationException("Landing state could not be prepared.");
         if (Finish(candidates, prepared).Status != BarrierStatus.Committed)
             throw new InvalidOperationException("Landing state did not commit.");
@@ -314,7 +318,7 @@ internal sealed partial class VolumeExploration
     {
         using var lease = terrain.TryRead();
         if (lease is null || lease.Info != _published || lease.Info.TerrainRevision != landed.Revision ||
-            lease.EditLineage != planet.Descriptor || !HasFineLandingCoverage(landed.Foot))
+            lease.EditLineage != Descriptor || !HasFineLandingCoverage(landed.Foot))
             throw new InvalidDataException("The saved touchdown lacks its committed terrain revision.");
         // The checkpoint records a grounded craft. Only the local contact needs rebuilding on Continue.
         var up = Unit(landed.Foot);
@@ -351,7 +355,7 @@ internal sealed partial class VolumeExploration
         digest = "";
         blocked = "terrain is not presented";
         using var lease = terrain.TryRead();
-        if (lease is null || lease.Info != _published || lease.EditLineage != planet.Descriptor)
+        if (lease is null || lease.Info != _published || lease.EditLineage != Descriptor)
             return false;
         var overlayBytes = new byte[lease.EditOverlayBytes];
         if (!lease.TryWriteEditOverlay(overlayBytes, out var written) || written != overlayBytes.Length)
@@ -363,7 +367,7 @@ internal sealed partial class VolumeExploration
             var row = overlayBytes.AsSpan(offset, 24);
             var vertex = new PlanetVector(BinaryPrimitives.ReadInt64LittleEndian(row),
                 BinaryPrimitives.ReadInt64LittleEndian(row[8..]), BinaryPrimitives.ReadInt64LittleEndian(row[16..]));
-            if (Length(vertex) > planet.Descriptor.RadiusMeters + 64)
+            if (Length(vertex) > Descriptor.RadiusMeters + 64)
                 return false;
         }
 
@@ -395,8 +399,8 @@ internal sealed partial class VolumeExploration
             return false;
         // Four metres enclose the local sweep, gear and its radius on every axis.
         var extent = new PlanetVector(4, 4, 4);
-        var lower = planet.Descriptor.SampleAt(Subtract(pad, extent)).Vertex.Locate().Brick;
-        var upper = planet.Descriptor.SampleAt(Add(pad, extent)).Vertex.Locate().Brick;
+        var lower = Descriptor.SampleAt(Subtract(pad, extent)).Vertex.Locate().Brick;
+        var upper = Descriptor.SampleAt(Add(pad, extent)).Vertex.Locate().Brick;
         for (var z = lower.Z; z <= upper.Z; z++)
         for (var y = lower.Y; y <= upper.Y; y++)
         for (var x = lower.X; x <= upper.X; x++)

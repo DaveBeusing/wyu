@@ -20,13 +20,17 @@ internal sealed class CavePlanet
         new PlanetLandformRecipe(61, 0, 0, new(17, 0), new(11, 0), new(5, 0), 13, 7, 19),
         4, 92, 19, 1, 7, 0, 8, 104, 65536, 65536, ShallowRock, MiddleRock, DeepRock, Ore);
 
-    internal CavePlanet(Guid world, ulong seed)
+    internal const string ConnectedName = "Ember Ridges";
+    private static readonly PlanetConnectedRecipe ConnectedRecipe = new(Recipe, 2, 512, 384, 256, 128);
+
+    internal CavePlanet(Guid world, ulong seed, bool connected = false)
     {
         if (seed != Seed)
             throw new ArgumentOutOfRangeException(nameof(seed), "Ember Caves uses the verified seed 42.");
-        Descriptor = new(world, PlanetId, seed, PlanetGeologyField.GeneratorVersion,
-            PlanetDensityField.TerrainSchemaVersion, 2, Recipe.ParameterSha256, Radius);
-        Field = new(Descriptor, Recipe);
+        Descriptor = new(world, PlanetId, seed,
+            connected ? PlanetGeologyField.ConnectedGeneratorVersion : PlanetGeologyField.GeneratorVersion,
+            PlanetDensityField.TerrainSchemaVersion, 2, connected ? ConnectedRecipe.ParameterSha256 : Recipe.ParameterSha256, Radius);
+        Field = connected ? PlanetTerrainGenerator.CreateConnected(Descriptor, ConnectedRecipe) : new(Descriptor, Recipe);
     }
 
     internal PlanetDescriptor Descriptor { get; }

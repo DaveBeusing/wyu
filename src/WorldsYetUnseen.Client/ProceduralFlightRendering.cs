@@ -103,6 +103,12 @@ internal static class ProceduralGlobe
 
     internal static RenderMeshPair Build(ReferencePlanet planet, PlanetVector pad, ReferenceBiomes? biomes, CancellationToken token)
     {
+        return Build(planet.Descriptor, planet.Field.SampleLandform, planet.Field.SampleMaterial, pad, biomes, token);
+    }
+
+    internal static RenderMeshPair Build(PlanetDescriptor descriptor, Func<LatticeCoordinate, PlanetLandform> landform,
+        Func<LatticeCoordinate, ushort> material, PlanetVector pad, ReferenceBiomes? biomes, CancellationToken token)
+    {
         var plan = Plan.Value;
         var samples = new GlobeSample[plan.Directions.Length];
         const int batchSize = 512;
@@ -114,7 +120,7 @@ internal static class ProceduralGlobe
             var start = batch * batchSize;
             var end = Math.Min(start + batchSize, samples.Length);
             for (var i = start; i < end; i++)
-                samples[i] = Sample(planet, plan.Directions[i], biomes);
+                samples[i] = Sample(descriptor, landform, material, plan.Directions[i], biomes);
         });
 
         token.ThrowIfCancellationRequested();
@@ -122,16 +128,16 @@ internal static class ProceduralGlobe
             new(BuildHalf(plan.Second, samples, pad, true), Vector3.Zero));
     }
 
-    private static GlobeSample Sample(ReferencePlanet planet, PlanetVector direction, ReferenceBiomes? biomes)
+    internal static GlobeSample Sample(PlanetDescriptor descriptor, Func<LatticeCoordinate, PlanetLandform> landform,
+        Func<LatticeCoordinate, ushort> sampleMaterial, PlanetVector direction, ReferenceBiomes? biomes)
     {
-        var descriptor = planet.Descriptor;
         var radius = descriptor.RadiusMeters;
         var height = 0d;
         var position = Scale(direction, radius);
         var vertex = descriptor.SampleAt(position).Vertex;
         for (var pass = 0; pass < 3; pass++)
         {
-            var next = planet.Field.SampleLandform(vertex).Elevation / (double)PlanetDensityField.UnitsPerCell;
+            var next = landform(vertex).Elevation / (double)PlanetDensityField.UnitsPerCell;
             if (next == height)
                 break;
             height = next;
@@ -139,7 +145,7 @@ internal static class ProceduralGlobe
             vertex = descriptor.SampleAt(position).Vertex;
         }
 
-        var material = planet.Field.SampleMaterial(vertex);
+        var material = sampleMaterial(vertex);
         var color = biomes?.Color(position, material) ??
             (material == (ushort)ReferenceTerrainMaterial.Basalt ? 0xff6f806au : 0xff76a3c4u);
         return new(Float(position), color);
@@ -212,7 +218,7 @@ internal static class ProceduralGlobe
 
     private sealed record SamplingPlan(PlanetVector[] Directions, HalfPlan First, HalfPlan Second);
     private sealed record HalfPlan(int[] SampleIndices, uint[] Indices);
-    private readonly record struct GlobeSample(Vector3 Position, uint Color);
+    internal readonly record struct GlobeSample(Vector3 Position, uint Color);
 
     private static void AddMarker(Span<Vector3> vertices, Span<uint> indices, Span<uint> colors, PlanetVector pad, uint offset)
     {
