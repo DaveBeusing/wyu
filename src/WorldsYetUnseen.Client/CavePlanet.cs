@@ -21,7 +21,9 @@ internal sealed class CavePlanet
         4, 92, 19, 1, 7, 0, 8, 104, 65536, 65536, ShallowRock, MiddleRock, DeepRock, Ore);
 
     internal const string ConnectedName = "Ember Ridges";
-    private static readonly PlanetConnectedRecipe ConnectedRecipe = new(Recipe, 2, 512, 384, 256, 128);
+    private const int ConnectedRidgeAmplitude = 512;
+    internal const double MaximumConnectedRelief = ConnectedRidgeAmplitude / (double)PlanetDensityField.UnitsPerCell;
+    private static readonly PlanetConnectedRecipe ConnectedRecipe = new(Recipe, 2, ConnectedRidgeAmplitude, 384, 256, 128);
 
     internal CavePlanet(Guid world, ulong seed, bool connected = false)
     {

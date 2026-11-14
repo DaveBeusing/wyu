@@ -31,6 +31,14 @@ internal sealed partial class VolumeExploration
             return (player, false);
         }
 
+        if (Connected && !IsConfirmedLaunchSurface(terrain, player.Position))
+        {
+            if (scripted)
+                throw new InvalidOperationException("V3 takeoff requires a confirmed surface position.");
+            Notice("Takeoff requires a confirmed surface position.");
+            return (player, false);
+        }
+
         diagnostics?.Write("flight-requested", $"revision={_published.TerrainRevision}");
         var anchors = scriptedAnchor is { } requested ? [requested] : FlightAnchors(player);
         var center = FlightCoverageCenter(player.Position);
@@ -274,6 +282,8 @@ internal sealed partial class VolumeExploration
         Notice("Touchdown confirmed. F5 saves this landing.");
         if (scripted)
             FlightTrace("touchdown", flight, revision, digest);
+        if (scripted && Connected)
+            await GameHost.VerifyConnectedProfilesAsync(window, slot!, await globeTask.ConfigureAwait(false), token).ConfigureAwait(false);
         return (position, false);
     }
 
@@ -333,6 +343,34 @@ internal sealed partial class VolumeExploration
             slot?.Checkpoint is not { } checkpoint || !bytes.AsSpan().SequenceEqual(checkpoint.Overlay))
             throw new InvalidDataException("The saved touchdown overlay differs from the rebuilt terrain.");
         return Convert.ToHexStringLower(SHA256.HashData(bytes));
+    }
+
+    private bool IsConfirmedLaunchSurface(VolumeStreamingCoordinator terrain, PlanetVector foot)
+    {
+        using var lease = terrain.TryRead();
+        if (lease is null || lease.Info != _published || lease.Info.View != terrain.View)
+            return false;
+        var up = Unit(foot);
+        var exterior = Math.Max(Descriptor.RadiusMeters + CavePlanet.MaximumConnectedRelief, Length(foot));
+        var overlay = new byte[lease.EditOverlayBytes];
+        if (!lease.TryWriteEditOverlay(overlay, out var written) || written != overlay.Length)
+            return false;
+        for (var offset = 8; offset < overlay.Length; offset += 32)
+        {
+            var row = overlay.AsSpan(offset, 24);
+            var vertex = new PlanetVector(BinaryPrimitives.ReadInt64LittleEndian(row),
+                BinaryPrimitives.ReadInt64LittleEndian(row[8..]), BinaryPrimitives.ReadInt64LittleEndian(row[16..]));
+            exterior = Math.Max(exterior, Length(Scale(vertex, Descriptor.CellSizeMeters)));
+        }
+        // Start beyond the edited sample envelope. Require published air and complete query coverage.
+        var outer = Scale(up, exterior + 4 * Descriptor.CellSizeMeters);
+        if (!lease.TryReadDensity(Descriptor.SampleAt(outer), out var density) || density <= 0)
+            return false;
+        Span<VolumeRayHit> hits = stackalloc VolumeRayHit[8];
+        var ray = lease.Raycast(outer, Add(foot, Scale(up, -0.25)), hits, CaveQueries);
+        return ray.Status == VolumeQueryStatus.Contact && ray.Count > 0 &&
+            Length(Subtract(hits[0].Position, foot)) <= 0.25 && Dot(hits[0].Normal, up) >= 0.87 &&
+            lease.Sweep(CaveBody(foot), default, CaveQueries).Status == VolumeQueryStatus.Clear;
     }
 
     private static PlanetVector FlightCoverageCenter(PlanetVector position) => Add(position, Scale(Unit(position), 26));

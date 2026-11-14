@@ -10,7 +10,7 @@ foreach ($phase in 'v3-init', 'v3-resume') {
     $exitCode = $LASTEXITCODE
     $output | Write-Host
     $output | Set-Content -LiteralPath (Join-Path $fixture "$phase.log")
-    if ($exitCode -ne 0 -or @($output | Where-Object { $_ -cmatch '^WP17 orbit profile ' }).Count -ne 3 -or
+    if ($exitCode -ne 0 -or ($phase -eq 'v3-resume' -and @($output | Where-Object { $_ -cmatch '^WP17 mesh profile ' }).Count -ne 3) -or
         $output -cnotcontains 'PASS: WYU WP12 cave route and native shutdown.') {
         throw "WP17 failed in $phase (exit $exitCode)."
     }

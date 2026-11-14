@@ -186,6 +186,37 @@ internal static partial class GameHost
         }
     }
 
+    internal static async Task VerifyConnectedProfilesAsync(WindowsHostModule window, VolumeWorldSlot slot,
+        Groundwork.Rendering.RenderMeshPair globe, CancellationToken token)
+    {
+        // The profile sites are away from the route. Publish them without changing the saved player's coverage.
+        var clock = TimeProvider.System;
+        var timeout = TimeSpan.FromSeconds(10);
+        var timing = new RuntimeTimingLimits(timeout, timeout, timeout);
+        var budget = new ProcessResourceBudget(new ProcessResourceLimits(1, RuntimeQuota));
+        using var reservation = budget.TryReserveRuntime(RuntimeQuota)
+            ?? throw new InvalidOperationException("Could not reserve the connected relief profile runtime.");
+        var runtime = RuntimeSafetyAuthority.Create(clock, timing, reservation);
+        VolumeStreamingCoordinator? terrain = null;
+        try
+        {
+            if (!runtime.TryAllocateWorldId(out var id))
+                throw new InvalidOperationException("Could not allocate the connected relief profile world.");
+            var world = runtime.OpenWorld(id, WorldQuota,
+                new BarrierSupervisorPolicy(WorldQuota.Diagnostics.RequiredEvidenceRecords), new CaveInventory(id, 0, 1),
+                new ExplorationJobScope(), slot.Checkpoint?.Tick ?? 0);
+            var exploration = new VolumeExploration(world, null, window, null, null, slot, null);
+            terrain = exploration.CreateTerrain(restore: false);
+            await exploration.VerifyConnectedProfilesAsync(terrain, globe, token).ConfigureAwait(false);
+        }
+        finally
+        {
+            terrain?.Stop();
+            await StopAsync(runtime, clock, null, null, null, new EcsStorageBudget(StorageBytes),
+                null, null, HostStopReason.ExternalCancellation).ConfigureAwait(false);
+        }
+    }
+
     private static string DefaultVolumeRoot() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WorldsYetUnseen", "WP11", "v2");
 
