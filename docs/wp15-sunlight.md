@@ -9,12 +9,13 @@ direct share ramps from zero at the horizon to 65% at an elevation sine of
 Package E floor of 0.18 and the shadow passes are disabled. Fog still follows
 terrain shading. Orbit and Ember Caves use their existing presentation.
 
-Set WYU_WP15 to off for the Package E comparison. Both variants use the same
+Set WYU_WP15=on to opt into WP15. The default retains Package E lighting
+pending qualification with a moving sun. Both variants use the same
 immutable Groundwork archive and both retain Package B, E and G.
 
 ## Windows checks
 
-Set WYU_WP15_PROBE to route and run the Release client with
+Set WYU_WP15=on and WYU_WP15_PROBE=route and run the Release client with
 --volume-smoke 42 hardware or --volume-smoke 20261111 warp.
 The route derives midday, low sun and night ticks from the canonical spawn,
 looks at fixed poses while moving 4 m along the heading at low sun, turns
@@ -25,7 +26,7 @@ renderer tests cover the shadow pixels at the cascade split and the exact
 first presented terrain edit. The WYU route checks do not measure rebase
 edge displacement in pixels.
 
-Run eng/Test-ReferenceSky.ps1 for the flight handoff and Continue. The flight
+With WYU_WP15=on, run eng/Test-ReferenceSky.ps1 for the flight handoff and Continue. The flight
 smoke output includes a WP15 LANDED row for comparing the restored lighting
 to the landing pose and tick.
 
@@ -419,3 +420,25 @@ both GPU budgets. The previous excursions did not recur at p99.
 | Midday | 0.1583 / 0.1610 | +6.22% / +4.61% |
 | Low sun | 0.1577 / 0.1596 | +6.37% / +6.31% |
 | Turn | 0.1658 / 0.1684 | +6.74% / +6.64% |
+
+### Moving-sun review replay
+
+The corrected replay advances the accepted sun tick every frame and
+alternates exact and half-tick samples. The turn phase oscillates
+between +/-0.70 rad with a 24-frame period. Both variants use the same
+route and pinned Groundwork 0.1.0-dev.43527092534.1 source; the probe DLL
+adds timestamps and counters. All five 1080p NVIDIA pairs rendered
+cascades in 400/400 measured frames per enabled phase and 0/400 with
+WP15 disabled. Present mode was not independently classified in this
+timestamp-only replay.
+
+| Phase | Extra GPU p95 / p99 (ms) | Relative GPU frame p95 / p99 |
+| --- | ---: | ---: |
+| Midday | 0.7508 / 0.7914 | +29.62% / +25.98% |
+| Low sun | 0.3782 / 0.3805 | +15.59% / +15.67% |
+| Repeated turns | 0.3816 / 0.3852 | +15.55% / +15.75% |
+
+The absolute GPU budget passed in all pairs and phases. The relative
+GPU budget failed in every pair and phase. WP15 is opt-in via
+WYU_WP15=on pending performance qualification; the default preserves
+Package E lighting.

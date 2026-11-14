@@ -33,12 +33,14 @@ try {
                 }
             }
             foreach ($phase in $phases) {
+                $redrawn = 0;
                 $span = @($lines | Where-Object { $_ -cmatch "^WP15 SEQUENCES $phase (\d+) 400$" })
                 if ($span.Count -ne 1) { throw "Missing sequence window for $phase. See $path." }
                 $first = [ulong]($span[0] -split ' ')[3]
                 for ($i = 0; $i -lt 400; $i++) {
                     $row = $data[($first + [ulong]$i)]
                     if ($null -eq $row) { throw "Missing GPU timestamp for sequence $($first + $i). See $path." }
+                    if ([int]$row.Draws -gt 0) { $redrawn++ }
                     $samples.Add([pscustomobject]@{
                         Pair = $pair; Mode = $mode; Phase = $phase; Sample = $i
                         Frame = [double]::Parse($row.Frame, $invariant)
@@ -49,6 +51,10 @@ try {
                         Draws = [int]$row.Draws; GeometryBuilds = [long]$row.GeometryBuilds
                     })
                 }
+                if (($mode -eq 'on' -and $redrawn -lt 390) -or ($mode -eq 'off' -and $redrawn -ne 0)) {
+                    throw "Unexpected shadow workload in $pair/$mode/$phase. Redrawn frames: $redrawn/400."
+                }
+                Write-Host "WP15 $pair/$mode/$phase redrew maps in $redrawn/400 frames."
             }
             Write-Host "WP15 replay $pair/$mode passed."
         }

@@ -37,11 +37,15 @@ internal sealed partial class VolumeExploration
             {
                 var camera = phase switch
                 {
-                    "turn" => origin with { Forward = Turn(i < count / 2 ? -0.70f : 0.70f) },
+                    "turn" => origin with { Forward = Turn(measure ? 0.70f * MathF.Sin(i * MathF.Tau / 24) : i < count / 2 ? -0.70f : 0.70f) },
                     "low" when !measure => origin with { Position = Add(origin.Position, Scale(forward, 4 * i / (count - 1d))) },
                     _ => origin,
                 };
-                var frame = ApplyNearEnvironment(camera, tick, 0);
+                // Alternate exact and half-tick presentation samples while the
+                // accepted clock advances. Both A/B variants replay this path.
+                var sampleTick = tick + (measure ? (ulong)i : 0);
+                var fraction = measure && (i & 1) != 0 ? 0.5 : 0;
+                var frame = ApplyNearEnvironment(camera, sampleTick, fraction);
                 VerifyLight(frame, expectedDirect: true);
                 var begin = await BeginAsync(token).ConfigureAwait(false);
                 terrain.BeginTick(begin);

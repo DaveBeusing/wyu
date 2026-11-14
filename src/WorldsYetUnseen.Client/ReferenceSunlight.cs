@@ -6,7 +6,7 @@ namespace WorldsYetUnseen.Client;
 
 internal static class ReferenceSunlight
 {
-    internal static readonly bool Enabled = Environment.GetEnvironmentVariable("WYU_WP15") != "off";
+    internal static readonly bool Enabled = Environment.GetEnvironmentVariable("WYU_WP15") == "on";
 
     internal static VolumeCamera Apply(VolumeCamera camera, ulong tick, double fraction)
     {
