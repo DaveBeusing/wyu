@@ -29,6 +29,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private ulong _environmentTick = ReadEnvironmentTick(slot?.Checkpoint);
     private readonly ReferenceWeather? _weather = reference is null ||
         Environment.GetEnvironmentVariable("WYU_PACKAGE_E") == "off" ? null : new(reference);
+    internal ReferenceProps? Props { get; set; }
+    private int _propPeakDraws;
+    private int _propPeakInstances;
     private ulong _sequence;
     private float _yaw, _pitch = -0.2f;
     private bool _debug;
@@ -267,6 +270,15 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var frame = ++_sequence;
             var presentStarted = scripted ? BiomeMeasurements.Start() : 0;
             RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, frame, camera));
+            if (scripted && Props is { } props)
+            {
+                await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= frame, token).ConfigureAwait(false);
+                var propsFrame = props.Read();
+                _propPeakDraws = Math.Max(_propPeakDraws, propsFrame.Draws);
+                _propPeakInstances = Math.Max(_propPeakInstances, propsFrame.Instances);
+                if (propsFrame.PayloadBytes > 0 && steps is >= 62 and <= 80)
+                    throw new InvalidOperationException("A camera-only turn uploaded prop payload.");
+            }
             if (presentStarted != 0)
             {
                 await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= frame, token).ConfigureAwait(false);
@@ -289,6 +301,12 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                     Descriptor.SampleAt(state.Position).Vertex.Locate().Brick != nextBrick ||
                     StrideAt(_selection!, nextBrick) != 1)
                     throw new InvalidOperationException($"Route did not reach expected coverage ({state.Position.Z - start.Z:F1} m, {_views} views, {_windows} windows, {_transitions} transitions).");
+                if (Props is { } propsRoute)
+                {
+                    if (_propPeakDraws <= 4 || _propPeakInstances == 0 || propsRoute.Retired == 0 || propsRoute.Staged <= propsRoute.CoverageCount)
+                        throw new InvalidOperationException($"WP16 route did not exercise streaming and mixed LODs (draws={_propPeakDraws} instances={_propPeakInstances} staged={propsRoute.Staged} retired={propsRoute.Retired}).");
+                    Console.WriteLine($"WP16 seed={Descriptor.Seed} peakDraws={_propPeakDraws} peakInstances={_propPeakInstances} staged={propsRoute.Staged} retired={propsRoute.Retired}; camera-only turns reused payload.");
+                }
                 Console.WriteLine($"WP11 route completed: {steps} ticks, {_views} views, {_windows} windows, {_transitions} seam triangles; destination promoted to LOD 1.");
                 return;
             }
@@ -407,6 +425,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             pauseWhileMinimized: true).ConfigureAwait(false);
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement reopened before the next BeginTick.");
+        if (Props is { } props)
+            await props.RefreshAsync(terrain, _published, position, edit, token).ConfigureAwait(false);
         _selection = selection;
         _fineBricks = CountFineBricks(selection);
         _views++;

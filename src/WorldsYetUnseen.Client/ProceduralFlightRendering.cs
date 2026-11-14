@@ -20,6 +20,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     private readonly D3D12DeviceSession _device = new(new(!measure, true), warp, reuseDirectQueue: true);
     internal D3D12Renderer? Current { get; private set; }
     private VolumeTerrainColorEvaluator? _colorEvaluator;
+    internal ReferenceProps? Props { get; set; }
     internal ReferenceBiomes? Biomes { get; private set; }
 
     internal void SetBiomes(ReferenceBiomes biomes)
@@ -32,8 +33,13 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     internal D3D12Renderer Active => Current ?? throw new InvalidOperationException("No active planet renderer.");
 
     internal Task NearAsync(VolumeStreamingCoordinator terrain, CancellationToken token) =>
-        StartAsync(owner => D3D12Renderer.CreateWithSessionVolumeTerrain(window, owner, terrain,
-            terrain.View.RendererEpoch, _device, _colorEvaluator, timing.Shutdown, timing.Shutdown), token);
+        StartAsync(owner =>
+        {
+            var renderer = D3D12Renderer.CreateWithSessionVolumeTerrain(window, owner, terrain,
+                terrain.View.RendererEpoch, _device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
+            Props?.Attach(renderer);
+            return renderer;
+        }, token);
 
     internal Task FarAsync(RenderMeshPair globe, CancellationToken token) =>
         StartAsync(owner => D3D12Renderer.CreateWithSessionMeshes(window, owner, globe, _device,
