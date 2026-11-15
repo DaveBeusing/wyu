@@ -1,6 +1,6 @@
 # Worlds Yet Unseen — World Vision, Lore & Gameplay Canon
 
-**Stand:** 13. November 2026  
+**Stand:** 15. November 2026  
 **Status:** Konsolidierte Designentscheidungen, keine Aussage über Implementierungsstand.  
 **Geltung:** Eine zentrale Referenz für Spielvision, Lore und beschlossene Gameplay-Regeln; Groundwork bleibt eine eigenständige Engine.
 
@@ -195,13 +195,13 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 - Use a **single compatible electrical grid** without voltage tiers, transformers or simulated electrical resistance. Energy accounting is per connected network.
 - Initial generation progression: **fuel-burning generators first, solar generation next**, with solar available before major solar storms. Batteries become available early.
 - Solar storm effects must remain consistent with the established severity schedule: early weak storms cause no general electronics disruption; later stronger storms can temporarily interrupt exposed solar generation without permanently damaging panels. Batteries retain charge.
-- Wind generation and more advanced power sources are part of the wider technology space, but their exact unlock order beyond fuel then solar is not settled.
+- Wind generation follows fuel and solar in the planned early progression; details are defined in the 15 November decisions below. More advanced power sources remain open.
 
 ### Active shields
 - In addition to passive shielding from terrain/materials, active shields are researchable, electricity-consuming systems. Separate technology branches may protect against **radiation/environmental hazards** and **physical impacts/projectiles**.
 - Shield generators are universal modular components usable on any base or freely built vehicle, including small rovers and spacecraft. No arbitrary vehicle-class or size restriction; actual coverage and effectiveness depend on installed generators and available energy.
 - A generator creates a **spherical shield** with variable radius. Multiple generators may produce overlapping coverage areas. Shields are generally unobtrusive or nearly invisible when idle, with visible activation or impact feedback.
-- Shields may operate **continuously** as long as sufficient energy is available. When supply is inadequate, protection weakens progressively rather than switching off immediately.
+- Shields may operate **continuously**. Their integrated supercapacitor and optional connected additional capacitors sustain operation after grid power is lost, until stored energy is exhausted. Protection can weaken progressively under load or insufficient delivered power; a fully depleted supply causes shutdown.
 - Each shield has a finite **stress/reserve state**. Projectile impacts impose discrete stress; sustained radiation or other exposure imposes continuous stress and increases energy demand. Sustained overload can weaken and ultimately collapse protection, permitting penetration.
 - With adequate energy, a shield **regenerates even while under attack**. Recovery consumes energy, not repair materials. Detailed regeneration rates, overlapping-shield interaction and post-collapse restart behavior remain to be specified.
 - Passive underground/rock protection remains viable and is not superseded by mandatory active shielding.
@@ -227,4 +227,40 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 ### Deferred details
 - Exact shield energy demand, reserve/regeneration formulas, coverage limits, overlap resolution, restart behavior and protective damage types.
 - Cable placement constraints and repair interactions, cross-planet communication implementation, advanced generator progression and power failure priorities.
-- Base maintenance/repair automation, remote controls, precise overview UX, research prerequisites and item consumption rules.
+- Remote controls, precise overview UX, research prerequisites and item consumption rules. Routine wear-based maintenance is explicitly excluded; damage repair is manual.
+
+
+## Design decisions — 15 November 2026: Manual repairs, wind power, power telemetry and shield capacitors
+
+**Status:** Agreed design intent, not implemented. This section supersedes older suggestions of automatic damage repair, periodic maintenance, wind-unlock ambiguity and immediate shield shutdown on grid failure. Numerical balancing is TBD.
+
+### Damage and manual block repairs
+- Bases, vehicles and spacecraft consist of individual damageable blocks/components. **No routine wear or periodic maintenance** occurs during undamaged normal operation; repair is needed only after damage or events.
+- Repairs are **manual per damaged block**, never automatic merely because supplies exist. The starting multitool includes a scanner that highlights damaged blocks and shows each block's current HP/condition.
+- The player holds the repair action on a selected block; its HP increases progressively with a short, visible progress indication, rather than instantly returning to 100% on one click. Releasing the action or leaving repair mode preserves the HP already restored.
+- **Every repair consumes materials**, proportional to the repair performed, drawn **only from the player's carried inventory**. Eligible material types are the same as those required to originally construct that block; no implicit repair reserve or remote-storage withdrawal. Exact quantities and rounding remain for balancing.
+- Repairs are possible **even during radiation exposure or incoming fire**. Radiation endangers the player but does not directly slow the repair action. Damage and player danger may still occur during repair.
+- Repairs grant a modest amount of XP; the exact XP progression remains to be specified. The same repair interaction applies to bases, ground vehicles and spacecraft.
+
+### Damage reporting in the base overview
+- Aggregate damaged-block/repair-needed warnings for each base in the global overview, including when the player is far away. These are **overview-only**, not persistent individual repair warnings in the HUD; existing critical HUD warnings for other systems remain unaffected.
+- Keep alerts unobtrusive and respect communication state: disconnected remote bases show **last-known data with stale/offline marking**, not invented live damage reports.
+- The overview remains optionally pausable, with simple filters including **repairs, energy and shields**, severity-first sorting and initially fixed warning thresholds. These reaffirm earlier overview decisions.
+
+### Wind generation and physical placement
+- Initial electricity generation progression is **fuel generators, then solar, then wind**. Wind is available early and at low construction cost, with modest, predictable weather-driven output fluctuations.
+- Wind turbines are **physical constructions** requiring surface space. Their actual geometry can obstruct movement and sightlines and cast shadows; do not abstract them as footprint-only markers. They do not operate underground.
+- Storms may temporarily interrupt wind generation, but do **not automatically damage** turbines. Respect established weak/medium/extreme solar-storm electronics behavior; do not invent turbine damage or shutdown in the first weak storm.
+- Preserve previously agreed regional wind variation and simplified wind-generator calculations; exact production balancing remains open.
+
+### Detailed electricity monitoring and batteries
+- On-demand electricity detail view lists **individual generators and consumers separately**, with source/type and precise numerical readings. Show **power in kW** for instantaneous generation/consumption and **energy in kWh** for accumulated generation/consumption over a clearly identified period, as well as battery stored energy/capacity in kWh and charge percentage. Do not conflate kW and kWh.
+- Show total generation, total consumption and the resulting **surplus/deficit** with an immediately readable positive/negative indicator. Display can refresh at about one-second intervals; no high-frequency UI polling is necessary.
+- The detail view is not permanently displayed. A discreet warning appears outside it when the network runs into a power deficit; its sound can be muted. Batteries and their state of charge appear in the same on-demand overview.
+- Batteries **discharge without suffering damage** from energy shortage. No automatic consumer-priority hierarchy at launch; advanced player-built logic can address priorities later.
+
+### Shield power buffering with expandable capacitors
+- Each shield generator contains an **integrated supercapacitor** charged from its electrical supply. Shield upkeep, regeneration and absorption of impacts/radiation consume energy. The player may attach **additional capacitors** to increase stored energy and extend runtime during power loss, consistent with modular construction.
+- After grid power fails, the shield **remains active while capacitor energy remains**, subject to load and its separate shield stress/reserve. Once the available capacitor energy is exhausted and no other power is available, the shield shuts down completely.
+- **Stored capacitor energy and shield stress/reserve are distinct states**: intense attacks can overwhelm and penetrate a shield even with stored energy remaining. Underpowered operation can degrade protection progressively; zero available energy cannot sustain it.
+- Exact capacitor connection topology, charge/discharge rates, power sharing, restart thresholds and overlapping-shield interactions remain open for later design and balancing.
