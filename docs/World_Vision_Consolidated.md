@@ -264,3 +264,37 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 - After grid power fails, the shield **remains active while capacitor energy remains**, subject to load and its separate shield stress/reserve. Once the available capacitor energy is exhausted and no other power is available, the shield shuts down completely.
 - **Stored capacitor energy and shield stress/reserve are distinct states**: intense attacks can overwhelm and penetrate a shield even with stored energy remaining. Underpowered operation can degrade protection progressively; zero available energy cannot sustain it.
 - Exact capacitor connection topology, charge/discharge rates, power sharing, restart thresholds and overlapping-shield interactions remain open for later design and balancing.
+
+
+## Design decisions — 15 November 2026: Survival inventory, modular construction and flight control
+
+**Status:** Agreed gameplay design, not implementation. The following newer, explicit decisions override conflicting older descriptions. Unspecified balancing and implementation details remain open.
+
+### Survival-first identity and carrying resources
+- WYU is a **first-person survival and exploration game, not a factory game**. Players personally carry the resources they mine in their own inventory. There are **no automated resource transport systems or factory-style transport chains**. Later unlockable functional blocks may automate *mining*, but do not imply automatic transport.
+- The player inventory has **hard weight and volume limits**. Tools and weapons count toward carried weight. This **supersedes** the earlier weight-only inventory rule.
+- At up to **20% overload** relative to carrying capacity, the player can move slowly, without overload damage; above 20% overload, movement is impossible. The exact movement-speed curve and how combined weight/volume overload is calculated remain to be specified.
+- No early handcarts or sleds as intermediate carrying aids. Transportation assistance comes from player-constructed vehicles.
+- Previous descriptions of connected logistics conduits, automatic machine input/output transfer, and shared storage networks are **not current design commitments**; they conflict with the explicitly rejected automated transport systems and require re-evaluation before implementation. Do not silently preserve them as approved gameplay.
+
+### Space Engineers-inspired modular construction
+- **Space Engineers and Space Engineers 2** are methodological references for modular building, functional components and physical vehicle behavior, not templates for copying overall gameplay or factory systems.
+- All ground vehicles, aircraft and spacecraft are **freely constructed from individual structural and functional blocks**; there are no prefab complete vehicle classes or prescribed vehicle milestones. Availability follows discovery, research and available materials for the relevant blocks.
+- Adopt a **unified 25 cm construction grid** as the smallest regular structural/functional building increment, with larger blocks occupying multiple grid cells. Freely placed decoration and furnishing may ignore the grid.
+- The unified grid does not require every occupied 25 cm cell to become a separate simulated rigid body or object.
+
+### Physical behavior and performance
+- Target **genuine rigid-body dynamics** for moving constructions: aggregate mass, center of mass, inertia, gravity, forces, thrust and torque must affect handling. Off-center or poorly arranged thrusters can cause real unwanted rotation. Do not artificially neutralize torque to make flawed designs fly perfectly.
+- Optimize performance by treating connected rigid constructions as aggregated physical bodies rather than simulating every block independently; update mass properties when construction/damage changes. Static bases and sleeping inactive bodies may be optimized accordingly. Collisions, detachable sections and articulated mechanisms require separately scoped design and benchmarks.
+- This **clarifies and supersedes** older language suggesting physics should be merely perceptible or simplified to the point of concealing torque. It does **not** establish full orbital mechanics or per-block rigid-body simulation. The previously agreed no-collapse rule for static buildings remains unchanged.
+
+### Flight computer and controls
+- Provide an **optional flight computer as a real, electricity-consuming functional block**, unlocked **later through research**, not granted at the outset.
+- The flight computer can stabilize unwanted rotations by commanding available thrusters/control actuators, but only within their real physical authority; insufficient or poorly placed actuators cannot be compensated magically.
+- Ships **remain manually controllable without a flight computer**, albeit more demanding to pilot. Assisted/stabilized flight is the default **when an operational flight computer is installed and assistance is enabled**; manual flight remains possible. Inertial coasting is available without continuous thrust, consistent with Newtonian behavior.
+- Exact flight-computer control laws, thruster allocation, steering inputs, failure modes and balancing remain open.
+
+### Reconciliation notes
+- The new survival-first restriction against automated resource transport takes precedence over the older conduit/network automation descriptions in this document; those passages are retained as historical context pending a dedicated cleanup, not as approved features.
+- The newer weight-and-volume inventory model takes precedence over the older weight-only statement.
+- These design decisions do not claim any Groundwork implementation or measured performance results.
