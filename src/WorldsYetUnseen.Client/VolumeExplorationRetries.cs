@@ -14,7 +14,7 @@ internal sealed partial class VolumeExploration
         ulong Revision, ulong TargetRevision, VolumeStreamingSelection Selection, VolumeBrushIntent? Edit);
 
     private async Task<(VolumeStreamingWork? Work, VolumeAdmission Result)> AdmitTerrainAsync(
-        VolumeStreamingCoordinator terrain, TerrainAdmissionRequest request, long started, CancellationToken token)
+        VolumeStreamingCoordinator terrain, TerrainAdmissionRequest request, long started, CancellationToken token, R09Timing? timing = null)
     {
         var exhaust = ExhaustTerrainRetry == request.Path && request.Revision != 0 && _retryProbes.Add(request.Path);
         var probe = exhaust || VerifyTerrainRetries && request.Revision != 0 && _retryProbes.Add(request.Path);
@@ -79,6 +79,7 @@ internal sealed partial class VolumeExploration
                     }
                     Console.WriteLine($"WP11 HOST RETRY path={request.Path} attempts={retry.Attempts} denied={retry.TransientDenials} tick={_tick}");
                 }
+                timing?.Write("admission", started, System.Diagnostics.Stopwatch.GetTimestamp(), retry.Attempts, retry.TransientDenials);
                 return (work, result);
             }
             if (state != TerrainHostRetryState.WaitingForProgress)

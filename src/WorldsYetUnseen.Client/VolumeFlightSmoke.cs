@@ -47,6 +47,7 @@ internal sealed partial class VolumeExploration
             else
             {
                 var center = FlightCoverageCenter(player.Position);
+                _measureCoverage = MeasureR09;
                 await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, terrain.View.Frame, token,
                     coverageCenter: center, supportCells: FlightSupportCells).ConfigureAwait(false);
                 if (!TryFlightPad(terrain, anchor!.Value, out var before, out _, out var blocked))

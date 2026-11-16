@@ -355,9 +355,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
         Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null,
-        bool recovery = false, long? operationStarted = null)
+        bool recovery = false, long? operationStarted = null, long handoffStarted = 0)
     {
         var started = operationStarted ?? Stopwatch.GetTimestamp();
+        var timing = returnTerrain?.Timing ?? StartR09(edit is not null ? VolumeWorkClass.FirstEdit :
+            recovery ? VolumeWorkClass.Recovery : VolumeWorkClass.Movement, started);
         VolumeViewIdentity view;
         if (returnTerrain is { } preparedReturn)
         {
@@ -399,7 +401,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 recovery ? VolumeWorkClass.Recovery : VolumeWorkClass.Movement;
             VolumeAdmission result;
             (work, result) = await AdmitTerrainAsync(terrain, new(path, view, revision, targetRevision, selection, edit),
-                started, token).ConfigureAwait(false);
+                started, token, timing).ConfigureAwait(false);
             if (result != VolumeAdmission.Accepted || work is null)
             {
                 if (edit is not null)
@@ -408,7 +410,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             }
         }
         using var ownedWork = returnTerrain is null ? work : null;
-        var generated = returnTerrain?.Generated ?? ExecuteTerrainAsync(work, token);
+        var generated = returnTerrain?.Generated ?? ExecuteTerrainAsync(work, token, timing: timing);
         if (rendererReady is not null)
         {
             try
@@ -433,6 +435,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
             pauseWhileMinimized: true).ConfigureAwait(false);
+        var uploadStarted = timing is null ? 0 : Stopwatch.GetTimestamp();
         var packSample = BiomeMeasurements.StartBuild();
         var upload = renderer.TryStageVolumeTerrain(work.Generation);
         BiomeMeasurements.WriteBuild("near-pack", packSample);
@@ -441,6 +444,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         RequireMesh(upload);
         await WaitAsync(renderer, () => renderer.IsVolumeTerrainReady(work.Generation), token).ConfigureAwait(false);
 
+        timing?.Write("upload-to-observed-ready", uploadStarted, Stopwatch.GetTimestamp());
         await BeginAsync(token).ConfigureAwait(false);
         var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
         var prepared = renderer.TryPrepareVolumePublication(work.Generation, commit, [], out var preparation);
@@ -461,9 +465,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             _transitions = CountTransitions(lease);
         }
         var sequence = ++_sequence;
+        var submitted = timing is null ? 0 : Stopwatch.GetTimestamp();
         RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, camera));
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
             pauseWhileMinimized: true).ConfigureAwait(false);
+        var presented = timing is null ? 0 : Stopwatch.GetTimestamp();
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement reopened before the next BeginTick.");
         if (Props is { } props)
@@ -472,6 +478,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         _fineBricks = CountFineBricks(selection);
         _views++;
         Drain(terrain);
+        if (timing is not null)
+            await FinishR09Async(timing, terrain, submitted, presented, handoffStarted, token).ConfigureAwait(false);
         return true;
     }
 
@@ -493,11 +501,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             ? "The terrain streaming budget is full. The planet could not load. Close the game and try again."
             : $"The planet could not load terrain ({result}). Close the game and try again.");
 
-    private static Task<bool> ExecuteTerrainAsync(VolumeStreamingWork work, CancellationToken token, string phase = "terrain-build") =>
+    private static Task<bool> ExecuteTerrainAsync(VolumeStreamingWork work, CancellationToken token, string phase = "terrain-build", R09Timing? timing = null) =>
         Task.Run(() =>
         {
             var started = BiomeMeasurements.Start();
+            var workerStarted = timing is null ? 0 : Stopwatch.GetTimestamp();
             var completed = work.Execute(token);
+            timing?.Write("worker", workerStarted, Stopwatch.GetTimestamp());
             BiomeMeasurements.Write(phase, started);
             return completed;
         }, token);

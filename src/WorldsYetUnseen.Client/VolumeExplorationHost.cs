@@ -103,6 +103,8 @@ internal static partial class GameHost
             var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld)
             {
                 VerifyTerrainRetries = retrySmoke == "1",
+                MeasureR09 = scripted && flightSmoke && saveSmoke == "flight" &&
+                    Environment.GetEnvironmentVariable("WYU_R09_LATENCY") == "1",
                 ExhaustTerrainRetry = retrySmoke switch
                 {
                     "Movement" => VolumeWorkClass.Movement,

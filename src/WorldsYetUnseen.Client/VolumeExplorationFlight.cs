@@ -113,6 +113,7 @@ internal sealed partial class VolumeExploration
                     {
                         transitionStarted = BiomeMeasurements.Start();
                         transition = "to-ground";
+                        var handoffStarted = MeasureR09 ? Stopwatch.GetTimestamp() : 0;
                         if (skySmoke)
                         {
                             handoffTick = checked(_environmentTick + (ulong)flight.Tick);
@@ -129,7 +130,7 @@ internal sealed partial class VolumeExploration
                             await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, prepared.View.Frame, token,
                                 coverageCenter: center, flightCamera: flight.State.Position, supportCells: FlightSupportCells,
                                 rendererReady: nearReady, returnTerrain: prepared,
-                                flightTick: checked(_environmentTick + (ulong)flight.Tick)).ConfigureAwait(false);
+                                flightTick: checked(_environmentTick + (ulong)flight.Tick), handoffStarted: handoffStarted).ConfigureAwait(false);
                         }
                         finally
                         {
@@ -288,12 +289,13 @@ internal sealed partial class VolumeExploration
     }
 
     private sealed record FlightReturnTerrain(VolumeViewIdentity View, ulong Revision, VolumeStreamingSelection Selection,
-        VolumeStreamingWork Work, Task<bool> Generated);
+        VolumeStreamingWork Work, Task<bool> Generated, R09Timing? Timing);
 
     private async Task<FlightReturnTerrain> PrepareFlightReturnAsync(VolumeStreamingCoordinator terrain, PlanetWalkState player,
         PlanetVector center, ulong revision, CancellationToken token)
     {
         var started = Stopwatch.GetTimestamp();
+        var timing = StartR09(VolumeWorkClass.Recovery, started);
         var previous = terrain.View;
         var frame = previous.Frame.TryRebase(player.Position, out var rebased) ? rebased : previous.Frame;
         var view = terrain.ChangeView(frame, checked(previous.RendererEpoch + 1));
@@ -301,10 +303,10 @@ internal sealed partial class VolumeExploration
             throw new InvalidOperationException("Could not reserve the held return view.");
         var selection = SelectTerrain(center, player.Heading, supportCells: FlightSupportCells);
         var (work, admission) = await AdmitTerrainAsync(terrain,
-            new(VolumeWorkClass.Recovery, view, revision, revision, selection, null), started, token).ConfigureAwait(false);
+            new(VolumeWorkClass.Recovery, view, revision, revision, selection, null), started, token, timing).ConfigureAwait(false);
         if (admission != VolumeAdmission.Accepted || work is null)
             throw TerrainAdmissionFailure(admission);
-        return new(view, revision, selection, work, ExecuteTerrainAsync(work, token, "return-terrain-build"));
+        return new(view, revision, selection, work, ExecuteTerrainAsync(work, token, "return-terrain-build", timing), timing);
     }
 
     private async Task<PlanetWalkState> PublishLandingAsync(VolumeStreamingCoordinator terrain, PlanetWalkState player,
