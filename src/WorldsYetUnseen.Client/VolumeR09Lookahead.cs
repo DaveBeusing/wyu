@@ -50,8 +50,10 @@ internal sealed partial class VolumeExploration
         {
             // The startup pose is only a prediction. Actual publishing still selects from the verified pose.
             var forcePending = Environment.GetEnvironmentVariable("WYU_R09_TEST_FORCE_PREFETCH_MISS") == "1";
+            // Use the ordinary support halo for the private forecast so the larger flight halo
+            // does not delay brick availability. The publishing plan checks every mesh's actual LOD.
             Movement = Start(VolumeWorkClass.Recovery,
-                owner.SelectTerrain(FlightCoverageCenter(position), heading, supportCells: FlightSupportCells));
+                owner.SelectTerrain(FlightCoverageCenter(position), heading));
             FirstEdit = Start(VolumeWorkClass.Speculative, owner.SelectTerrain(position, heading));
 
             R09EarlyPrebuild Start(VolumeWorkClass envelope, VolumeStreamingSelection selection)
