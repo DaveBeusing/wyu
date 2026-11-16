@@ -358,7 +358,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
         Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null,
-        bool recovery = false, long? operationStarted = null, long handoffStarted = 0)
+        bool recovery = false, long? operationStarted = null, long handoffStarted = 0,
+        R09EarlyPrebuild? earlyPrebuild = null)
     {
         var started = operationStarted ?? Stopwatch.GetTimestamp();
         var timing = returnTerrain?.Timing ?? StartR09(edit is not null ? VolumeWorkClass.FirstEdit :
@@ -419,7 +420,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             ? await StartR09PressureAsync(token).ConfigureAwait(false) : null;
         var pressure = returnTerrain?.Pressure ?? ownedPressure;
         var generated = returnTerrain?.Generated ?? (pressure is null
-            ? ExecuteTerrainAsync(work, token) : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token));
+            ? ExecuteTerrainAsync(work, token)
+            : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token, earlyPrebuild));
         if (rendererReady is not null)
         {
             try

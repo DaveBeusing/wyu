@@ -20,14 +20,18 @@ internal sealed partial class VolumeExploration
         var probe = exhaust || VerifyTerrainRetries && request.Revision != 0 && _retryProbes.Add(request.Path);
         var baseline = exhaust ? terrain.Statistics : default;
         // The edit head owns FirstEdit. A probe may charge recovery beside it without consuming the sealed edit.
+        var canUseRetiringLookahead = !exhaust && timing?.Path == VolumeWorkClass.FirstEdit &&
+            _r09Lookahead?.Movement?.IsSettling == true;
+        var retryUsesRetiringLookahead = false;
         using var reader = probe ? terrain.TryRead() : null;
-        using var firstOccupant = probe ? ReserveProbe() : null;
+        using var firstOccupant = probe ? ReserveProbe(canUseRetiringLookahead) : null;
         var occupant = firstOccupant;
         VolumeStreamingWork? work = null;
         var result = VolumeAdmission.Backpressure;
         var retry = new TerrainHostRetry<TerrainAdmissionRequest>(request.Path, request, candidate =>
         {
-            if (probe && candidate.Edit is not null && occupant is { IsCancellationRequested: false })
+            if (probe && candidate.Edit is not null &&
+                (retryUsesRetiringLookahead || occupant is { IsCancellationRequested: false }))
                 return TerrainHostAdmissionResult.Busy; // Pre-admission injection. The sealed head stays pending.
             result = candidate.Edit is { } brush
                 ? terrain.TryStageEdit(brush.Tick, brush.Id, candidate.Selection, MeshBytes, Charge(candidate.Selection), out work)
@@ -85,14 +89,16 @@ internal sealed partial class VolumeExploration
             if (state != TerrainHostRetryState.WaitingForProgress)
                 return (null, result);
 
+            var releasedInjectedDenial = retryUsesRetiringLookahead;
             if (probe)
             {
-                if ((!exhaust && retry.Attempts != 1) || occupant is null || work is not null)
+                if ((!exhaust && retry.Attempts != 1) || (occupant is null && !releasedInjectedDenial) || work is not null)
                     throw new InvalidOperationException("The pressure probe did not block admission before allocation.");
-                occupant.Dispose();
+                occupant?.Dispose();
+                retryUsesRetiringLookahead = false;
             }
             // Wait outside both authority and GPU locks. Polling alone does not authorize another attempt.
-            while (!retry.IsDeadlineElapsed && terrain.View == request.View)
+            while (!releasedInjectedDenial && !retry.IsDeadlineElapsed && terrain.View == request.View)
             {
                 token.ThrowIfCancellationRequested();
                 var currentResources = terrain.Statistics;
@@ -121,11 +127,18 @@ internal sealed partial class VolumeExploration
             progress++;
         }
 
-        VolumeStreamingWork ReserveProbe()
+        VolumeStreamingWork? ReserveProbe(bool allowRetiringLookahead = false)
         {
             var path = request.Edit is null ? request.Path : VolumeWorkClass.Recovery;
             var status = terrain.TryStage(path, request.Selection, request.Revision, request.Revision,
                 MeshBytes, Charge(request.Selection), Field, out var pressure);
+            if (allowRetiringLookahead && status == VolumeAdmission.Backpressure)
+            {
+                // The retiring Movement prebuild still charges Recovery. Release the diagnostic
+                // pre-admission denial at the next tick without waiting on that unrelated reservation.
+                retryUsesRetiringLookahead = true;
+                return null;
+            }
             return status == VolumeAdmission.Accepted && pressure is not null ? pressure
                 : throw new InvalidOperationException($"Could not charge terrain retry probe ({request.Path}, {status}).");
         }

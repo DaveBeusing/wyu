@@ -120,13 +120,17 @@ internal static partial class GameHost
                 exploration.Props = renderHost.Props = new ReferenceProps(planet);
             if (planet is not null && (!scripted || BiomeMeasurements.UseBiomes || propsSmoke))
                 renderHost.SetBiomes(new ReferenceBiomes(planet));
+            if (measureR09)
+                terrain = exploration.CreateTerrain();
+            await using var earlyTerrain = terrain is null ? null
+                : await exploration.StartR09LookaheadAsync(terrain, saveSmoke, token).ConfigureAwait(false);
             if (planet is not null)
             {
                 var planStarted = BiomeMeasurements.Start();
                 ProceduralGlobe.Prepare();
                 BiomeMeasurements.Write("globe-plan", planStarted);
             }
-            terrain = exploration.CreateTerrain();
+            terrain ??= exploration.CreateTerrain();
             diagnostics?.Enter("GraphicsStartup");
             diagnostics?.CheckGraphics();
             await renderHost.NearAsync(terrain, token).ConfigureAwait(false);

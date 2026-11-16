@@ -3,6 +3,6 @@
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Groundwork.Voxels" Version="[0.1.0-dev.r09reuse.19bbc9f05d42]" />
+    <PackageReference Include="Groundwork.Voxels" Version="[0.1.0-dev.r09ahead.1ff6882622f5]" />
   </ItemGroup>
 </Project>

@@ -136,25 +136,44 @@ internal sealed partial class VolumeExploration
         }
 
         internal async Task<bool> RunProtectedAsync(VolumeStreamingWork work, R09Timing timing,
-            VolumeStreamingCoordinator terrain, VolumeStreamingSelection selection, ulong revision, CancellationToken token)
+            VolumeStreamingCoordinator terrain, VolumeStreamingSelection selection, ulong revision, CancellationToken token,
+            R09EarlyPrebuild? earlyPrebuild = null)
         {
-            var privateClass = timing.Path == VolumeWorkClass.Recovery ? VolumeWorkClass.Movement : VolumeWorkClass.Recovery;
-            var admission = terrain.TryStagePrivate(privateClass, selection, revision, revision, owner.MeshBytes,
-                owner.Charge(selection), owner.Field, out var source);
-            using var privateWork = source;
-            if (admission != VolumeAdmission.Accepted || privateWork is null)
-                throw new InvalidOperationException($"R09 could not admit the private prebuild ({admission}).");
-            var prebuild = await MeasureWorkerAsync(privateWork, null, "private prebuild", token).ConfigureAwait(false);
-            if (prebuild is not { } privateWorker)
-                return false;
-            privateWorker.Write(timing, "prebuild-worker");
-            var measurement = await MeasureWorkerAsync(work, privateWork, timing.Path.ToString(), token).ConfigureAwait(false);
-            if (measurement is not { } worker)
-                return false;
-            worker.Write(timing, "worker");
-            Console.WriteLine(FormattableString.Invariant(
-                $"WYU R09 REUSE {timing.Path} {privateWork.Generation} {work.Generation} {worker.Profile.ReuseSourceGeneration}"));
-            return true;
+            VolumeStreamingWork? privateWork = null;
+            R09WorkerMeasurement? prebuild;
+            try
+            {
+                if (timing.Path == VolumeWorkClass.Recovery)
+                {
+                    var admission = terrain.TryStagePrivate(VolumeWorkClass.Movement, selection, revision, revision,
+                        owner.MeshBytes, owner.Charge(selection), owner.Field, out privateWork);
+                    if (admission != VolumeAdmission.Accepted || privateWork is null)
+                        throw new InvalidOperationException($"R09 could not admit the Recovery private prebuild ({admission}).");
+                    prebuild = await MeasureWorkerAsync(privateWork, null, "private prebuild", token).ConfigureAwait(false);
+                    if (prebuild is null)
+                        return false;
+                }
+                else
+                {
+                    (privateWork, prebuild) = R09EarlyPrebuild.Offer(earlyPrebuild, timing);
+                }
+
+                var measurement = await MeasureWorkerAsync(work, privateWork, timing.Path.ToString(), token).ConfigureAwait(false);
+                if (measurement is not { } worker)
+                    return false;
+                timing.WriteWorkers = () =>
+                {
+                    prebuild?.Write(timing, "prebuild-worker");
+                    worker.Write(timing, "worker");
+                    Console.WriteLine(FormattableString.Invariant(
+                        $"WYU R09 REUSE {timing.Path} {privateWork?.Generation ?? 0} {work.Generation} {worker.Profile.ReuseSourceGeneration}"));
+                };
+                return true;
+            }
+            finally
+            {
+                privateWork?.Dispose();
+            }
         }
 
         private async Task<R09WorkerMeasurement?> MeasureWorkerAsync(VolumeStreamingWork work,

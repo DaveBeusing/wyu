@@ -17,6 +17,8 @@ internal sealed partial class VolumeExploration
 
     private sealed record R09Timing(VolumeWorkClass Path, long Started)
     {
+        internal Action? WriteWorkers { get; set; }
+
         internal void Write(string phase, long start, long end, int attempts = 0, int denials = 0) =>
             Console.WriteLine(FormattableString.Invariant(
                 $"WYU R09 {Path} {phase} {start} {end} {Stopwatch.Frequency} {attempts} {denials}"));
@@ -61,5 +63,7 @@ internal sealed partial class VolumeExploration
             timing.Write("handoff-to-begin-tick", handoffStarted, consumed);
         Console.WriteLine(FormattableString.Invariant(
             $"WYU R09 IDENTITY {timing.Path} {generation} {frame} {view.View} {view.RendererEpoch} {accepted.Tick} {begin.Tick}"));
+        timing.WriteWorkers?.Invoke();
+        timing.WriteWorkers = null;
     }
 }

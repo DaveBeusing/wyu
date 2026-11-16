@@ -49,12 +49,13 @@ internal sealed partial class VolumeExploration
                 var center = FlightCoverageCenter(player.Position);
                 _measureCoverage = MeasureR09;
                 await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, terrain.View.Frame, token,
-                    coverageCenter: center, supportCells: FlightSupportCells).ConfigureAwait(false);
+                    coverageCenter: center, supportCells: FlightSupportCells, earlyPrebuild: _r09Lookahead?.Movement)
+                    .ConfigureAwait(false);
                 if (!TryFlightPad(terrain, anchor!.Value, out var before, out _, out var blocked))
                     throw new InvalidOperationException($"Unedited comparison pad unavailable ({blocked}).");
                 var revisionBeforeEdit = _published.TerrainRevision;
                 var edited = await EditAsync(terrain, renderHost.Active, player, new(21, 4105, 16), VolumeBrushOperation.Add,
-                    (ushort)ReferenceTerrainMaterial.OchreStone, token).ConfigureAwait(false);
+                    (ushort)ReferenceTerrainMaterial.OchreStone, token, _r09Lookahead?.FirstEdit).ConfigureAwait(false);
                 if (_retryExhausted && ExhaustTerrainRetry == VolumeWorkClass.FirstEdit)
                 {
                     var begin = await BeginAsync(token).ConfigureAwait(false);

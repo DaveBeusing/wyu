@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedManifestSha256,
     [ValidateRange(1,50)][int]$Samples = 5,
     [ValidateSet('hardware','warp')][string]$Adapter = 'hardware',
-    [ValidateSet('Normal','Retry')][string[]]$Cohort = @('Normal','Retry')
+    [ValidateSet('Normal','Retry')][string[]]$Cohort = @('Normal','Retry'),
+    [switch]$RequireEarlyColdFallback
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -45,7 +46,7 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     foreach ($argument in '--volume-flight-smoke','flight',$Slot,$Adapter) { $start.ArgumentList.Add($argument) }
-    foreach ($name in 'WYU_HOST_RETRY_SMOKE','WYU_WP13_MEASURE','WYU_PACKAGE_G','WYU_PACKAGE_G_SMOKE',
+    foreach ($name in 'WYU_R09_TEST_FORCE_PREFETCH_MISS','WYU_HOST_RETRY_SMOKE','WYU_WP13_MEASURE','WYU_PACKAGE_G','WYU_PACKAGE_G_SMOKE',
         'WYU_WP16','WYU_WP16_SMOKE','WYU_WP15','WYU_WP15_PROBE','WYU_WP15_FLIP','WYU_PACKAGE_E',
         'WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_WALK','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
         'DOTNET_STARTUP_HOOKS','DOTNET_ADDITIONAL_DEPS','DOTNET_SHARED_STORE','DOTNET_DIAGNOSTIC_PORTS',
@@ -55,6 +56,7 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
     }
     $start.Environment['WYU_R09_LATENCY'] = '1'
     if ($Mode -eq 'Retry') { $start.Environment['WYU_HOST_RETRY_SMOKE'] = '1' }
+    if ($RequireEarlyColdFallback) { $start.Environment['WYU_R09_TEST_FORCE_PREFETCH_MISS'] = '1' }
 
     $outputStream = [IO.File]::Create($Log)
     try {
@@ -217,15 +219,17 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $roles = @('publishing','private')
     $workerStages = @('overlay','bricks','plan','mesh','evidence','handoff')
     $brickStages = @('reservation','allocation','density','material','shared-vertices','publish','residual')
-    $phases = @('worker','worker-queue','worker-completion-observation','admission',
-        'prebuild-worker','prebuild-worker-queue','prebuild-worker-completion-observation','held-upload',
+    $phases = @('worker','worker-queue','worker-completion-observation','admission','held-upload',
         'upload-to-observed-ready','held-upload-release-to-ready','submit-to-observed-present',
         'observed-present-to-begin-tick','authorized-receipt-to-begin-tick','setup-to-begin-tick')
-    $phases += @($workerStages | ForEach-Object { "worker-$_"; "prebuild-worker-$_" })
+    $phases += @($workerStages | ForEach-Object { "worker-$_" })
+    $privatePhases = @('prebuild-worker','prebuild-worker-queue','prebuild-worker-completion-observation')
+    $privatePhases += @($workerStages | ForEach-Object { "prebuild-worker-$_" })
     $intervals = @{}
     $identities = @{}
     $pressure = @{}
     $reuse = @{}
+    $early = @{}
     $brickTimings = @{}
     $bricksByGroup = @{}
     $meshesByGroup = @{}
@@ -255,14 +259,27 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
                 Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $path
                 CpuPeakBytes = $cpu; NativePeakBytes = $native; UploadPeakBytes = $upload; RetirementPeakBytes = $retirement
             }
+        } elseif ($line -cmatch '^WYU R09 EARLY (Movement|FirstEdit) (Ready|Pending|Rejected|Unavailable) ([0-9]+) ([0-9]+) ([0-9]+)$') {
+            $path, $status = $Matches[1], $Matches[2]
+            $attempt, $cut = [long]$Matches[3], [long]$Matches[4]
+            $generation = [uint64]$Matches[5]
+            if ($early.ContainsKey($path) -or !$cut -or $cut -lt $attempt -or
+                (!$attempt -and ($status -cne 'Unavailable' -or $generation)) -or
+                ($status -cin @('Ready','Pending') -and !$generation) -or
+                ($status -ceq 'Rejected' -and $generation)) {
+                throw "Invalid or duplicate early prebuild record: $line"
+            }
+            $early[$path] = [pscustomobject]@{ Status = $status; AttemptQpc = $attempt; CutQpc = $cut; Generation = $generation }
         } elseif ($line -cmatch '^WYU R09 REUSE (Movement|FirstEdit|Recovery) ([0-9]+) ([0-9]+) ([0-9]+)$') {
             $path = $Matches[1]
             $producer, $consumer, $source = 2..4 | ForEach-Object { [uint64]$Matches[$_] }
-            if ($reuse.ContainsKey($path) -or !$producer -or !$consumer -or $producer -eq $consumer -or
+            if ($reuse.ContainsKey($path) -or !$consumer -or $producer -eq $consumer -or
                 ($source -and $source -ne $producer)) { throw "Invalid or duplicate reuse record: $line" }
             $reuse[$path] = [pscustomobject]@{
                 Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $path
                 PrivateGeneration = $producer; PublishingGeneration = $consumer; ReuseSourceGeneration = $source
+                EarlyStatus = ''; EarlyAttemptQpc = $null; EarlyCutQpc = $null; EarlyAdmittedGeneration = $null
+                EarlyLeadMilliseconds = $null; ReadyBeforeCutMilliseconds = $null; ColdFallback = !$source
                 ReusedBricks = 0; RebuiltBricks = 0; ReusedMeshes = 0; RebuiltMeshes = 0
             }
         } elseif ($line -cmatch '^WYU R09 BRICKTIMING (Movement|FirstEdit|Recovery) (publishing|private) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)$') {
@@ -311,7 +328,7 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
             if ($intervals.ContainsKey($key) -or !$from -or $to -lt $from -or !$qpc -or
                 ($frequency -and $qpc -ne $frequency) -or $attempts -ne $expectedAttempts -or
                 $denials -ne [Math]::Max(0, $expectedAttempts - 1) -or
-                ($phases -cnotcontains $phase -and $key -cne 'Recovery/handoff-to-begin-tick')) {
+                ($phases -cnotcontains $phase -and $privatePhases -cnotcontains $phase -and $key -cne 'Recovery/handoff-to-begin-tick')) {
                 throw "Invalid or duplicate interval: $line"
             }
             $frequency = $qpc
@@ -330,6 +347,10 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $brickTimingRows = [Collections.Generic.List[object]]::new()
     $brickOverlap = [Collections.Generic.List[object]]::new()
     $meshOverlap = [Collections.Generic.List[object]]::new()
+    $generations = [Collections.Generic.HashSet[uint64]]::new()
+    foreach ($identity in $identities.Values) {
+        if (!$generations.Add($identity.Generation)) { throw "Duplicate publishing generation: $($identity.Generation)" }
+    }
     foreach ($path in $paths) {
         foreach ($phase in $phases) {
             if (!$intervals.ContainsKey("$path/$phase")) { throw "Missing interval: $path/$phase" }
@@ -337,28 +358,70 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
         if (!$identities.ContainsKey($path)) { throw "Missing identity: $path" }
         if (!$pressure.ContainsKey($path)) { throw "Missing pressure: $path" }
         Assert-WorkerProfile $intervals $path 'worker' $workerStages
-        Assert-WorkerProfile $intervals $path 'prebuild-worker' $workerStages
         $hold = $intervals["$path/held-upload"]
-        $prebuildQueue = $intervals["$path/prebuild-worker-queue"]
-        $prebuildObserved = $intervals["$path/prebuild-worker-completion-observation"]
         $publishingQueue = $intervals["$path/worker-queue"]
         $publishingObserved = $intervals["$path/worker-completion-observation"]
         $admission = $intervals["$path/admission"]
         $route = $intervals["$path/setup-to-begin-tick"]
         $upload = $intervals["$path/upload-to-observed-ready"]
         $release = $intervals["$path/held-upload-release-to-ready"]
-        if ($prebuildQueue.FromQpc -lt $admission.ToQpc -or $prebuildQueue.FromQpc -lt $route.FromQpc -or
-            $prebuildObserved.ToQpc -gt $publishingQueue.FromQpc -or $publishingObserved.ToQpc -gt $upload.FromQpc -or
+        if ($admission.FromQpc -lt $route.FromQpc -or $admission.ToQpc -gt $publishingQueue.FromQpc -or
+            $publishingObserved.ToQpc -gt $upload.FromQpc -or
             $upload.ToQpc -gt $route.ToQpc -or
             $hold.FromQpc -lt $upload.FromQpc -or $hold.ToQpc -ne $release.FromQpc -or
             $release.ToQpc -ne $upload.ToQpc) {
-            throw "Invalid prebuild, publishing or upload ordering for $path."
+            throw "Invalid admission, publishing or upload ordering for $path."
         }
         $transfer = $reuse[$path]
         if ($null -eq $transfer -or $transfer.PublishingGeneration -ne $identities[$path].Generation) {
             throw "Missing reuse source or wrong publishing generation for $path."
         }
-        foreach ($role in $roles) {
+        $hasPrivate = $transfer.PrivateGeneration -ne 0
+        foreach ($phase in $privatePhases) {
+            if ($intervals.ContainsKey("$path/$phase") -ne $hasPrivate) {
+                throw "Private profile does not match the offered source for $path/$phase."
+            }
+        }
+        if ($hasPrivate) {
+            Assert-WorkerProfile $intervals $path 'prebuild-worker' $workerStages
+            $prebuildQueue = $intervals["$path/prebuild-worker-queue"]
+            $prebuildObserved = $intervals["$path/prebuild-worker-completion-observation"]
+        } elseif ($bricksByGroup["$path/private"].Count -or $meshesByGroup["$path/private"].Count -or
+            $brickTimings.ContainsKey("$path/private")) {
+            throw "Private inventory has no offered source for $path."
+        }
+        if ($path -ceq 'Recovery') {
+            if (!$hasPrivate -or !$generations.Add($transfer.PrivateGeneration) -or
+                $prebuildQueue.FromQpc -lt $admission.ToQpc -or
+                $prebuildObserved.ToQpc -gt $publishingQueue.FromQpc) {
+                throw 'Recovery requires a synchronous private profile before publishing.'
+            }
+            $transfer.EarlyStatus = 'Synchronous'
+        } else {
+            $decision = $early[$path]
+            if ($null -eq $decision -or $decision.AttemptQpc -gt $route.FromQpc -or
+                $decision.CutQpc -lt $admission.ToQpc -or $decision.CutQpc -gt $publishingQueue.FromQpc -or
+                ($decision.Generation -and ($decision.Generation -ge $transfer.PublishingGeneration -or
+                    !$generations.Add($decision.Generation))) -or
+                (($decision.Status -ceq 'Ready') -ne $hasPrivate) -or
+                ($hasPrivate -and ($transfer.PrivateGeneration -ne $decision.Generation -or
+                    $prebuildQueue.FromQpc -lt $decision.AttemptQpc -or $prebuildQueue.FromQpc -gt $route.FromQpc -or
+                    $prebuildObserved.ToQpc -gt $route.FromQpc))) {
+                throw "Invalid early prebuild ordering or source identity for $path."
+            }
+            $transfer.EarlyStatus = $decision.Status
+            $transfer.EarlyAttemptQpc = $decision.AttemptQpc
+            $transfer.EarlyCutQpc = $decision.CutQpc
+            $transfer.EarlyAdmittedGeneration = $decision.Generation
+            if ($decision.AttemptQpc) {
+                $transfer.EarlyLeadMilliseconds = (($route.FromQpc - $decision.AttemptQpc) * 1000.0 / $frequency)
+            }
+            if ($hasPrivate) {
+                $transfer.ReadyBeforeCutMilliseconds = (($decision.CutQpc - $prebuildObserved.ToQpc) * 1000.0 / $frequency)
+            }
+        }
+        $measuredRoles = if ($hasPrivate) { $roles } else { @('publishing') }
+        foreach ($role in $measuredRoles) {
             $group = "$path/$role"
             $bricks = $bricksByGroup[$group]
             $meshes = $meshesByGroup[$group]
@@ -450,9 +513,10 @@ try {
     Assert-InstalledPayload $installRoot $manifest
     $exe = Join-Path $installRoot 'WorldsYetUnseen.Client.exe'
     $meta = [ordered]@{
-        Schema = 'wyu-r09-installed-flight-v5'; UTC = [DateTime]::UtcNow.ToString('o')
+        Schema = 'wyu-r09-installed-flight-v6'; UTC = [DateTime]::UtcNow.ToString('o')
         OS = [Environment]::OSVersion.VersionString; LogicalProcessors = [Environment]::ProcessorCount
         Adapter = $Adapter; Cohorts = $Cohort; SamplesPerCohort = $Samples; WarmupsPerCohort = 1
+        EarlyPrefetchMode = if ($RequireEarlyColdFallback) { 'forced-pending' } else { 'natural' }
         WyuCommit = $manifest.wyuCommit; GroundworkCommit = $manifest.groundworkCommit
         GroundworkVersion = $manifest.groundworkVersion; GroundworkManifestSha256 = $manifest.groundworkManifestSha256
         InstallerSha256 = $manifest.installerSha256; InstallerManifestSha256 = $manifestHash
@@ -487,6 +551,13 @@ try {
                 throw "$label did not demonstrate landing and clean settlement. See $log and $errors."
             }
             $run = Read-Measurements $lines $mode $sample
+            if ($RequireEarlyColdFallback) {
+                foreach ($decision in $run.Reuse | Where-Object Path -In @('Movement','FirstEdit')) {
+                    if ($decision.EarlyStatus -cne 'Pending' -or !$decision.ColdFallback) {
+                        throw "$label did not demonstrate forced pending fallback for $($decision.Path)."
+                    }
+                }
+            }
             if ($rows.Count -gt 0 -and $run.Frequency -ne $rows[0].Frequency) {
                 throw "$label used a different QPC frequency. See $log."
             }
