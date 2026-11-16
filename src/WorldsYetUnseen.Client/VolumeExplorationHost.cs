@@ -34,8 +34,11 @@ internal static partial class GameHost
         Task<bool> watchClose = Task.FromResult(false);
         D3D12Renderer? renderer = null;
         var measure = measureSunlight || scripted && BiomeMeasurements.Enabled;
-        using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure);
+        var measureR09 = scripted && flightSmoke && saveSmoke == "flight" &&
+            Environment.GetEnvironmentVariable("WYU_R09_LATENCY") == "1";
+        using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure, measureR09);
         VolumeStreamingCoordinator? terrain = null;
+        VolumeExploration? exploration = null;
         AlphaOverlay? overlay = null;
         PrototypeMouseLook? mouse = null;
         VolumeWorldSlot? slot = null;
@@ -94,17 +97,16 @@ internal static partial class GameHost
             }
             var world = runtime.OpenWorld(id, WorldQuota,
                 new BarrierSupervisorPolicy(WorldQuota.Diagnostics.RequiredEvidenceRecords), initial,
-                new ExplorationJobScope(), slot?.Checkpoint?.Tick ?? 0);
+                measureR09 ? new R09JobScope() : new ExplorationJobScope(), slot?.Checkpoint?.Tick ?? 0);
             var planet = slot?.Planet ?? (slot?.Cave is null
                 ? new ReferencePlanet(new Guid("d89e4d83-1228-4780-b2c4-1af37f48468e"), smokeSeed!.Value) : null);
             if (!scripted)
                 mouse = new PrototypeMouseLook(window, settings);
             var retrySmoke = scripted ? Environment.GetEnvironmentVariable("WYU_HOST_RETRY_SMOKE") : null;
-            var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld)
+            exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld)
             {
                 VerifyTerrainRetries = retrySmoke == "1",
-                MeasureR09 = scripted && flightSmoke && saveSmoke == "flight" &&
-                    Environment.GetEnvironmentVariable("WYU_R09_LATENCY") == "1",
+                R09RenderHost = measureR09 ? renderHost : null,
                 ExhaustTerrainRetry = retrySmoke switch
                 {
                     "Movement" => VolumeWorkClass.Movement,
@@ -173,7 +175,15 @@ internal static partial class GameHost
             {
                 try
                 {
-                    await renderHost.StopAsync().ConfigureAwait(false);
+                    try
+                    {
+                        if (measureR09 && exploration is not null)
+                            await exploration.StopR09JobsAsync().ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await renderHost.StopAsync().ConfigureAwait(false);
+                    }
                 }
                 finally
                 {

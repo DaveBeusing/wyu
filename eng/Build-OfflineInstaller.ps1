@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory)][string]$GroundworkVersion,
     [Parameter(Mandatory)][string]$GroundworkCommit,
     [Parameter(Mandatory)][string]$GroundworkManifestHash,
-    [Parameter(Mandatory)][string]$GroundworkLicense
+    [Parameter(Mandatory)][string]$GroundworkLicense,
+    [switch]$R09Measurement
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -62,9 +63,10 @@ Copy-Item -LiteralPath (Join-Path $runtimePackage 'LICENSE.TXT') -Destination (J
 Copy-Item -LiteralPath (Join-Path $runtimePackage 'THIRD-PARTY-NOTICES.TXT') -Destination (Join-Path $licenses 'dotnet-third-party-notices.txt')
 
 New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
-& $compilerFile.FullName "/DAppVersion=$version" "/DPayloadDirectory=$payload" "/DInstallerOutput=$OutputDirectory" (Join-Path $PSScriptRoot 'WyuAlpha.iss')
+$profile = if ($R09Measurement) { @('/DR09Installer=1') } else { @() }
+& $compilerFile.FullName @profile "/DAppVersion=$version" "/DPayloadDirectory=$payload" "/DInstallerOutput=$OutputDirectory" (Join-Path $PSScriptRoot 'WyuAlpha.iss')
 if ($LASTEXITCODE) { throw 'Inno Setup compilation failed.' }
-$name = "WYU-Alpha-$version-win-x64.exe"
+$name = if ($R09Measurement) { "WYU-R09-$version-win-x64.exe" } else { "WYU-Alpha-$version-win-x64.exe" }
 $installer = Join-Path $OutputDirectory $name
 $files = @(Get-ChildItem -LiteralPath $payload -Recurse -File | Sort-Object FullName | ForEach-Object {
     [ordered]@{

@@ -61,10 +61,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var movement = diagnostics?.LimitPlanetStreaming == true ? unit with { CpuBytes = unit.CpuBytes - 1 } : unit;
         var limits = new VolumeStreamingLimits(baseline + unit + unit + unit + unit,
             baseline, movement, unit, unit, unit, 12, 12, 256);
-        return restore && slot?.Checkpoint is { } checkpoint
+        var terrain = restore && slot?.Checkpoint is { } checkpoint
             ? checkpoint.RestoreTerrain(world, Field, limits, OverlayLimit,
                 cave is null ? VolumeWorldSlot.SupportsMaterial : CavePlanet.SupportsMaterial)
             : new VolumeStreamingCoordinator(world, Field, limits, OverlayLimit);
+        if (MeasureR09)
+            terrain.EnableEventTiming();
+        return terrain;
     }
 
     internal static async Task<ulong?> ChooseSeedAsync(WindowsHostModule window, AlphaOverlay overlay,
@@ -360,6 +363,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var started = operationStarted ?? Stopwatch.GetTimestamp();
         var timing = returnTerrain?.Timing ?? StartR09(edit is not null ? VolumeWorkClass.FirstEdit :
             recovery ? VolumeWorkClass.Recovery : VolumeWorkClass.Movement, started);
+        using var retained = timing is null ? null : terrain.TryRead()
+            ?? throw new InvalidOperationException("R09 requires the previous terrain generation.");
         VolumeViewIdentity view;
         if (returnTerrain is { } preparedReturn)
         {
@@ -410,7 +415,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             }
         }
         using var ownedWork = returnTerrain is null ? work : null;
-        var generated = returnTerrain?.Generated ?? ExecuteTerrainAsync(work, token, timing: timing);
+        using var ownedPressure = timing is not null && returnTerrain is null
+            ? await StartR09PressureAsync(token).ConfigureAwait(false) : null;
+        var pressure = returnTerrain?.Pressure ?? ownedPressure;
+        var generated = returnTerrain?.Generated ?? (pressure is null
+            ? ExecuteTerrainAsync(work, token) : pressure.RunProtectedAsync(work, timing, token));
         if (rendererReady is not null)
         {
             try
@@ -435,17 +444,24 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
             pauseWhileMinimized: true).ConfigureAwait(false);
-        var uploadStarted = timing is null ? 0 : Stopwatch.GetTimestamp();
-        var packSample = BiomeMeasurements.StartBuild();
-        var upload = renderer.TryStageVolumeTerrain(work.Generation);
-        BiomeMeasurements.WriteBuild("near-pack", packSample);
-        if (edit is not null && upload is MeshReplacementSubmissionResult.Backpressure or MeshReplacementSubmissionResult.InvalidRegion)
-            return false;
-        RequireMesh(upload);
-        await WaitAsync(renderer, () => renderer.IsVolumeTerrainReady(work.Generation), token).ConfigureAwait(false);
-
-        timing?.Write("upload-to-observed-ready", uploadStarted, Stopwatch.GetTimestamp());
-        await BeginAsync(token).ConfigureAwait(false);
+        if (timing is null)
+        {
+            var packSample = BiomeMeasurements.StartBuild();
+            var upload = renderer.TryStageVolumeTerrain(work.Generation);
+            BiomeMeasurements.WriteBuild("near-pack", packSample);
+            if (edit is not null && upload is MeshReplacementSubmissionResult.Backpressure or MeshReplacementSubmissionResult.InvalidRegion)
+                return false;
+            RequireMesh(upload);
+            await WaitAsync(renderer, () => renderer.IsVolumeTerrainReady(work.Generation), token).ConfigureAwait(false);
+            await BeginAsync(token).ConfigureAwait(false);
+        }
+        else
+        {
+            await StageR09UploadAsync(timing, pressure!, terrain, renderer, work.Generation, retained!, selection, token)
+                .ConfigureAwait(false);
+            Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
+            await BeginAsync(token).ConfigureAwait(false);
+        }
         var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
         var prepared = renderer.TryPrepareVolumePublication(work.Generation, commit, [], out var preparation);
         if (prepared is null)
@@ -477,9 +493,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         _selection = selection;
         _fineBricks = CountFineBricks(selection);
         _views++;
-        Drain(terrain);
-        if (timing is not null)
-            await FinishR09Async(timing, terrain, submitted, presented, handoffStarted, token).ConfigureAwait(false);
+        if (timing is null)
+            Drain(terrain);
+        else
+            await FinishR09Async(timing, terrain, work.Generation, sequence, view, submitted, presented, handoffStarted, token)
+                .ConfigureAwait(false);
         return true;
     }
 
@@ -501,15 +519,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             ? "The terrain streaming budget is full. The planet could not load. Close the game and try again."
             : $"The planet could not load terrain ({result}). Close the game and try again.");
 
-    private static Task<bool> ExecuteTerrainAsync(VolumeStreamingWork work, CancellationToken token, string phase = "terrain-build", R09Timing? timing = null) =>
+    private static Task<bool> ExecuteTerrainAsync(VolumeStreamingWork work, CancellationToken token, string phase = "terrain-build") =>
         Task.Run(() =>
         {
             var started = BiomeMeasurements.Start();
-            var workerStarted = timing is null ? 0 : Stopwatch.GetTimestamp();
-            var completed = work.Execute(token);
-            timing?.Write("worker", workerStarted, Stopwatch.GetTimestamp());
+            var result = work.Execute(token);
             BiomeMeasurements.Write(phase, started);
-            return completed;
+            return result;
         }, token);
 
     private static int CountFineBricks(VolumeStreamingSelection selection)

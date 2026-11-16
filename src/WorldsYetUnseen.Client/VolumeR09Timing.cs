@@ -6,7 +6,8 @@ namespace WorldsYetUnseen.Client;
 
 internal sealed partial class VolumeExploration
 {
-    internal bool MeasureR09 { get; init; }
+    internal ProceduralRenderHost? R09RenderHost { get; init; }
+    private bool MeasureR09 => R09RenderHost is not null;
     private bool _measureCoverage;
     private readonly HashSet<VolumeWorkClass> _r09Paths = [];
 
@@ -22,20 +23,43 @@ internal sealed partial class VolumeExploration
     }
 
     private async Task FinishR09Async(R09Timing timing, VolumeStreamingCoordinator terrain,
-        long submitted, long presented, long handoffStarted, CancellationToken token)
+        ulong generation, ulong frame, VolumeViewIdentity view, long submitted, long presented,
+        long handoffStarted, CancellationToken token)
     {
         // The scripted flight does not consume ground input at handoff. Drive the next
         // authoritative tick explicitly to observe when the presented coverage becomes usable.
         var begin = await BeginAsync(token).ConfigureAwait(false);
-        terrain.BeginTick(begin);
-        var consumed = Stopwatch.GetTimestamp();
+        if (!terrain.BeginTick(begin))
+            throw new InvalidOperationException($"R09 did not consume the {timing.Path} receipt at BeginTick.");
         Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
-        if (terrain.Statistics.MovementHeld)
-            throw new InvalidOperationException($"R09 movement remained held after {timing.Path} presentation.");
+
+        VolumeStreamingEvent? receipt = null, opened = null;
+        while (terrain.TryReadEvent(out var entry))
+        {
+            if (entry.Generation != generation || entry.Frame != frame || entry.View != view)
+                continue;
+            if (entry.Kind == VolumeEventKind.Accepted && receipt is null)
+                receipt = entry;
+            else if (entry.Kind == VolumeEventKind.Opened && opened is null)
+                opened = entry;
+            else if (entry.Kind is VolumeEventKind.Accepted or VolumeEventKind.Opened)
+                throw new InvalidOperationException($"R09 observed duplicate presentation evidence for {timing.Path}.");
+        }
+        if (receipt is not { Stamp: { } accepted, MonotonicTimestamp: > 0 } presentedFrame ||
+            opened is not { Stamp: { } consumedAt, MonotonicTimestamp: > 0 } openedFrame ||
+            consumedAt != begin || accepted.World != begin.World || accepted.Tick >= begin.Tick ||
+            presentedFrame.MonotonicTimestamp < submitted || openedFrame.MonotonicTimestamp < presented ||
+            openedFrame.MonotonicTimestamp < presentedFrame.MonotonicTimestamp || terrain.Statistics.MovementHeld)
+            throw new InvalidOperationException($"R09 could not match the {timing.Path} receipt to the consuming BeginTick.");
+
+        var consumed = openedFrame.MonotonicTimestamp;
         timing.Write("submit-to-observed-present", submitted, presented);
         timing.Write("observed-present-to-begin-tick", presented, consumed);
+        timing.Write("authorized-receipt-to-begin-tick", presentedFrame.MonotonicTimestamp, consumed);
         timing.Write("setup-to-begin-tick", timing.Started, consumed);
         if (handoffStarted != 0)
             timing.Write("handoff-to-begin-tick", handoffStarted, consumed);
+        Console.WriteLine(FormattableString.Invariant(
+            $"WYU R09 IDENTITY {timing.Path} {generation} {frame} {view.View} {view.RendererEpoch} {accepted.Tick} {begin.Tick}"));
     }
 }

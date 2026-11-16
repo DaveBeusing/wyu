@@ -25,13 +25,13 @@ try {
         $projects -ccontains $gameplayProject -and $projects -ccontains $gameplayTests) 'Unexpected WYU project graph.'
     [xml] $props = Get-Content 'Directory.Build.props' -Raw
     $version = $props.SelectSingleNode('//PropertyGroup/Version')
-    Assert-True (($null -ne $version) -and ($version.InnerText -eq '0.1.0')) 'Source version must be 0.1.0.'
+    Assert-True (($null -ne $version) -and ($version.InnerText -eq '0.1.1')) 'Source version must be 0.1.1.'
     [xml] $project = Get-Content $clientProject -Raw
     $refs = @($project.SelectNodes('//ProjectReference'))
     Assert-True ($refs.Count -eq 1 -and
         $refs[0].GetAttribute('Include') -ceq '../WorldsYetUnseen.Gameplay/WorldsYetUnseen.Gameplay.csproj') 'Unexpected WYU host project dependency.'
     $packages = @($project.SelectNodes('//PackageReference'))
-    $expectedVersion = '0.1.0-dev.43632281999.1'
+    $expectedVersion = '0.1.0-dev.43945439532.1'
     $expectedIds = @('Core', 'Diagnostics', 'Ecs', 'Jobs', 'Persistence', 'Platform.Windows', 'Rendering', 'Rendering.D3D12', 'Simulation', 'Voxels') |
         ForEach-Object { "Groundwork.$_" }
     Assert-True ($packages.Count -eq $expectedIds.Count) 'Unexpected WYU package reference count.'

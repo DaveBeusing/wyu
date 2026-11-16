@@ -268,6 +268,7 @@ internal sealed partial class VolumeExploration
             {
                 await returnCancellation.CancelAsync().ConfigureAwait(false);
                 await ((Task)pending.Generated).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                pending.Pressure?.Dispose();
                 pending.Work.Dispose();
             }
             // Both CPU workers settle before the host retires terrain or the window.
@@ -289,7 +290,7 @@ internal sealed partial class VolumeExploration
     }
 
     private sealed record FlightReturnTerrain(VolumeViewIdentity View, ulong Revision, VolumeStreamingSelection Selection,
-        VolumeStreamingWork Work, Task<bool> Generated, R09Timing? Timing);
+        VolumeStreamingWork Work, Task<bool> Generated, R09Timing? Timing, R09Pressure? Pressure);
 
     private async Task<FlightReturnTerrain> PrepareFlightReturnAsync(VolumeStreamingCoordinator terrain, PlanetWalkState player,
         PlanetVector center, ulong revision, CancellationToken token)
@@ -306,7 +307,18 @@ internal sealed partial class VolumeExploration
             new(VolumeWorkClass.Recovery, view, revision, revision, selection, null), started, token, timing).ConfigureAwait(false);
         if (admission != VolumeAdmission.Accepted || work is null)
             throw TerrainAdmissionFailure(admission);
-        return new(view, revision, selection, work, ExecuteTerrainAsync(work, token, "return-terrain-build", timing), timing);
+        try
+        {
+            var pressure = timing is null ? null : await StartR09PressureAsync(token).ConfigureAwait(false);
+            var generated = pressure is null ? ExecuteTerrainAsync(work, token, "return-terrain-build")
+                : pressure.RunProtectedAsync(work, timing, token);
+            return new(view, revision, selection, work, generated, timing, pressure);
+        }
+        catch
+        {
+            work.Dispose();
+            throw;
+        }
     }
 
     private async Task<PlanetWalkState> PublishLandingAsync(VolumeStreamingCoordinator terrain, PlanetWalkState player,

@@ -13,12 +13,13 @@ namespace WorldsYetUnseen.Client;
 // A renderer Stop fences its owning runtime. Each successive graphics owner therefore
 // has its own bounded lifetime while the world and the HWND keep their original authority.
 internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, RuntimeTimingLimits timing,
-    ResourceQuota quota, bool measure) : IDisposable
+    ResourceQuota quota, bool measure, bool qualifyR09 = false) : IDisposable
 {
     private readonly ProcessResourceBudget _budget = new(new ProcessResourceLimits(1, quota));
     private RuntimeSafetyAuthority? _runtime;
     private readonly D3D12DeviceSession _device = new(new(!measure, true), warp, reuseDirectQueue: true);
     internal D3D12Renderer? Current { get; private set; }
+    internal R09NativeUploadGate? R09UploadGate { get; private set; }
     private VolumeTerrainColorEvaluator? _colorEvaluator;
     internal ReferenceProps? Props { get; set; }
     internal ReferenceBiomes? Biomes { get; private set; }
@@ -37,6 +38,8 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
         {
             var renderer = D3D12Renderer.CreateWithSessionVolumeTerrain(window, owner, terrain,
                 terrain.View.RendererEpoch, _device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
+            if (qualifyR09)
+                R09UploadGate = R09NativeUploadGate.Attach(renderer);
             Props?.Attach(renderer);
             return renderer;
         }, token);
@@ -84,6 +87,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
             throw new InvalidOperationException("The planet renderer did not settle for handoff.");
         _runtime = null;
         Current = null;
+        R09UploadGate = null;
         if (qualifyHandoff && renderer is not null)
             DesktopSmoke.VerifyAdapterSettlement(renderer, requireDebugLayer: !measure, requireNvidia: !warp,
                 useWarp: warp, allowRetainedSessionQueue: true);
