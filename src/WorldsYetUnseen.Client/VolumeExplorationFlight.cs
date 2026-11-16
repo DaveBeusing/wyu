@@ -249,7 +249,7 @@ internal sealed partial class VolumeExploration
                 if (transition is not null)
                     BiomeMeasurements.Write(transition, transitionStarted);
                 if (far && returnTerrain is null)
-                    returnTerrain = PrepareFlightReturn(terrain, player, center, revision, returnCancellation.Token);
+                    returnTerrain = await PrepareFlightReturnAsync(terrain, player, center, revision, returnCancellation.Token).ConfigureAwait(false);
                 if (abortAtFar && far)
                     return (player, true);
                 if (!scripted)
@@ -290,17 +290,18 @@ internal sealed partial class VolumeExploration
     private sealed record FlightReturnTerrain(VolumeViewIdentity View, ulong Revision, VolumeStreamingSelection Selection,
         VolumeStreamingWork Work, Task<bool> Generated);
 
-    private FlightReturnTerrain PrepareFlightReturn(VolumeStreamingCoordinator terrain, PlanetWalkState player,
+    private async Task<FlightReturnTerrain> PrepareFlightReturnAsync(VolumeStreamingCoordinator terrain, PlanetWalkState player,
         PlanetVector center, ulong revision, CancellationToken token)
     {
+        var started = Stopwatch.GetTimestamp();
         var previous = terrain.View;
         var frame = previous.Frame.TryRebase(player.Position, out var rebased) ? rebased : previous.Frame;
         var view = terrain.ChangeView(frame, checked(previous.RendererEpoch + 1));
         if (view.RendererEpoch <= previous.RendererEpoch || !terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Could not reserve the held return view.");
         var selection = SelectTerrain(center, player.Heading, supportCells: FlightSupportCells);
-        var admission = terrain.TryStage(VolumeWorkClass.Movement, selection, revision, revision, MeshBytes,
-            Charge(selection), Field, out var work);
+        var (work, admission) = await AdmitTerrainAsync(terrain,
+            new(VolumeWorkClass.Recovery, view, revision, revision, selection, null), started, token).ConfigureAwait(false);
         if (admission != VolumeAdmission.Accepted || work is null)
             throw TerrainAdmissionFailure(admission);
         return new(view, revision, selection, work, ExecuteTerrainAsync(work, token, "return-terrain-build"));

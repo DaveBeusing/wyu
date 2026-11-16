@@ -354,8 +354,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private async Task<bool> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
-        Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null)
+        Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null,
+        bool recovery = false, long? operationStarted = null)
     {
+        var started = operationStarted ?? Stopwatch.GetTimestamp();
         VolumeViewIdentity view;
         if (returnTerrain is { } preparedReturn)
         {
@@ -393,10 +395,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var work = returnTerrain?.Work;
         if (work is null)
         {
-            var result = edit is { } brush
-                ? terrain.TryStageEdit(brush.Tick, brush.Id, selection, MeshBytes, Charge(selection), out work)
-                : terrain.TryStage(VolumeWorkClass.Movement, selection, revision, targetRevision, MeshBytes,
-                    Charge(selection), Field, out work);
+            var path = edit is not null ? VolumeWorkClass.FirstEdit :
+                recovery ? VolumeWorkClass.Recovery : VolumeWorkClass.Movement;
+            VolumeAdmission result;
+            (work, result) = await AdmitTerrainAsync(terrain, new(path, view, revision, targetRevision, selection, edit),
+                started, token).ConfigureAwait(false);
             if (result != VolumeAdmission.Accepted || work is null)
             {
                 if (edit is not null)
