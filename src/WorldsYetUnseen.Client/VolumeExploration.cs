@@ -419,7 +419,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             ? await StartR09PressureAsync(token).ConfigureAwait(false) : null;
         var pressure = returnTerrain?.Pressure ?? ownedPressure;
         var generated = returnTerrain?.Generated ?? (pressure is null
-            ? ExecuteTerrainAsync(work, token) : pressure.RunProtectedAsync(work, timing, token));
+            ? ExecuteTerrainAsync(work, token) : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token));
         if (rendererReady is not null)
         {
             try
@@ -457,7 +457,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
         else
         {
-            await StageR09UploadAsync(timing, pressure!, terrain, renderer, work.Generation, retained!, selection, token)
+            await StageR09UploadAsync(timing, pressure!, terrain, renderer, work.Generation, retained!, token)
                 .ConfigureAwait(false);
             Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
             await BeginAsync(token).ConfigureAwait(false);

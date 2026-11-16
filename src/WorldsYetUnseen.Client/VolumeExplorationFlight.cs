@@ -311,7 +311,7 @@ internal sealed partial class VolumeExploration
         {
             var pressure = timing is null ? null : await StartR09PressureAsync(token).ConfigureAwait(false);
             var generated = pressure is null ? ExecuteTerrainAsync(work, token, "return-terrain-build")
-                : pressure.RunProtectedAsync(work, timing, token);
+                : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token);
             return new(view, revision, selection, work, generated, timing, pressure);
         }
         catch

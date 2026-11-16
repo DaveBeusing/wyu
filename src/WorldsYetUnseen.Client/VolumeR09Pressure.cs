@@ -51,8 +51,7 @@ internal sealed partial class VolumeExploration
     }
 
     private async Task StageR09UploadAsync(R09Timing timing, R09Pressure pressure, VolumeStreamingCoordinator terrain,
-        D3D12Renderer renderer, ulong generation, VolumeStreamingLease retained, VolumeStreamingSelection selection,
-        CancellationToken token)
+        D3D12Renderer renderer, ulong generation, VolumeStreamingLease retained, CancellationToken token)
     {
         var gate = R09RenderHost?.R09UploadGate ?? throw new InvalidOperationException("The active R09 renderer has no native upload gate.");
         using var hold = gate.Arm();
@@ -61,18 +60,9 @@ internal sealed partial class VolumeExploration
         await hold.Entered.WaitAsync(TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
         var holdObserved = Stopwatch.GetTimestamp();
         pressure.RequireSaturated();
-        var revision = retained.Info.TerrainRevision;
-        var overlapClass = timing.Path == VolumeWorkClass.Recovery ? VolumeWorkClass.Movement : VolumeWorkClass.Recovery;
-        var admission = terrain.TryStage(overlapClass, selection, revision, revision, MeshBytes,
-            Charge(selection), Field, out var overlap);
-        using var ownedOverlap = overlap;
-        if (admission != VolumeAdmission.Accepted || ownedOverlap is null)
-            throw new InvalidOperationException($"R09 could not admit a private overlap build ({admission}).");
-        var overlapMeasurement = await pressure.MeasureOverlapAsync(ownedOverlap, token).ConfigureAwait(false);
-        if (overlapMeasurement is not { } privateWorker ||
-            renderer.IsVolumeTerrainReady(generation) || !terrain.Statistics.MovementHeld ||
+        if (renderer.IsVolumeTerrainReady(generation) || !terrain.Statistics.MovementHeld ||
             (_ports.Committed.Read().Root as VolumeWorldRoot)?.Terrain != retained.Info)
-            throw new InvalidOperationException("R09 overlap lost the held upload or retained terrain.");
+            throw new InvalidOperationException("R09 lost the held upload or retained terrain.");
 
         var uploadReleased = hold.Release();
         await WaitAsync(renderer, () => renderer.IsVolumeTerrainReady(generation), token).ConfigureAwait(false);
@@ -82,7 +72,6 @@ internal sealed partial class VolumeExploration
         timing.Write("upload-to-observed-ready", uploadStarted, ready);
         timing.Write("held-upload", holdObserved, uploadReleased);
         timing.Write("held-upload-release-to-ready", uploadReleased, ready);
-        privateWorker.Write(timing, "overlap-worker");
         Console.WriteLine(FormattableString.Invariant(
             $"WYU R09 PRESSURE {timing.Path} {peak.CpuBytes} {peak.NativeBytes} {peak.UploadBytes} {peak.RetirementBytes}"));
         await pressure.SettleAsync(token).ConfigureAwait(false);
@@ -112,13 +101,13 @@ internal sealed partial class VolumeExploration
             {
                 var key = brick.Key;
                 Console.WriteLine(FormattableString.Invariant(
-                    $"WYU R09 BRICK {timing.Path} {role} {key.X} {key.Y} {key.Z} {brick.RequestedStride} {brick.DensitySha256} {brick.MaterialSha256} {brick.ElapsedTicks}"));
+                    $"WYU R09 BRICK {timing.Path} {role} {key.X} {key.Y} {key.Z} {brick.RequestedStride} {brick.DensitySha256} {brick.MaterialSha256} {brick.ElapsedTicks} {(brick.Reused ? 1 : 0)}"));
             }
             foreach (var mesh in Profile.Meshes.Span)
             {
                 var origin = mesh.Origin;
                 Console.WriteLine(FormattableString.Invariant(
-                    $"WYU R09 MESH {timing.Path} {role} {origin.X} {origin.Y} {origin.Z} {mesh.LodMask} {mesh.TriangleCount} {mesh.GeometrySha256} {mesh.ElapsedTicks}"));
+                    $"WYU R09 MESH {timing.Path} {role} {origin.X} {origin.Y} {origin.Z} {mesh.LodMask} {mesh.TriangleCount} {mesh.GeometrySha256} {mesh.ElapsedTicks} {(mesh.Reused ? 1 : 0)}"));
             }
         }
     }
@@ -146,22 +135,30 @@ internal sealed partial class VolumeExploration
             await _release.Task.WaitAsync(token).ConfigureAwait(false);
         }
 
-        internal async Task<bool> RunProtectedAsync(VolumeStreamingWork work, R09Timing? timing, CancellationToken token)
+        internal async Task<bool> RunProtectedAsync(VolumeStreamingWork work, R09Timing timing,
+            VolumeStreamingCoordinator terrain, VolumeStreamingSelection selection, ulong revision, CancellationToken token)
         {
-            var measurement = await MeasureWorkerAsync(work, timing?.Path.ToString() ?? "publishing", 25, token)
-                .ConfigureAwait(false);
+            var privateClass = timing.Path == VolumeWorkClass.Recovery ? VolumeWorkClass.Movement : VolumeWorkClass.Recovery;
+            var admission = terrain.TryStagePrivate(privateClass, selection, revision, revision, owner.MeshBytes,
+                owner.Charge(selection), owner.Field, out var source);
+            using var privateWork = source;
+            if (admission != VolumeAdmission.Accepted || privateWork is null)
+                throw new InvalidOperationException($"R09 could not admit the private prebuild ({admission}).");
+            var prebuild = await MeasureWorkerAsync(privateWork, null, "private prebuild", token).ConfigureAwait(false);
+            if (prebuild is not { } privateWorker)
+                return false;
+            privateWorker.Write(timing, "prebuild-worker");
+            var measurement = await MeasureWorkerAsync(work, privateWork, timing.Path.ToString(), token).ConfigureAwait(false);
             if (measurement is not { } worker)
                 return false;
-            if (timing is not null)
-                worker.Write(timing, "worker");
+            worker.Write(timing, "worker");
+            Console.WriteLine(FormattableString.Invariant(
+                $"WYU R09 REUSE {timing.Path} {privateWork.Generation} {work.Generation} {worker.Profile.ReuseSourceGeneration}"));
             return true;
         }
 
-        internal Task<R09WorkerMeasurement?> MeasureOverlapAsync(VolumeStreamingWork work, CancellationToken token) =>
-            MeasureWorkerAsync(work, "overlap", 7, token);
-
-        private async Task<R09WorkerMeasurement?> MeasureWorkerAsync(VolumeStreamingWork work, string description,
-            int timeoutSeconds, CancellationToken token)
+        private async Task<R09WorkerMeasurement?> MeasureWorkerAsync(VolumeStreamingWork work,
+            VolumeStreamingWork? privateWork, string description, CancellationToken token)
         {
             RequireSaturated();
             long started = 0, finished = 0;
@@ -170,7 +167,8 @@ internal sealed partial class VolumeExploration
             owner._r09Protected = cancellation =>
             {
                 started = Stopwatch.GetTimestamp();
-                completed = work.ExecuteDetailedProfiled(out profile, cancellation);
+                completed = privateWork is null ? work.ExecuteDetailedProfiled(out profile, cancellation)
+                    : work.ExecuteDetailedProfiled(privateWork, out profile, cancellation);
                 finished = Stopwatch.GetTimestamp();
                 return ValueTask.CompletedTask;
             };
@@ -181,7 +179,7 @@ internal sealed partial class VolumeExploration
             JobExecutionReport result;
             try
             {
-                var deadline = TimeSpan.FromSeconds(timeoutSeconds);
+                var deadline = TimeSpan.FromSeconds(25);
                 result = await handle.ExecutionCompletion.WaitAsync(deadline, token).ConfigureAwait(false);
             }
             catch (TimeoutException error)

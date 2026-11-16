@@ -115,17 +115,24 @@ function Assert-InventoryTiming($Items, $Outer, [long]$Frequency, [string]$Group
 }
 
 function Compare-BrickInventory($Publishing, $Private, [long]$Frequency, [string]$Mode, [int]$Sample, [string]$Path) {
-    $shared = $sameStride = $sameDensity = $sameMaterial = $samePayload = $samePayloadAndStride = 0
+    $shared = $sameStride = $sameDensity = $sameMaterial = $samePayload = $samePayloadAndStride = $reused = 0
     $privateSharedTicks = $privateSamePayloadTicks = $privateSamePayloadAndStrideTicks = $publishingSamePayloadTicks = 0L
-    foreach ($key in $Private.Keys) {
-        if (!$Publishing.ContainsKey($key)) { continue }
-        $shared++
+    foreach ($key in $Publishing.Keys) {
         $published = $Publishing[$key]
+        if (!$Private.ContainsKey($key)) {
+            if ($published.Reused) { throw "Reused brick $Path/$key is missing from the source." }
+            continue
+        }
+        $shared++
         $overlap = $Private[$key]
         $privateSharedTicks += $overlap.ElapsedTicks
         $strideMatches = $published.RequestedStride -eq $overlap.RequestedStride
         $densityMatches = $published.DensitySha256 -ceq $overlap.DensitySha256
         $materialMatches = $published.MaterialSha256 -ceq $overlap.MaterialSha256
+        if ($published.Reused) {
+            if (!$densityMatches -or !$materialMatches) { throw "Reused brick $Path/$key differs from the source." }
+            $reused++
+        }
         if ($strideMatches) { $sameStride++ }
         if ($densityMatches) { $sameDensity++ }
         if ($materialMatches) { $sameMaterial++ }
@@ -142,6 +149,7 @@ function Compare-BrickInventory($Publishing, $Private, [long]$Frequency, [string
     [pscustomobject]@{
         Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $Path
         PublishingBricks = $Publishing.Count; PrivateBricks = $Private.Count; SharedKeys = $shared
+        ReusedBricks = $reused; RebuiltBricks = $Publishing.Count - $reused
         PublishingOnlyKeys = $Publishing.Count - $shared; PrivateOnlyKeys = $Private.Count - $shared
         SameRequestedStride = $sameStride; SameDensity = $sameDensity; SameMaterial = $sameMaterial
         SamePayload = $samePayload; SamePayloadAndRequestedStride = $samePayloadAndStride
@@ -156,19 +164,27 @@ function Compare-BrickInventory($Publishing, $Private, [long]$Frequency, [string
 }
 
 function Compare-MeshInventory($Publishing, $Private, [long]$Frequency, [string]$Mode, [int]$Sample, [string]$Path) {
-    $shared = $sameLod = $sameTriangleCount = $sameGeometry = $sameLodAndGeometry = 0
+    $shared = $sameLod = $sameTriangleCount = $sameGeometry = $sameLodAndGeometry = $reused = 0
     $privateSharedTicks = $privateSameGeometryTicks = $privateSameLodAndGeometryTicks = $publishingSameLodAndGeometryTicks = 0L
-    foreach ($key in $Private.Keys) {
-        if (!$Publishing.ContainsKey($key)) { continue }
-        $shared++
+    foreach ($key in $Publishing.Keys) {
         $published = $Publishing[$key]
+        if (!$Private.ContainsKey($key)) {
+            if ($published.Reused) { throw "Reused mesh $Path/$key is missing from the source." }
+            continue
+        }
+        $shared++
         $overlap = $Private[$key]
         $privateSharedTicks += $overlap.ElapsedTicks
         $lodMatches = $published.LodMask -eq $overlap.LodMask
         $countMatches = $published.TriangleCount -eq $overlap.TriangleCount
+        $geometryMatches = $published.GeometrySha256 -ceq $overlap.GeometrySha256
+        if ($published.Reused) {
+            if (!$lodMatches -or !$countMatches -or !$geometryMatches) { throw "Reused mesh $Path/$key differs from the source." }
+            $reused++
+        }
         if ($lodMatches) { $sameLod++ }
         if ($countMatches) { $sameTriangleCount++ }
-        if ($countMatches -and $published.GeometrySha256 -ceq $overlap.GeometrySha256) {
+        if ($countMatches -and $geometryMatches) {
             $sameGeometry++
             $privateSameGeometryTicks += $overlap.ElapsedTicks
             if ($lodMatches) {
@@ -181,6 +197,7 @@ function Compare-MeshInventory($Publishing, $Private, [long]$Frequency, [string]
     [pscustomobject]@{
         Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $Path
         PublishingMeshes = $Publishing.Count; PrivateMeshes = $Private.Count; SharedOrigins = $shared
+        ReusedMeshes = $reused; RebuiltMeshes = $Publishing.Count - $reused
         PublishingOnlyOrigins = $Publishing.Count - $shared; PrivateOnlyOrigins = $Private.Count - $shared
         SameLodMask = $sameLod; SameTriangleCount = $sameTriangleCount
         SameGeometry = $sameGeometry; SameLodAndGeometry = $sameLodAndGeometry
@@ -201,13 +218,14 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $workerStages = @('overlay','bricks','plan','mesh','evidence','handoff')
     $brickStages = @('reservation','allocation','density','material','shared-vertices','publish','residual')
     $phases = @('worker','worker-queue','worker-completion-observation','admission',
-        'overlap-worker','overlap-worker-queue','overlap-worker-completion-observation','held-upload',
+        'prebuild-worker','prebuild-worker-queue','prebuild-worker-completion-observation','held-upload',
         'upload-to-observed-ready','held-upload-release-to-ready','submit-to-observed-present',
         'observed-present-to-begin-tick','authorized-receipt-to-begin-tick','setup-to-begin-tick')
-    $phases += @($workerStages | ForEach-Object { "worker-$_"; "overlap-worker-$_" })
+    $phases += @($workerStages | ForEach-Object { "worker-$_"; "prebuild-worker-$_" })
     $intervals = @{}
     $identities = @{}
     $pressure = @{}
+    $reuse = @{}
     $brickTimings = @{}
     $bricksByGroup = @{}
     $meshesByGroup = @{}
@@ -237,32 +255,50 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
                 Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $path
                 CpuPeakBytes = $cpu; NativePeakBytes = $native; UploadPeakBytes = $upload; RetirementPeakBytes = $retirement
             }
+        } elseif ($line -cmatch '^WYU R09 REUSE (Movement|FirstEdit|Recovery) ([0-9]+) ([0-9]+) ([0-9]+)$') {
+            $path = $Matches[1]
+            $producer, $consumer, $source = 2..4 | ForEach-Object { [uint64]$Matches[$_] }
+            if ($reuse.ContainsKey($path) -or !$producer -or !$consumer -or $producer -eq $consumer -or
+                ($source -and $source -ne $producer)) { throw "Invalid or duplicate reuse record: $line" }
+            $reuse[$path] = [pscustomobject]@{
+                Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $path
+                PrivateGeneration = $producer; PublishingGeneration = $consumer; ReuseSourceGeneration = $source
+                ReusedBricks = 0; RebuiltBricks = 0; ReusedMeshes = 0; RebuiltMeshes = 0
+            }
         } elseif ($line -cmatch '^WYU R09 BRICKTIMING (Movement|FirstEdit|Recovery) (publishing|private) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)$') {
             $group = "$($Matches[1])/$($Matches[2])"
             if ($brickTimings.ContainsKey($group)) { throw "Duplicate brick timing: $line" }
             $brickTimings[$group] = @(3..8 | ForEach-Object { [long]$Matches[$_] })
-        } elseif ($line -cmatch '^WYU R09 BRICK (Movement|FirstEdit|Recovery) (publishing|private) (-?[0-9]+) (-?[0-9]+) (-?[0-9]+) ([12]) ([a-f0-9]{64}) ([a-f0-9]{64}) ([0-9]+)$') {
+        } elseif ($line -cmatch '^WYU R09 BRICK (Movement|FirstEdit|Recovery) (publishing|private) (-?[0-9]+) (-?[0-9]+) (-?[0-9]+) ([12]) ([a-f0-9]{64}) ([a-f0-9]{64}) ([0-9]+) ([01])$') {
             $path, $role = $Matches[1], $Matches[2]
             $x, $y, $z = 3..5 | ForEach-Object { [long]$Matches[$_] }
             $key = "$x,$y,$z"
             $group = $bricksByGroup["$path/$role"]
-            if ($group.Count -ge 512 -or $group.ContainsKey($key)) { throw "Too many or duplicate bricks: $line" }
+            $reused = $Matches[10] -ceq '1'
+            if ($group.Count -ge 512 -or $group.ContainsKey($key) -or ($role -eq 'private' -and $reused)) {
+                throw "Invalid or duplicate brick: $line"
+            }
             $group[$key] = [pscustomobject]@{
                 Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $path; Role = $role
                 BrickX = $x; BrickY = $y; BrickZ = $z; RequestedStride = [int]$Matches[6]
                 DensitySha256 = $Matches[7]; MaterialSha256 = $Matches[8]
+                Reused = $reused
                 ElapsedTicks = [long]$Matches[9]; Frequency = 0L; ElapsedMilliseconds = 0.0
             }
-        } elseif ($line -cmatch '^WYU R09 MESH (Movement|FirstEdit|Recovery) (publishing|private) (-?[0-9]+) (-?[0-9]+) (-?[0-9]+) ([0-9]+) ([0-9]+) ([a-f0-9]{64}) ([0-9]+)$') {
+        } elseif ($line -cmatch '^WYU R09 MESH (Movement|FirstEdit|Recovery) (publishing|private) (-?[0-9]+) (-?[0-9]+) (-?[0-9]+) ([0-9]+) ([0-9]+) ([a-f0-9]{64}) ([0-9]+) ([01])$') {
             $path, $role = $Matches[1], $Matches[2]
             $x, $y, $z = 3..5 | ForEach-Object { [long]$Matches[$_] }
             $key = "$x,$y,$z"
             $group = $meshesByGroup["$path/$role"]
-            if ($group.Count -ge 64 -or $group.ContainsKey($key)) { throw "Too many or duplicate meshes: $line" }
+            $reused = $Matches[10] -ceq '1'
+            if ($group.Count -ge 64 -or $group.ContainsKey($key) -or ($role -eq 'private' -and $reused)) {
+                throw "Invalid or duplicate mesh: $line"
+            }
             $group[$key] = [pscustomobject]@{
                 Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $path; Role = $role
                 OriginX = $x; OriginY = $y; OriginZ = $z; LodMask = [byte]$Matches[6]
                 TriangleCount = [int]$Matches[7]; GeometrySha256 = $Matches[8]
+                Reused = $reused
                 ElapsedTicks = [long]$Matches[9]; Frequency = 0L; ElapsedMilliseconds = 0.0
             }
         } elseif ($line -cmatch '^WYU R09 (Movement|FirstEdit|Recovery) ([a-z-]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)$') {
@@ -301,15 +337,26 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
         if (!$identities.ContainsKey($path)) { throw "Missing identity: $path" }
         if (!$pressure.ContainsKey($path)) { throw "Missing pressure: $path" }
         Assert-WorkerProfile $intervals $path 'worker' $workerStages
-        Assert-WorkerProfile $intervals $path 'overlap-worker' $workerStages
+        Assert-WorkerProfile $intervals $path 'prebuild-worker' $workerStages
         $hold = $intervals["$path/held-upload"]
-        $private = $intervals["$path/overlap-worker"]
+        $prebuildQueue = $intervals["$path/prebuild-worker-queue"]
+        $prebuildObserved = $intervals["$path/prebuild-worker-completion-observation"]
+        $publishingQueue = $intervals["$path/worker-queue"]
+        $publishingObserved = $intervals["$path/worker-completion-observation"]
+        $admission = $intervals["$path/admission"]
+        $route = $intervals["$path/setup-to-begin-tick"]
         $upload = $intervals["$path/upload-to-observed-ready"]
         $release = $intervals["$path/held-upload-release-to-ready"]
-        if ($private.FromQpc -lt $hold.FromQpc -or $private.ToQpc -gt $hold.ToQpc -or
+        if ($prebuildQueue.FromQpc -lt $admission.ToQpc -or $prebuildQueue.FromQpc -lt $route.FromQpc -or
+            $prebuildObserved.ToQpc -gt $publishingQueue.FromQpc -or $publishingObserved.ToQpc -gt $upload.FromQpc -or
+            $upload.ToQpc -gt $route.ToQpc -or
             $hold.FromQpc -lt $upload.FromQpc -or $hold.ToQpc -ne $release.FromQpc -or
             $release.ToQpc -ne $upload.ToQpc) {
-            throw "Invalid upload timing for $path. The private Execute must occur during the upload hold."
+            throw "Invalid prebuild, publishing or upload ordering for $path."
+        }
+        $transfer = $reuse[$path]
+        if ($null -eq $transfer -or $transfer.PublishingGeneration -ne $identities[$path].Generation) {
+            throw "Missing reuse source or wrong publishing generation for $path."
         }
         foreach ($role in $roles) {
             $group = "$path/$role"
@@ -319,7 +366,7 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
                 throw "Invalid inventory for $group. Each mesh must account for eight bricks."
             }
             if (!$brickTimings.ContainsKey($group)) { throw "Missing brick timing for $group." }
-            $worker = if ($role -eq 'publishing') { 'worker' } else { 'overlap-worker' }
+            $worker = if ($role -eq 'publishing') { 'worker' } else { 'prebuild-worker' }
             $outerBricks = $intervals["$path/$worker-bricks"]
             $brickItemTicks = Assert-InventoryTiming $bricks $outerBricks $frequency "$group/bricks"
             $null = Assert-InventoryTiming $meshes $intervals["$path/$worker-mesh"] $frequency "$group/meshes"
@@ -342,14 +389,23 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
             foreach ($record in $bricks.Values) { $brickRows.Add($record) }
             foreach ($record in $meshes.Values) { $meshRows.Add($record) }
         }
-        $brickOverlap.Add((Compare-BrickInventory $bricksByGroup["$path/publishing"] $bricksByGroup["$path/private"] $frequency $Mode $Sample $path))
-        $meshOverlap.Add((Compare-MeshInventory $meshesByGroup["$path/publishing"] $meshesByGroup["$path/private"] $frequency $Mode $Sample $path))
+        $brickMatch = Compare-BrickInventory $bricksByGroup["$path/publishing"] $bricksByGroup["$path/private"] $frequency $Mode $Sample $path
+        $meshMatch = Compare-MeshInventory $meshesByGroup["$path/publishing"] $meshesByGroup["$path/private"] $frequency $Mode $Sample $path
+        if (($brickMatch.ReusedBricks -or $meshMatch.ReusedMeshes) -and !$transfer.ReuseSourceGeneration) {
+            throw "Reused entries have no source generation for $path."
+        }
+        $transfer.ReusedBricks = $brickMatch.ReusedBricks
+        $transfer.RebuiltBricks = $brickMatch.RebuiltBricks
+        $transfer.ReusedMeshes = $meshMatch.ReusedMeshes
+        $transfer.RebuiltMeshes = $meshMatch.RebuiltMeshes
+        $brickOverlap.Add($brickMatch)
+        $meshOverlap.Add($meshMatch)
     }
     if (!$intervals.ContainsKey('Recovery/handoff-to-begin-tick')) { throw 'Missing recovery handoff interval.' }
     [pscustomobject]@{
         Intervals = $intervals.Values; Identities = $identities.Values; Pressure = $pressure.Values; Frequency = $frequency
         Bricks = $brickRows; Meshes = $meshRows; BrickTimings = $brickTimingRows
-        BrickOverlap = $brickOverlap; MeshOverlap = $meshOverlap
+        BrickOverlap = $brickOverlap; MeshOverlap = $meshOverlap; Reuse = $reuse.Values
     }
 }
 
@@ -374,6 +430,7 @@ $meshes = [Collections.Generic.List[object]]::new()
 $brickTimings = [Collections.Generic.List[object]]::new()
 $brickOverlap = [Collections.Generic.List[object]]::new()
 $meshOverlap = [Collections.Generic.List[object]]::new()
+$reuseRows = [Collections.Generic.List[object]]::new()
 $work = $null
 try {
     $manifestFile = (Get-Item -LiteralPath $ManifestPath).FullName
@@ -393,7 +450,7 @@ try {
     Assert-InstalledPayload $installRoot $manifest
     $exe = Join-Path $installRoot 'WorldsYetUnseen.Client.exe'
     $meta = [ordered]@{
-        Schema = 'wyu-r09-installed-flight-v4'; UTC = [DateTime]::UtcNow.ToString('o')
+        Schema = 'wyu-r09-installed-flight-v5'; UTC = [DateTime]::UtcNow.ToString('o')
         OS = [Environment]::OSVersion.VersionString; LogicalProcessors = [Environment]::ProcessorCount
         Adapter = $Adapter; Cohorts = $Cohort; SamplesPerCohort = $Samples; WarmupsPerCohort = 1
         WyuCommit = $manifest.wyuCommit; GroundworkCommit = $manifest.groundworkCommit
@@ -441,6 +498,7 @@ try {
             $brickTimings.AddRange($run.BrickTimings)
             $brickOverlap.AddRange($run.BrickOverlap)
             $meshOverlap.AddRange($run.MeshOverlap)
+            foreach ($record in $run.Reuse) { $reuseRows.Add($record) }
             Write-Host "$label passed."
         }
     }
@@ -479,6 +537,7 @@ try {
         $brickTimings | Sort-Object Cohort,Run,Path,Role,Phase | Export-Csv -LiteralPath (Join-Path $out 'brick-timings.csv') -NoTypeInformation
         $brickOverlap | Sort-Object Cohort,Run,Path | Export-Csv -LiteralPath (Join-Path $out 'brick-overlap.csv') -NoTypeInformation
         $meshOverlap | Sort-Object Cohort,Run,Path | Export-Csv -LiteralPath (Join-Path $out 'mesh-overlap.csv') -NoTypeInformation
+        $reuseRows | Sort-Object Cohort,Run,Path | Export-Csv -LiteralPath (Join-Path $out 'reuse.csv') -NoTypeInformation
         $evidence = Get-ChildItem -LiteralPath $out -File
         Compress-Archive -LiteralPath $evidence.FullName -DestinationPath "$out.zip"
         Write-Host "Evidence: $out.zip"
