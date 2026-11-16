@@ -63,8 +63,10 @@ Copy-Item -LiteralPath (Join-Path $runtimePackage 'LICENSE.TXT') -Destination (J
 Copy-Item -LiteralPath (Join-Path $runtimePackage 'THIRD-PARTY-NOTICES.TXT') -Destination (Join-Path $licenses 'dotnet-third-party-notices.txt')
 
 New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
-$profile = if ($R09Measurement) { @('/DR09Installer=1') } else { @() }
-& $compilerFile.FullName @profile "/DAppVersion=$version" "/DPayloadDirectory=$payload" "/DInstallerOutput=$OutputDirectory" (Join-Path $PSScriptRoot 'WyuAlpha.iss')
+$compilerArguments = @("/DAppVersion=$version", "/DPayloadDirectory=$payload", "/DInstallerOutput=$OutputDirectory")
+if ($R09Measurement) { $compilerArguments += '/DR09Installer=1' }
+$compilerArguments += (Join-Path $PSScriptRoot 'WyuAlpha.iss')
+& $compilerFile.FullName @compilerArguments
 if ($LASTEXITCODE) { throw 'Inno Setup compilation failed.' }
 $name = if ($R09Measurement) { "WYU-R09-$version-win-x64.exe" } else { "WYU-Alpha-$version-win-x64.exe" }
 $installer = Join-Path $OutputDirectory $name
