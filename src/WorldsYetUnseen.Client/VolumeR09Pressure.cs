@@ -89,18 +89,37 @@ internal sealed partial class VolumeExploration
     }
 
     private readonly record struct R09WorkerMeasurement(long Queued, long Started, long Finished, long Observed,
-        VolumeStreamingWorkProfile Profile)
+        VolumeStreamingWorkDetailedProfile Profile)
     {
         internal void Write(R09Timing timing, string prefix)
         {
             timing.Write($"{prefix}-queue", Queued, Started);
             timing.Write(prefix, Started, Finished);
             timing.Write($"{prefix}-completion-observation", Finished, Observed);
-            timing.Write($"{prefix}-overlay", Profile.Started, Profile.OverlayPrepared);
-            timing.Write($"{prefix}-bricks", Profile.OverlayPrepared, Profile.BricksGenerated);
-            timing.Write($"{prefix}-plan", Profile.BricksGenerated, Profile.PlanCreated);
-            timing.Write($"{prefix}-mesh", Profile.PlanCreated, Profile.MeshBuilt);
-            timing.Write($"{prefix}-handoff", Profile.MeshBuilt, Profile.Completed);
+            var stages = Profile.Timing;
+            timing.Write($"{prefix}-overlay", stages.Started, stages.OverlayPrepared);
+            timing.Write($"{prefix}-bricks", stages.OverlayPrepared, stages.BricksGenerated);
+            timing.Write($"{prefix}-plan", stages.BricksGenerated, stages.PlanCreated);
+            timing.Write($"{prefix}-mesh", stages.PlanCreated, stages.MeshBuilt);
+            timing.Write($"{prefix}-evidence", stages.MeshBuilt, Profile.EvidenceFinished);
+            timing.Write($"{prefix}-handoff", Profile.EvidenceFinished, stages.Completed);
+
+            var role = prefix == "worker" ? "publishing" : "private";
+            var brickTiming = Profile.BrickTiming;
+            Console.WriteLine(FormattableString.Invariant(
+                $"WYU R09 BRICKTIMING {timing.Path} {role} {brickTiming.ReservationTicks} {brickTiming.AllocationTicks} {brickTiming.DensityTicks} {brickTiming.MaterialTicks} {brickTiming.SharedVertexTicks} {brickTiming.PublishTicks}"));
+            foreach (var brick in Profile.Bricks.Span)
+            {
+                var key = brick.Key;
+                Console.WriteLine(FormattableString.Invariant(
+                    $"WYU R09 BRICK {timing.Path} {role} {key.X} {key.Y} {key.Z} {brick.RequestedStride} {brick.DensitySha256} {brick.MaterialSha256} {brick.ElapsedTicks}"));
+            }
+            foreach (var mesh in Profile.Meshes.Span)
+            {
+                var origin = mesh.Origin;
+                Console.WriteLine(FormattableString.Invariant(
+                    $"WYU R09 MESH {timing.Path} {role} {origin.X} {origin.Y} {origin.Z} {mesh.LodMask} {mesh.TriangleCount} {mesh.GeometrySha256} {mesh.ElapsedTicks}"));
+            }
         }
     }
 
@@ -147,11 +166,11 @@ internal sealed partial class VolumeExploration
             RequireSaturated();
             long started = 0, finished = 0;
             var completed = false;
-            VolumeStreamingWorkProfile profile = default;
+            VolumeStreamingWorkDetailedProfile profile = default;
             owner._r09Protected = cancellation =>
             {
                 started = Stopwatch.GetTimestamp();
-                completed = work.ExecuteProfiled(out profile, cancellation);
+                completed = work.ExecuteDetailedProfiled(out profile, cancellation);
                 finished = Stopwatch.GetTimestamp();
                 return ValueTask.CompletedTask;
             };

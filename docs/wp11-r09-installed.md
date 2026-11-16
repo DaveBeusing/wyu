@@ -8,15 +8,24 @@ The publishing job uses the protected scheduler lane while one speculative job o
 
 ## Read the profiling results
 
-Evidence schema `wyu-r09-installed-flight-v3` preserves the raw QPC endpoints in `observations.csv` and reports p50, p95, p99 and maximum in `summary.csv`. For each path and cohort, compare `worker` (the publishing job) with `overlap-worker` (the private job). Each has a scheduler queue interval before `Execute`, a completion observation interval after `Execute`, and five contiguous phases inside `Execute`.
+Evidence schema `wyu-r09-installed-flight-v4` preserves the raw QPC endpoints in `observations.csv` and reports p50, p95, p99 and maximum in `summary.csv`. For each path and cohort, compare `worker` (the publishing job) with `overlap-worker` (the private job). Each has a scheduler queue interval before `Execute`, a completion observation interval after `Execute`, and six contiguous phases inside `Execute`.
 
 | Phase suffix | Work measured |
 | --- | --- |
 | `overlay` | Edit overlay preparation and request refinement |
-| `bricks` | Brick generation, including density sampling performed there |
+| `bricks` | Brick-store work, including density and material sampling |
 | `plan` | Mesh plan creation and lease acquisition |
 | `mesh` | Mesh construction and packaging of generated artifacts |
+| `evidence` | Capture of diagnostic fingerprints from the completed brick and mesh outputs |
 | `handoff` | Return of the completed result to the streaming coordinator |
+
+### Brick stages and repeated work
+
+- `brick-timings.csv` breaks each role's brick interval into reservation, allocation, density sampling, material sampling, shared-vertex validation, publication and residual time. Each stage is summed across that worker's bricks, with the original QPC frequency and outer brick interval in the same row. Residual time covers the rest of the outer interval, including orchestration and timing overhead. The diagnostic sampler groups density and material calls by row to avoid timing every sample individually. Measured sampling detours and fingerprint collection contribute to the full worker time. The `evidence` interval lets you report fingerprint cost separately when comparing v4 with a previous run.
+- `brick-inventory.csv` lists signed brick keys, requested strides, SHA-256 fingerprints for density and material arrays, and generation time for each brick. `brick-overlap.csv` counts shared brick keys, keys present in one role, and equality of payloads and requested stride as separate dimensions. `PrivateSamePayloadMilliseconds` sums the private worker's generation time for keys with matching density and material fingerprints. Requested stride describes the mesh request and is reported separately from brick content.
+- `mesh-inventory.csv` lists the lattice origin, LOD mask, triangle count, SHA-256 fingerprint of emitted geometry, and build time for each mesh. `mesh-overlap.csv` compares origins, LOD masks and geometry, including triangle counts. `PrivateSameLodAndGeometryMilliseconds` sums the private worker's build time for origins with matching LOD and geometry. Equal mesh output can occur with different upstream inputs. Any reuse decision still needs a matching input and dependency contract.
+
+Every table preserves the path, cohort, run and warm-up flag. Compare roles within the same path and run. Brick keys index bricks and mesh origins are in lattice coordinates.
 
 `held-upload` starts when the host observes the renderer entering the gate and ends at the actual release. `held-upload-release-to-ready` starts at that release and ends when the host sees the staged generation ready. `upload-to-observed-ready` starts earlier, before native staging. Use the separate intervals to distinguish time spent waiting for the private build from native readiness after the release. Compute a phase's share from matching samples in `observations.csv`. The phase maxima in `summary.csv` can come from different runs.
 
