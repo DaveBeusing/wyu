@@ -84,11 +84,32 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
     } finally { $outputStream.Dispose() }
 }
 
+function Assert-WorkerProfile($Intervals, [string]$Path, [string]$Worker, [string[]]$Stages) {
+    $outer = $Intervals["$Path/$Worker"]
+    $queue = $Intervals["$Path/$Worker-queue"]
+    $observation = $Intervals["$Path/$Worker-completion-observation"]
+    if ($queue.ToQpc -ne $outer.FromQpc -or $observation.FromQpc -ne $outer.ToQpc) {
+        throw "Invalid scheduler timing for $Path/$Worker. Queue and completion observation must meet Execute."
+    }
+    $previous = $null
+    foreach ($stage in $Stages) {
+        $interval = $Intervals["$Path/$Worker-$stage"]
+        if ($interval.FromQpc -lt $outer.FromQpc -or $interval.ToQpc -gt $outer.ToQpc -or
+            ($null -ne $previous -and $interval.FromQpc -ne $previous.ToQpc)) {
+            throw "Invalid timing for $Path/$Worker-$stage. Worker stages must be contiguous and within Execute."
+        }
+        $previous = $interval
+    }
+}
+
 function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $paths = @('Movement','FirstEdit','Recovery')
+    $workerStages = @('overlay','bricks','plan','mesh','handoff')
     $phases = @('worker','worker-queue','worker-completion-observation','admission',
+        'overlap-worker','overlap-worker-queue','overlap-worker-completion-observation','held-upload',
         'upload-to-observed-ready','held-upload-release-to-ready','submit-to-observed-present',
         'observed-present-to-begin-tick','authorized-receipt-to-begin-tick','setup-to-begin-tick')
+    $phases += @($workerStages | ForEach-Object { "worker-$_"; "overlap-worker-$_" })
     $intervals = @{}
     $identities = @{}
     $pressure = @{}
@@ -142,9 +163,20 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
         }
         if (!$identities.ContainsKey($path)) { throw "Missing identity: $path" }
         if (!$pressure.ContainsKey($path)) { throw "Missing pressure: $path" }
+        Assert-WorkerProfile $intervals $path 'worker' $workerStages
+        Assert-WorkerProfile $intervals $path 'overlap-worker' $workerStages
+        $hold = $intervals["$path/held-upload"]
+        $private = $intervals["$path/overlap-worker"]
+        $upload = $intervals["$path/upload-to-observed-ready"]
+        $release = $intervals["$path/held-upload-release-to-ready"]
+        if ($private.FromQpc -lt $hold.FromQpc -or $private.ToQpc -gt $hold.ToQpc -or
+            $hold.FromQpc -lt $upload.FromQpc -or $hold.ToQpc -ne $release.FromQpc -or
+            $release.ToQpc -ne $upload.ToQpc) {
+            throw "Invalid upload timing for $path. The private Execute must occur during the upload hold."
+        }
     }
     if (!$intervals.ContainsKey('Recovery/handoff-to-begin-tick')) { throw 'Missing recovery handoff interval.' }
-    [pscustomobject]@{ Intervals = $intervals.Values; Identities = $identities.Values; Pressure = $pressure.Values }
+    [pscustomobject]@{ Intervals = $intervals.Values; Identities = $identities.Values; Pressure = $pressure.Values; Frequency = $frequency }
 }
 
 $out = [IO.Path]::GetFullPath($OutputDirectory)
@@ -182,7 +214,7 @@ try {
     Assert-InstalledPayload $installRoot $manifest
     $exe = Join-Path $installRoot 'WorldsYetUnseen.Client.exe'
     $meta = [ordered]@{
-        Schema = 'wyu-r09-installed-flight-v2'; UTC = [DateTime]::UtcNow.ToString('o')
+        Schema = 'wyu-r09-installed-flight-v3'; UTC = [DateTime]::UtcNow.ToString('o')
         OS = [Environment]::OSVersion.VersionString; LogicalProcessors = [Environment]::ProcessorCount
         Adapter = $Adapter; Cohorts = $Cohort; SamplesPerCohort = $Samples; WarmupsPerCohort = 1
         WyuCommit = $manifest.wyuCommit; GroundworkCommit = $manifest.groundworkCommit
@@ -219,6 +251,9 @@ try {
                 throw "$label did not demonstrate landing and clean settlement. See $log and $errors."
             }
             $run = Read-Measurements $lines $mode $sample
+            if ($rows.Count -gt 0 -and $run.Frequency -ne $rows[0].Frequency) {
+                throw "$label used a different QPC frequency. See $log."
+            }
             foreach ($record in $run.Intervals) { $rows.Add($record) }
             foreach ($record in $run.Identities) { $identities.Add($record) }
             foreach ($record in $run.Pressure) { $pressure.Add($record) }

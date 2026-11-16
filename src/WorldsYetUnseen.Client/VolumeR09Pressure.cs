@@ -59,6 +59,7 @@ internal sealed partial class VolumeExploration
         var uploadStarted = Stopwatch.GetTimestamp();
         RequireMesh(renderer.TryStageVolumeTerrain(generation));
         await hold.Entered.WaitAsync(TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
+        var holdObserved = Stopwatch.GetTimestamp();
         pressure.RequireSaturated();
         var revision = retained.Info.TerrainRevision;
         var overlapClass = timing.Path == VolumeWorkClass.Recovery ? VolumeWorkClass.Movement : VolumeWorkClass.Recovery;
@@ -67,7 +68,8 @@ internal sealed partial class VolumeExploration
         using var ownedOverlap = overlap;
         if (admission != VolumeAdmission.Accepted || ownedOverlap is null)
             throw new InvalidOperationException($"R09 could not admit a private overlap build ({admission}).");
-        if (!await pressure.RunProtectedAsync(ownedOverlap, null, token).ConfigureAwait(false) ||
+        var overlapMeasurement = await pressure.MeasureOverlapAsync(ownedOverlap, token).ConfigureAwait(false);
+        if (overlapMeasurement is not { } privateWorker ||
             renderer.IsVolumeTerrainReady(generation) || !terrain.Statistics.MovementHeld ||
             (_ports.Committed.Read().Root as VolumeWorldRoot)?.Terrain != retained.Info)
             throw new InvalidOperationException("R09 overlap lost the held upload or retained terrain.");
@@ -78,10 +80,28 @@ internal sealed partial class VolumeExploration
         pressure.RequireSaturated();
         var peak = terrain.Statistics.Peak;
         timing.Write("upload-to-observed-ready", uploadStarted, ready);
+        timing.Write("held-upload", holdObserved, uploadReleased);
         timing.Write("held-upload-release-to-ready", uploadReleased, ready);
+        privateWorker.Write(timing, "overlap-worker");
         Console.WriteLine(FormattableString.Invariant(
             $"WYU R09 PRESSURE {timing.Path} {peak.CpuBytes} {peak.NativeBytes} {peak.UploadBytes} {peak.RetirementBytes}"));
         await pressure.SettleAsync(token).ConfigureAwait(false);
+    }
+
+    private readonly record struct R09WorkerMeasurement(long Queued, long Started, long Finished, long Observed,
+        VolumeStreamingWorkProfile Profile)
+    {
+        internal void Write(R09Timing timing, string prefix)
+        {
+            timing.Write($"{prefix}-queue", Queued, Started);
+            timing.Write(prefix, Started, Finished);
+            timing.Write($"{prefix}-completion-observation", Finished, Observed);
+            timing.Write($"{prefix}-overlay", Profile.Started, Profile.OverlayPrepared);
+            timing.Write($"{prefix}-bricks", Profile.OverlayPrepared, Profile.BricksGenerated);
+            timing.Write($"{prefix}-plan", Profile.BricksGenerated, Profile.PlanCreated);
+            timing.Write($"{prefix}-mesh", Profile.PlanCreated, Profile.MeshBuilt);
+            timing.Write($"{prefix}-handoff", Profile.MeshBuilt, Profile.Completed);
+        }
     }
 
     private sealed class R09Pressure(VolumeExploration owner, JobScheduler scheduler,
@@ -109,13 +129,29 @@ internal sealed partial class VolumeExploration
 
         internal async Task<bool> RunProtectedAsync(VolumeStreamingWork work, R09Timing? timing, CancellationToken token)
         {
+            var measurement = await MeasureWorkerAsync(work, timing?.Path.ToString() ?? "publishing", 25, token)
+                .ConfigureAwait(false);
+            if (measurement is not { } worker)
+                return false;
+            if (timing is not null)
+                worker.Write(timing, "worker");
+            return true;
+        }
+
+        internal Task<R09WorkerMeasurement?> MeasureOverlapAsync(VolumeStreamingWork work, CancellationToken token) =>
+            MeasureWorkerAsync(work, "overlap", 7, token);
+
+        private async Task<R09WorkerMeasurement?> MeasureWorkerAsync(VolumeStreamingWork work, string description,
+            int timeoutSeconds, CancellationToken token)
+        {
             RequireSaturated();
             long started = 0, finished = 0;
             var completed = false;
+            VolumeStreamingWorkProfile profile = default;
             owner._r09Protected = cancellation =>
             {
                 started = Stopwatch.GetTimestamp();
-                completed = work.Execute(cancellation);
+                completed = work.ExecuteProfiled(out profile, cancellation);
                 finished = Stopwatch.GetTimestamp();
                 return ValueTask.CompletedTask;
             };
@@ -126,24 +162,20 @@ internal sealed partial class VolumeExploration
             JobExecutionReport result;
             try
             {
-                // Only the private overlap build runs under the native gate watchdog.
-                var deadline = TimeSpan.FromSeconds(timing is null ? 7 : 25);
+                var deadline = TimeSpan.FromSeconds(timeoutSeconds);
                 result = await handle.ExecutionCompletion.WaitAsync(deadline, token).ConfigureAwait(false);
             }
             catch (TimeoutException error)
             {
-                throw new TimeoutException($"R09 {timing?.Path.ToString() ?? "overlap"} job did not settle. " +
+                throw new TimeoutException($"R09 {description} job did not settle. " +
                     $"Execute entered={Volatile.Read(ref started) != 0}. {scheduler.ReadMetrics()}", error);
             }
             var observed = Stopwatch.GetTimestamp();
             if (result.Status != JobExecutionStatus.Succeeded || !completed)
-                return false;
+                return null;
             await WaitForWorkersAsync(1, token).ConfigureAwait(false);
             owner._r09Protected = null;
-            timing?.Write("worker-queue", queued, started);
-            timing?.Write("worker", started, finished);
-            timing?.Write("worker-completion-observation", finished, observed);
-            return true;
+            return new(queued, started, finished, observed, profile);
         }
 
         internal void RequireSaturated()
