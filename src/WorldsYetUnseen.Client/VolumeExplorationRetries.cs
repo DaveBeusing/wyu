@@ -6,6 +6,8 @@ namespace WorldsYetUnseen.Client;
 internal sealed partial class VolumeExploration
 {
     internal bool VerifyTerrainRetries { get; init; }
+    internal VolumeWorkClass? ExhaustTerrainRetry { get; init; }
+    private bool _retryExhausted;
     private readonly HashSet<VolumeWorkClass> _retryProbes = [];
 
     private readonly record struct TerrainAdmissionRequest(VolumeWorkClass Path, VolumeViewIdentity View,
@@ -14,10 +16,13 @@ internal sealed partial class VolumeExploration
     private async Task<(VolumeStreamingWork? Work, VolumeAdmission Result)> AdmitTerrainAsync(
         VolumeStreamingCoordinator terrain, TerrainAdmissionRequest request, long started, CancellationToken token)
     {
-        var probe = VerifyTerrainRetries && request.Revision != 0 && _retryProbes.Add(request.Path);
+        var exhaust = ExhaustTerrainRetry == request.Path && request.Revision != 0 && _retryProbes.Add(request.Path);
+        var probe = exhaust || VerifyTerrainRetries && request.Revision != 0 && _retryProbes.Add(request.Path);
+        var baseline = exhaust ? terrain.Statistics : default;
         // The edit head owns FirstEdit. A probe may charge recovery beside it without consuming the sealed edit.
         using var reader = probe ? terrain.TryRead() : null;
-        using var occupant = probe ? ReserveProbe() : null;
+        using var firstOccupant = probe ? ReserveProbe() : null;
+        var occupant = firstOccupant;
         VolumeStreamingWork? work = null;
         var result = VolumeAdmission.Backpressure;
         var retry = new TerrainHostRetry<TerrainAdmissionRequest>(request.Path, request, candidate =>
@@ -41,8 +46,28 @@ internal sealed partial class VolumeExploration
                 retry.Supersede();
                 return (null, VolumeAdmission.Stale);
             }
+            using var replenished = exhaust && retry.Attempts != 0 ? ReserveProbe() : null;
+            occupant = replenished ?? firstOccupant;
             var before = terrain.Statistics;
             var state = retry.Advance(_tick, progress);
+            if (exhaust && state != TerrainHostRetryState.WaitingForProgress)
+            {
+                var expected = request.Edit is null ? 3 : 2;
+                occupant!.Dispose();
+                reader?.Dispose();
+                var released = terrain.Statistics;
+                if (state != TerrainHostRetryState.AttemptsExhausted || retry.Attempts != expected ||
+                    retry.TransientDenials != expected || work is not null ||
+                    !released.Used.Fits(baseline.Used) || released.Readers != baseline.Readers ||
+                    released.Generations > baseline.Generations)
+                {
+                    work?.Dispose();
+                    throw new InvalidOperationException($"Unexpected terminal state or retained terrain charges ({request.Path}, {state}).");
+                }
+                _retryExhausted = true;
+                Console.WriteLine($"WP11 HOST RETRY EXHAUSTED path={request.Path} attempts={retry.Attempts} denied={retry.TransientDenials} released=true");
+                return (null, VolumeAdmission.Backpressure);
+            }
             if (state == TerrainHostRetryState.Admitted)
             {
                 if (probe)
@@ -61,7 +86,7 @@ internal sealed partial class VolumeExploration
 
             if (probe)
             {
-                if (retry.Attempts != 1 || occupant is null || work is not null)
+                if ((!exhaust && retry.Attempts != 1) || occupant is null || work is not null)
                     throw new InvalidOperationException("The pressure probe did not block admission before allocation.");
                 occupant.Dispose();
             }

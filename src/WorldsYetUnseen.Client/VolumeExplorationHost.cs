@@ -99,9 +99,17 @@ internal static partial class GameHost
                 ? new ReferencePlanet(new Guid("d89e4d83-1228-4780-b2c4-1af37f48468e"), smokeSeed!.Value) : null);
             if (!scripted)
                 mouse = new PrototypeMouseLook(window, settings);
+            var retrySmoke = scripted ? Environment.GetEnvironmentVariable("WYU_HOST_RETRY_SMOKE") : null;
             var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld)
             {
-                VerifyTerrainRetries = scripted && Environment.GetEnvironmentVariable("WYU_HOST_RETRY_SMOKE") == "1",
+                VerifyTerrainRetries = retrySmoke == "1",
+                ExhaustTerrainRetry = retrySmoke switch
+                {
+                    "Movement" => VolumeWorkClass.Movement,
+                    "FirstEdit" => VolumeWorkClass.FirstEdit,
+                    "Recovery" => VolumeWorkClass.Recovery,
+                    _ => null,
+                },
             };
             var propsSmoke = scripted && Environment.GetEnvironmentVariable("WYU_WP16_SMOKE") == "1";
             if (planet is not null && (propsSmoke || !scripted && Environment.GetEnvironmentVariable("WYU_WP16") != "off"))
@@ -185,7 +193,7 @@ internal static partial class GameHost
             DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: !measure, requireNvidia: !useWarp, useWarp: useWarp);
             if (terrain!.Statistics is not { Readers: 0, Generations: 0 } settled || settled.Used != default)
                 throw new InvalidOperationException("Exploration retained terrain after shutdown.");
-            if (Environment.GetEnvironmentVariable("WYU_HOST_RETRY_SMOKE") == "1")
+            if (Environment.GetEnvironmentVariable("WYU_HOST_RETRY_SMOKE") is "1" or "Movement" or "FirstEdit" or "Recovery")
                 Console.WriteLine("WP11 HOST RETRY SETTLED terrain=0 readers=0 generations=0");
             Console.WriteLine(caveSmoke is null ? "PASS: WYU WP11 exploration, rebase and native shutdown."
                 : "PASS: WYU WP12 cave route and native shutdown.");
