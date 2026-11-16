@@ -55,6 +55,9 @@ internal sealed partial class VolumeExploration
                     (ushort)ReferenceTerrainMaterial.OchreStone, token).ConfigureAwait(false);
                 if (_retryExhausted && ExhaustTerrainRetry == VolumeWorkClass.FirstEdit)
                 {
+                    var begin = await BeginAsync(token).ConfigureAwait(false);
+                    terrain.BeginTick(begin);
+                    Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
                     if (edited || _published.TerrainRevision != revisionBeforeEdit || terrain.Statistics.MovementHeld)
                         throw new InvalidOperationException("The exhausted edit changed terrain or did not restore movement.");
                     Console.WriteLine($"WP11 HOST RETRY EDIT RECOVERED revision={revisionBeforeEdit}");
