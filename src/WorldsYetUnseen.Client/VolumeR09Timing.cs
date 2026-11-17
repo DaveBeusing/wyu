@@ -11,11 +11,11 @@ internal sealed partial class VolumeExploration
     private bool _measureCoverage;
     private readonly HashSet<VolumeWorkClass> _r09Paths = [];
 
-    private R09Timing? StartR09(VolumeWorkClass path, long started) =>
+    private R09Timing? StartR09(VolumeWorkClass path, long started, bool recoveryAtHandoff = false) =>
         MeasureR09 && (path != VolumeWorkClass.Movement || _measureCoverage) && _r09Paths.Add(path)
-            ? new(path, started) : null;
+            ? new(path, started, recoveryAtHandoff) : null;
 
-    private sealed record R09Timing(VolumeWorkClass Path, long Started)
+    private sealed record R09Timing(VolumeWorkClass Path, long Started, bool RecoveryAtHandoff)
     {
         internal Action? WriteWorkers { get; set; }
 
@@ -60,7 +60,16 @@ internal sealed partial class VolumeExploration
         timing.Write("authorized-receipt-to-begin-tick", presentedFrame.MonotonicTimestamp, consumed);
         timing.Write("setup-to-begin-tick", timing.Started, consumed);
         if (handoffStarted != 0)
+        {
+            if (timing.Path != VolumeWorkClass.Recovery || handoffStarted > consumed ||
+                (timing.RecoveryAtHandoff ? timing.Started != handoffStarted : timing.Started >= handoffStarted))
+                throw new InvalidOperationException("R09 Recovery and flight handoff timings do not match the chosen route.");
             timing.Write("handoff-to-begin-tick", handoffStarted, consumed);
+            if (timing.RecoveryAtHandoff)
+                timing.Write("recovery-no-flight-to-begin-tick", timing.Started, consumed);
+            else
+                timing.Write("flight-overlap-window", timing.Started, handoffStarted);
+        }
         Console.WriteLine(FormattableString.Invariant(
             $"WYU R09 IDENTITY {timing.Path} {generation} {frame} {view.View} {view.RendererEpoch} {accepted.Tick} {begin.Tick}"));
         timing.WriteWorkers?.Invoke();

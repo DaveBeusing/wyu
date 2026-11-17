@@ -17,7 +17,8 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
 {
     private readonly ProcessResourceBudget _budget = new(new ProcessResourceLimits(1, quota));
     private RuntimeSafetyAuthority? _runtime;
-    private readonly D3D12DeviceSession _device = new(new(!measure, true), warp, reuseDirectQueue: true);
+    private readonly D3D12DeviceSession _device = new(
+        new D3D12DiagnosticsOptions(!measure, true) { EnableResourceSnapshots = qualifyR09 }, warp, reuseDirectQueue: true);
     internal D3D12Renderer? Current { get; private set; }
     internal R09NativeUploadGate? R09UploadGate { get; private set; }
     private VolumeTerrainColorEvaluator? _colorEvaluator;

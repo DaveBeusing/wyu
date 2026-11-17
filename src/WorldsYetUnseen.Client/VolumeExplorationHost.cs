@@ -209,6 +209,8 @@ internal static partial class GameHost
             DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: !measure, requireNvidia: !useWarp, useWarp: useWarp);
             if (terrain!.Statistics is not { Readers: 0, Generations: 0 } settled || settled.Used != default)
                 throw new InvalidOperationException("Exploration retained terrain after shutdown.");
+            if (measureR09)
+                exploration!.WriteR09SettledResources(renderer!, terrain.View.RendererEpoch, settled);
             if (Environment.GetEnvironmentVariable("WYU_HOST_RETRY_SMOKE") is "1" or "Movement" or "FirstEdit" or "Recovery")
                 Console.WriteLine("WP11 HOST RETRY SETTLED terrain=0 readers=0 generations=0");
             Console.WriteLine(caveSmoke is null ? "PASS: WYU WP11 exploration, rebase and native shutdown."

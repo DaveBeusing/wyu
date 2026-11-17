@@ -59,22 +59,35 @@ internal sealed partial class VolumeExploration
         RequireMesh(renderer.TryStageVolumeTerrain(generation));
         await hold.Entered.WaitAsync(TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
         var holdObserved = Stopwatch.GetTimestamp();
-        pressure.RequireSaturated();
-        if (renderer.IsVolumeTerrainReady(generation) || !terrain.Statistics.MovementHeld ||
+        var heldJobs = pressure.RequireSaturated();
+        var heldTerrain = terrain.Statistics;
+        if (renderer.IsVolumeTerrainReady(generation) || !heldTerrain.MovementHeld ||
             (_ports.Committed.Read().Root as VolumeWorldRoot)?.Terrain != retained.Info)
             throw new InvalidOperationException("R09 lost the held upload or retained terrain.");
+        var epoch = terrain.View.RendererEpoch;
+        var held = R09ResourceMeasurement.Capture(renderer, epoch, heldTerrain, heldJobs);
 
         var uploadReleased = hold.Release();
         await WaitAsync(renderer, () => renderer.IsVolumeTerrainReady(generation), token).ConfigureAwait(false);
         var ready = Stopwatch.GetTimestamp();
-        pressure.RequireSaturated();
-        var peak = terrain.Statistics.Peak;
+        var readyJobs = pressure.RequireSaturated();
+        var readyTerrain = terrain.Statistics;
+        var nativeReady = R09ResourceMeasurement.Capture(renderer, epoch, readyTerrain, readyJobs);
+        var peak = readyTerrain.Peak;
         timing.Write("upload-to-observed-ready", uploadStarted, ready);
         timing.Write("held-upload", holdObserved, uploadReleased);
         timing.Write("held-upload-release-to-ready", uploadReleased, ready);
         Console.WriteLine(FormattableString.Invariant(
             $"WYU R09 PRESSURE {timing.Path} {peak.CpuBytes} {peak.NativeBytes} {peak.UploadBytes} {peak.RetirementBytes}"));
         await pressure.SettleAsync(token).ConfigureAwait(false);
+        var writeWorkers = timing.WriteWorkers;
+        timing.WriteWorkers = () =>
+        {
+            writeWorkers?.Invoke();
+            var path = timing.Path.ToString();
+            held.Write(path, "held");
+            nativeReady.Write(path, "native-ready");
+        };
     }
 
     private readonly record struct R09WorkerMeasurement(long Queued, long Started, long Finished, long Observed,
@@ -214,13 +227,16 @@ internal sealed partial class VolumeExploration
             return new(queued, started, finished, observed, profile);
         }
 
-        internal void RequireSaturated()
+        internal JobSchedulerMetrics RequireSaturated()
         {
             var refused = scheduler.TrySubmit(Submission(R09JobScope.Speculative), phase);
             refused.Handle?.Dispose();
+            var metrics = scheduler.ReadMetrics();
             if (refused.Status != JobAdmissionStatus.CapacityExceeded ||
-                _running?.ExecutionCompletion.IsCompleted != false || _queued?.ExecutionCompletion.IsCompleted != false)
+                _running?.ExecutionCompletion.IsCompleted != false || _queued?.ExecutionCompletion.IsCompleted != false ||
+                metrics is not { Queued: 1, OccupiedWorkerSlots: 1 })
                 throw new InvalidOperationException("R09 did not observe an occupied speculative worker and full speculative queue.");
+            return metrics;
         }
 
         internal async Task SettleAsync(CancellationToken token)

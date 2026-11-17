@@ -6,6 +6,7 @@ param(
     [ValidateRange(1,50)][int]$Samples = 5,
     [ValidateSet('hardware','warp')][string]$Adapter = 'hardware',
     [ValidateSet('Normal','Retry')][string[]]$Cohort = @('Normal','Retry'),
+    [ValidateSet('Overlap','AtHandoff')][string]$RecoveryMode = 'Overlap',
     [switch]$RequireEarlyColdFallback
 )
 Set-StrictMode -Version Latest
@@ -46,7 +47,7 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     foreach ($argument in '--volume-flight-smoke','flight',$Slot,$Adapter) { $start.ArgumentList.Add($argument) }
-    foreach ($name in 'WYU_R09_TEST_FORCE_PREFETCH_MISS','WYU_HOST_RETRY_SMOKE','WYU_WP13_MEASURE','WYU_PACKAGE_G','WYU_PACKAGE_G_SMOKE',
+    foreach ($name in 'WYU_R09_RECOVERY_AT_HANDOFF','WYU_R09_TEST_FORCE_PREFETCH_MISS','WYU_HOST_RETRY_SMOKE','WYU_WP13_MEASURE','WYU_PACKAGE_G','WYU_PACKAGE_G_SMOKE',
         'WYU_WP16','WYU_WP16_SMOKE','WYU_WP15','WYU_WP15_PROBE','WYU_WP15_FLIP','WYU_PACKAGE_E',
         'WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_WALK','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
         'DOTNET_STARTUP_HOOKS','DOTNET_ADDITIONAL_DEPS','DOTNET_SHARED_STORE','DOTNET_DIAGNOSTIC_PORTS',
@@ -55,6 +56,7 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
         [void]$start.Environment.Remove($name)
     }
     $start.Environment['WYU_R09_LATENCY'] = '1'
+    if ($RecoveryMode -eq 'AtHandoff') { $start.Environment['WYU_R09_RECOVERY_AT_HANDOFF'] = '1' }
     if ($Mode -eq 'Retry') { $start.Environment['WYU_HOST_RETRY_SMOKE'] = '1' }
     if ($RequireEarlyColdFallback) { $start.Environment['WYU_R09_TEST_FORCE_PREFETCH_MISS'] = '1' }
 
@@ -214,6 +216,75 @@ function Compare-MeshInventory($Publishing, $Private, [long]$Frequency, [string]
     }
 }
 
+$r09GpuOwners = @('Presentation','Depth','Terrain','Shadow','Props','Readback','Texture','TextureStaging')
+$r09RecoveryPhases = @('handoff-to-begin-tick','flight-overlap-window','recovery-no-flight-to-begin-tick')
+
+function Complete-ResourceSamples($ResourceSamples, $GpuOwners, $Intervals, $Identities, [long]$Frequency) {
+    if ($ResourceSamples.Count -ne 7 -or $GpuOwners.Count -ne 7 * $r09GpuOwners.Count) {
+        throw 'Expected two resource checkpoints per path and one shutdown checkpoint.'
+    }
+    foreach ($path in 'Movement','FirstEdit','Recovery','Shutdown') {
+        $points = if ($path -ceq 'Shutdown') { @('settled') } else { @('held','native-ready') }
+        $pathSamples = foreach ($point in $points) {
+            $key = "$path/$point"
+            $snapshot = $ResourceSamples[$key]
+            if ($null -eq $snapshot -or $snapshot.Frequency -ne $Frequency -or !$snapshot.Epoch -or
+                $snapshot.CpuLifetimePeakChargedBytes -lt $snapshot.CpuChargedBytes -or
+                !$snapshot.ProcessWorkingSetBytes -or !$snapshot.ProcessPrivateBytes -or
+                $snapshot.ProcessLifetimePeakWorkingSetBytes -lt $snapshot.ProcessWorkingSetBytes -or
+                $snapshot.GpuLedgerOverflow -or $snapshot.GpuSizeUnknown) {
+                throw "Missing or incomplete resource evidence: $key."
+            }
+            $gpuCount = 0
+            foreach ($owner in $r09GpuOwners) {
+                $entry = $GpuOwners["$key/$owner"]
+                if ($null -eq $entry -or $entry.Live -gt 128 -or $entry.Retained -gt 128 -or
+                    ((!$entry.Live) -ne (!$entry.LiveBytes)) -or ((!$entry.Retained) -ne (!$entry.RetainedBytes))) {
+                    throw "Missing or invalid GPU allocation evidence: $key/$owner."
+                }
+                $backing = $entry.LiveBytes + $entry.RetainedBytes
+                $snapshot.GpuBackingBytes += $backing
+                $gpuCount += $entry.Live + $entry.Retained
+                if ($owner -ceq 'Terrain') { $snapshot.GpuTerrainBackingBytes = $backing }
+            }
+            if ($gpuCount -gt 128) { throw "GPU ledger is out of bounds: $key." }
+
+            if ($point -ceq 'settled') {
+                if ($snapshot.Qpc -lt $Intervals['Recovery/setup-to-begin-tick'].ToQpc -or
+                    $snapshot.Epoch -ne $Identities['Recovery'].Epoch -or
+                    $snapshot.Workers -or $snapshot.Queued -or $snapshot.CpuChargedBytes -or
+                    $snapshot.Generations -or $snapshot.Readers -or $snapshot.GpuCustody -or $gpuCount) {
+                    throw 'CPU terrain, speculative jobs or native GPU allocations remained after shutdown.'
+                }
+            } else {
+                $bounds = if ($point -ceq 'held') { $Intervals["$path/held-upload"] }
+                    else { $Intervals["$path/setup-to-begin-tick"] }
+                $earliest = if ($point -ceq 'held') { $bounds.FromQpc }
+                    else { $Intervals["$path/upload-to-observed-ready"].ToQpc }
+                if ($snapshot.Epoch -ne $Identities[$path].Epoch -or $snapshot.Qpc -lt $earliest -or
+                    $snapshot.Qpc -gt $bounds.ToQpc -or $snapshot.Workers -ne 1 -or $snapshot.Queued -ne 1 -or
+                    !$snapshot.CpuChargedBytes -or !$snapshot.Generations -or !$snapshot.Readers -or
+                    ($point -ceq 'native-ready' -and !$snapshot.GpuTerrainBackingBytes)) {
+                    throw "Resource checkpoint did not demonstrate combined pressure: $key."
+                }
+            }
+            $snapshot
+        }
+        if ($path -cne 'Shutdown') {
+            $first = $pathSamples[0]
+            [pscustomobject]@{
+                Cohort = $first.Cohort; Run = $first.Run; Warmup = $first.Warmup; Path = $path
+                RendererEpoch = $first.Epoch; Checkpoints = $pathSamples.Count
+                CpuChargedSampleMaxBytes = ($pathSamples | Measure-Object CpuChargedBytes -Maximum).Maximum
+                ProcessWorkingSetSampleMaxBytes = ($pathSamples | Measure-Object ProcessWorkingSetBytes -Maximum).Maximum
+                ProcessPrivateSampleMaxBytes = ($pathSamples | Measure-Object ProcessPrivateBytes -Maximum).Maximum
+                GpuBackingSampleMaxBytes = ($pathSamples | Measure-Object GpuBackingBytes -Maximum).Maximum
+                GpuTerrainBackingSampleMaxBytes = ($pathSamples | Measure-Object GpuTerrainBackingBytes -Maximum).Maximum
+            }
+        }
+    }
+}
+
 function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $paths = @('Movement','FirstEdit','Recovery')
     $roles = @('publishing','private')
@@ -228,6 +299,8 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $intervals = @{}
     $identities = @{}
     $pressure = @{}
+    $resourceSamples = @{}
+    $gpuOwners = @{}
     $reuse = @{}
     $early = @{}
     $brickTimings = @{}
@@ -258,6 +331,36 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
             $pressure[$path] = [pscustomobject]@{
                 Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $path
                 CpuPeakBytes = $cpu; NativePeakBytes = $native; UploadPeakBytes = $upload; RetirementPeakBytes = $retirement
+            }
+        } elseif ($line -cmatch '^WYU R09 RESOURCE (Movement|FirstEdit|Recovery|Shutdown) (held|native-ready|settled) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([01]) ([01]) ([0-9]+)$') {
+            $path, $point = $Matches[1], $Matches[2]
+            $key = "$path/$point"
+            if ($resourceSamples.ContainsKey($key) -or (($path -ceq 'Shutdown') -ne ($point -ceq 'settled'))) {
+                throw "Invalid or duplicate resource checkpoint: $line"
+            }
+            $resourceSamples[$key] = [pscustomobject]@{
+                Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $path; Point = $point
+                Qpc = [long]$Matches[3]; Frequency = [long]$Matches[4]; Epoch = [uint64]$Matches[5]
+                Workers = [int]$Matches[6]; Queued = [int]$Matches[7]
+                CpuChargedBytes = [long]$Matches[8]; CpuLifetimePeakChargedBytes = [long]$Matches[9]
+                Generations = [int]$Matches[10]; Readers = [int]$Matches[11]
+                ProcessWorkingSetBytes = [long]$Matches[12]; ProcessPrivateBytes = [long]$Matches[13]
+                ProcessLifetimePeakWorkingSetBytes = [long]$Matches[14]
+                GpuLedgerOverflow = ($Matches[15] -ceq '1'); GpuSizeUnknown = ($Matches[16] -ceq '1')
+                GpuCustody = [int]$Matches[17]; GpuBackingBytes = 0L; GpuTerrainBackingBytes = 0L
+            }
+        } elseif ($line -cmatch '^WYU R09 GPU (Movement|FirstEdit|Recovery|Shutdown) (held|native-ready|settled) ([A-Za-z]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)$') {
+            $path, $point, $owner = $Matches[1], $Matches[2], $Matches[3]
+            $key = "$path/$point/$owner"
+            if ($gpuOwners.ContainsKey($key) -or $r09GpuOwners -cnotcontains $owner -or
+                (($path -ceq 'Shutdown') -ne ($point -ceq 'settled'))) {
+                throw "Invalid or duplicate GPU owner record: $line"
+            }
+            $gpuOwners[$key] = [pscustomobject]@{
+                Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $path; Point = $point
+                Owner = $owner; Live = [int]$Matches[4]; LiveBytes = [long]$Matches[5]
+                Retained = [int]$Matches[6]; RetainedBytes = [long]$Matches[7]
+                Released = [uint64]$Matches[8]; ReleasedBytes = [uint64]$Matches[9]
             }
         } elseif ($line -cmatch '^WYU R09 EARLY (Movement|FirstEdit) (Ready|Pending|Rejected|Unavailable) ([0-9]+) ([0-9]+) ([0-9]+)$') {
             $path, $status = $Matches[1], $Matches[2]
@@ -328,11 +431,19 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
             if ($intervals.ContainsKey($key) -or !$from -or $to -lt $from -or !$qpc -or
                 ($frequency -and $qpc -ne $frequency) -or $attempts -ne $expectedAttempts -or
                 $denials -ne [Math]::Max(0, $expectedAttempts - 1) -or
-                ($phases -cnotcontains $phase -and $privatePhases -cnotcontains $phase -and $key -cne 'Recovery/handoff-to-begin-tick')) {
+                ($phases -cnotcontains $phase -and $privatePhases -cnotcontains $phase -and
+                    !($path -ceq 'Recovery' -and $r09RecoveryPhases -ccontains $phase))) {
                 throw "Invalid or duplicate interval: $line"
             }
             $frequency = $qpc
-            $scope = if ($key -eq 'Recovery/setup-to-begin-tick') { 'includes-in-flight-overlap' }
+            $scope = switch -CaseSensitive ($key) {
+                'Recovery/setup-to-begin-tick' {
+                    if ($RecoveryMode -eq 'AtHandoff') { 'without-flight-overlap' } else { 'includes-in-flight-overlap' }
+                }
+                'Recovery/recovery-no-flight-to-begin-tick' { 'without-flight-overlap' }
+                'Recovery/flight-overlap-window' { 'flight-before-handoff' }
+                'Recovery/handoff-to-begin-tick' { 'return-handoff' }
+            }
             $intervals[$key] = [pscustomobject]@{
                 Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $path; Phase = $phase; MeasurementScope = $scope
                 FromQpc = $from; ToQpc = $to; Frequency = $qpc; Milliseconds = (($to - $from) * 1000.0 / $qpc)
@@ -464,11 +575,27 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
         $brickOverlap.Add($brickMatch)
         $meshOverlap.Add($meshMatch)
     }
-    if (!$intervals.ContainsKey('Recovery/handoff-to-begin-tick')) { throw 'Missing recovery handoff interval.' }
+    $route = $intervals['Recovery/setup-to-begin-tick']
+    $handoff = $intervals['Recovery/handoff-to-begin-tick']
+    $overlap = $intervals['Recovery/flight-overlap-window']
+    $noFlight = $intervals['Recovery/recovery-no-flight-to-begin-tick']
+    if ($null -eq $handoff -or $handoff.ToQpc -ne $route.ToQpc) { throw 'Invalid Recovery handoff endpoint.' }
+    if ($RecoveryMode -eq 'AtHandoff') {
+        if ($null -eq $noFlight -or $null -ne $overlap -or $noFlight.FromQpc -ne $route.FromQpc -or
+            $noFlight.ToQpc -ne $route.ToQpc -or $handoff.FromQpc -ne $route.FromQpc -or
+            $intervals['Recovery/admission'].FromQpc -ne $route.FromQpc) {
+            throw 'Recovery without flight must start at handoff and include admission through the consuming tick.'
+        }
+    } elseif ($null -eq $overlap -or $null -ne $noFlight -or $overlap.FromQpc -ne $route.FromQpc -or
+        $overlap.ToQpc -ne $handoff.FromQpc -or $overlap.ToQpc -le $overlap.FromQpc) {
+        throw 'Recovery with flight must report the observed preload-to-handoff window separately.'
+    }
+    $resourcePeaks = @(Complete-ResourceSamples $resourceSamples $gpuOwners $intervals $identities $frequency)
     [pscustomobject]@{
         Intervals = $intervals.Values; Identities = $identities.Values; Pressure = $pressure.Values; Frequency = $frequency
         Bricks = $brickRows; Meshes = $meshRows; BrickTimings = $brickTimingRows
         BrickOverlap = $brickOverlap; MeshOverlap = $meshOverlap; Reuse = $reuse.Values
+        ResourceSamples = $resourceSamples.Values; GpuOwners = $gpuOwners.Values; ResourcePeaks = $resourcePeaks
     }
 }
 
@@ -488,6 +615,9 @@ $previousCulture = [Globalization.CultureInfo]::CurrentCulture
 $rows = [Collections.Generic.List[object]]::new()
 $identities = [Collections.Generic.List[object]]::new()
 $pressure = [Collections.Generic.List[object]]::new()
+$resourceSampleRows = [Collections.Generic.List[object]]::new()
+$gpuOwnerRows = [Collections.Generic.List[object]]::new()
+$resourcePeakRows = [Collections.Generic.List[object]]::new()
 $bricks = [Collections.Generic.List[object]]::new()
 $meshes = [Collections.Generic.List[object]]::new()
 $brickTimings = [Collections.Generic.List[object]]::new()
@@ -513,9 +643,10 @@ try {
     Assert-InstalledPayload $installRoot $manifest
     $exe = Join-Path $installRoot 'WorldsYetUnseen.Client.exe'
     $meta = [ordered]@{
-        Schema = 'wyu-r09-installed-flight-v6'; UTC = [DateTime]::UtcNow.ToString('o')
+        Schema = 'wyu-r09-installed-flight-v7'; UTC = [DateTime]::UtcNow.ToString('o')
         OS = [Environment]::OSVersion.VersionString; LogicalProcessors = [Environment]::ProcessorCount
         Adapter = $Adapter; Cohorts = $Cohort; SamplesPerCohort = $Samples; WarmupsPerCohort = 1
+        RecoveryMode = $RecoveryMode
         EarlyPrefetchMode = if ($RequireEarlyColdFallback) { 'forced-pending' } else { 'natural' }
         WyuCommit = $manifest.wyuCommit; GroundworkCommit = $manifest.groundworkCommit
         GroundworkVersion = $manifest.groundworkVersion; GroundworkManifestSha256 = $manifest.groundworkManifestSha256
@@ -564,6 +695,9 @@ try {
             foreach ($record in $run.Intervals) { $rows.Add($record) }
             foreach ($record in $run.Identities) { $identities.Add($record) }
             foreach ($record in $run.Pressure) { $pressure.Add($record) }
+            foreach ($record in $run.ResourceSamples) { $resourceSampleRows.Add($record) }
+            foreach ($record in $run.GpuOwners) { $gpuOwnerRows.Add($record) }
+            $resourcePeakRows.AddRange($run.ResourcePeaks)
             $bricks.AddRange($run.Bricks)
             $meshes.AddRange($run.Meshes)
             $brickTimings.AddRange($run.BrickTimings)
@@ -582,6 +716,7 @@ try {
         $limit = switch ($g.Phase) {
             'worker' { $ceilings[$g.Path][0] }
             'setup-to-begin-tick' { if ($g.Path -ne 'Recovery') { $ceilings[$g.Path][1] } }
+            'recovery-no-flight-to-begin-tick' { $ceilings.Recovery[1] }
             'held-upload-release-to-ready' { 50 }
             'authorized-receipt-to-begin-tick' { 50 }
         }
@@ -603,6 +738,9 @@ try {
         $rows | Sort-Object Cohort,Run,Path,Phase | Export-Csv -LiteralPath (Join-Path $out 'observations.csv') -NoTypeInformation
         $identities | Sort-Object Cohort,Run,Path | Export-Csv -LiteralPath (Join-Path $out 'identities.csv') -NoTypeInformation
         $pressure | Sort-Object Cohort,Run,Path | Export-Csv -LiteralPath (Join-Path $out 'pressure.csv') -NoTypeInformation
+        $resourceSampleRows | Sort-Object Cohort,Run,Qpc | Export-Csv -LiteralPath (Join-Path $out 'resource-samples.csv') -NoTypeInformation
+        $gpuOwnerRows | Sort-Object Cohort,Run,Path,Point,Owner | Export-Csv -LiteralPath (Join-Path $out 'gpu-owners.csv') -NoTypeInformation
+        $resourcePeakRows | Sort-Object Cohort,Run,Path | Export-Csv -LiteralPath (Join-Path $out 'combined-peaks.csv') -NoTypeInformation
         $bricks | Sort-Object Cohort,Run,Path,Role,BrickX,BrickY,BrickZ | Export-Csv -LiteralPath (Join-Path $out 'brick-inventory.csv') -NoTypeInformation
         $meshes | Sort-Object Cohort,Run,Path,Role,OriginX,OriginY,OriginZ | Export-Csv -LiteralPath (Join-Path $out 'mesh-inventory.csv') -NoTypeInformation
         $brickTimings | Sort-Object Cohort,Run,Path,Role,Phase | Export-Csv -LiteralPath (Join-Path $out 'brick-timings.csv') -NoTypeInformation

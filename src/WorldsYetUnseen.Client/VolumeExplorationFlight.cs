@@ -79,6 +79,8 @@ internal sealed partial class VolumeExploration
         var far = false;
         var usedFar = false;
         var skySmoke = scripted && Environment.GetEnvironmentVariable("WYU_PACKAGE_G_SMOKE") == "1";
+        var recoveryAtHandoff = MeasureR09 && scripted &&
+            Environment.GetEnvironmentVariable("WYU_R09_RECOVERY_AT_HANDOFF") == "1";
         var orbitSkyChecked = false;
         var previousPhase = flight.Phase;
         using var returnCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -114,6 +116,10 @@ internal sealed partial class VolumeExploration
                         transitionStarted = BiomeMeasurements.Start();
                         transition = "to-ground";
                         var handoffStarted = MeasureR09 ? Stopwatch.GetTimestamp() : 0;
+                        // Freeze flight at the normal return boundary before starting measured Recovery.
+                        if (recoveryAtHandoff)
+                            returnTerrain = await PrepareFlightReturnAsync(terrain, player, center, revision,
+                                returnCancellation.Token, handoffStarted).ConfigureAwait(false);
                         if (skySmoke)
                         {
                             handoffTick = checked(_environmentTick + (ulong)flight.Tick);
@@ -249,7 +255,7 @@ internal sealed partial class VolumeExploration
                 BiomeMeasurements.Write("orbit", frameStarted);
                 if (transition is not null)
                     BiomeMeasurements.Write(transition, transitionStarted);
-                if (far && returnTerrain is null)
+                if (far && returnTerrain is null && !recoveryAtHandoff)
                     returnTerrain = await PrepareFlightReturnAsync(terrain, player, center, revision, returnCancellation.Token).ConfigureAwait(false);
                 if (abortAtFar && far)
                     return (player, true);
@@ -293,10 +299,10 @@ internal sealed partial class VolumeExploration
         VolumeStreamingWork Work, Task<bool> Generated, R09Timing? Timing, R09Pressure? Pressure);
 
     private async Task<FlightReturnTerrain> PrepareFlightReturnAsync(VolumeStreamingCoordinator terrain, PlanetWalkState player,
-        PlanetVector center, ulong revision, CancellationToken token)
+        PlanetVector center, ulong revision, CancellationToken token, long? handoffStarted = null)
     {
-        var started = Stopwatch.GetTimestamp();
-        var timing = StartR09(VolumeWorkClass.Recovery, started);
+        var started = handoffStarted ?? Stopwatch.GetTimestamp();
+        var timing = StartR09(VolumeWorkClass.Recovery, started, recoveryAtHandoff: handoffStarted.HasValue);
         var previous = terrain.View;
         var frame = previous.Frame.TryRebase(player.Position, out var rebased) ? rebased : previous.Frame;
         var view = terrain.ChangeView(frame, checked(previous.RendererEpoch + 1));
