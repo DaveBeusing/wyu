@@ -8,7 +8,7 @@ One speculative job occupies a worker and another fills the speculative queue in
 
 ## Read the profiling results
 
-Evidence schema `wyu-r09-installed-flight-v7` preserves the raw QPC endpoints in `observations.csv` and reports p50, p95, p99 and maximum in `summary.csv`. Compare `worker` (the publishing job) with `prebuild-worker` (the offered private source). Each measured worker has a queue interval before `Execute`, a completion observation interval after `Execute`, and six contiguous phases inside `Execute`. A movement or first-edit sample with no offered private source has no private worker phases or inventory. Publishing, route, upload, receipt and cold-fallback evidence is present for every run. Check the reported sample count before comparing private-phase percentiles.
+Evidence schema `wyu-r09-installed-flight-v8` preserves the raw QPC endpoints in `observations.csv` and reports p50, p95, p99 and maximum in `summary.csv`. Compare `worker` (the publishing job) with `prebuild-worker` (the offered private source). Each measured worker has a queue interval before `Execute`, a completion observation interval after `Execute`, and six contiguous phases inside `Execute`. A movement or first-edit sample with no offered private source has no private worker phases or inventory. Publishing, route, upload, receipt and cold-fallback evidence is present for every run. Check the reported sample count before comparing private-phase percentiles.
 
 | Phase suffix | Work measured |
 | --- | --- |
@@ -38,9 +38,18 @@ Run both modes into separate output directories. `-RecoveryMode Overlap` (the de
 
 `-RecoveryMode AtHandoff` starts the actual Recovery admission and worker at the existing return boundary, with the flight simulation paused until the consuming tick. The interval `recovery-no-flight-to-begin-tick` includes Recovery setup, admission, renderer handoff, private and publishing work, upload and authorized presentation. Renderer and worker execution can overlap during handoff. Only this interval is compared with the proposed 4,000 ms ceiling. Both modes retain the worker, release-to-native-ready and authorized-receipt-to-BeginTick endpoints.
 
+Both modes also report separate QPC intervals for the renderer switch.
+
+- `far-renderer-stop` measures the awaited stop of the flight renderer.
+- `ground-renderer-startup` measures ground renderer startup through observed readiness.
+- `ground-renderer-switch` spans from the start of the flight renderer stop to observed ground renderer readiness. It includes the elapsed time between stop and startup.
+- `private-build-renderer-overlap` is the intersection of the renderer switch and the private worker's `Execute` interval. Queue and completion observation time are outside the private worker interval. When there is no overlap, both endpoints are the switch start.
+
+The runner checks the renderer endpoints and recomputes the intersection from the raw QPC ticks in every sample. These intervals add diagnostic measurements with no separate proposed ceilings.
+
 ### Combined-pressure resources
 
-- `resource-samples.csv` records the held-upload and native-ready checkpoints under the occupied speculative worker and queue slot while the previous terrain revision is retained. It includes charged terrain CPU bytes, generation and reader counts, process working set and private bytes. OS peak working set and the coordinator's reservation peak are lifetime counters. `pressure.csv` retains the cumulative CPU/native/upload/retirement reservation peaks.
+- `resource-samples.csv` records the held-upload and native-ready checkpoints under the occupied speculative worker and queue slot while the previous terrain generation is retained. It includes charged terrain CPU bytes, generation and reader counts, process working set and private bytes. OS peak working set and the coordinator's reservation peak are lifetime counters. `pressure.csv` retains the cumulative CPU/native/upload/retirement reservation peaks.
 - `gpu-owners.csv` contains live, fence-retained and released counts and D3D12 backing bytes by renderer owner and checkpoint. Live and retained backing are disjoint. These aligned tracked allocations measure resource backing. Driver residency, descriptor heaps and command allocator storage are outside this accounting.
 - `combined-peaks.csv` reports the observed maximum across the two checkpoints per route and run. Each GPU total sums live and retained bytes within the same checkpoint. Recovery creates a fresh near renderer, so retained CPU terrain can coexist with zero old terrain backing at the held checkpoint.
 - The shutdown record validates zero charged terrain, generations, readers, scheduler work and live or retained tracked GPU allocations. It reports the final process peak separately. Check the raw logs for D3D12 shutdown evidence.

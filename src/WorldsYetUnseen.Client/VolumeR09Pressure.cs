@@ -165,6 +165,7 @@ internal sealed partial class VolumeExploration
                     prebuild = await MeasureWorkerAsync(privateWork, null, "private prebuild", token).ConfigureAwait(false);
                     if (prebuild is null)
                         return false;
+                    timing.RecoveryPrivateWorker = prebuild;
                 }
                 else
                 {

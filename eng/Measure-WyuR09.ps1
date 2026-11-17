@@ -217,7 +217,9 @@ function Compare-MeshInventory($Publishing, $Private, [long]$Frequency, [string]
 }
 
 $r09GpuOwners = @('Presentation','Depth','Terrain','Shadow','Props','Readback','Texture','TextureStaging')
-$r09RecoveryPhases = @('handoff-to-begin-tick','flight-overlap-window','recovery-no-flight-to-begin-tick')
+$r09RendererPhases = @('far-renderer-stop','ground-renderer-startup','ground-renderer-switch',
+    'private-build-renderer-overlap')
+$r09RecoveryPhases = @('handoff-to-begin-tick','flight-overlap-window','recovery-no-flight-to-begin-tick') + $r09RendererPhases
 
 function Complete-ResourceSamples($ResourceSamples, $GpuOwners, $Intervals, $Identities, [long]$Frequency) {
     if ($ResourceSamples.Count -ne 7 -or $GpuOwners.Count -ne 7 * $r09GpuOwners.Count) {
@@ -443,6 +445,10 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
                 'Recovery/recovery-no-flight-to-begin-tick' { 'without-flight-overlap' }
                 'Recovery/flight-overlap-window' { 'flight-before-handoff' }
                 'Recovery/handoff-to-begin-tick' { 'return-handoff' }
+                'Recovery/far-renderer-stop' { 'renderer-handoff' }
+                'Recovery/ground-renderer-startup' { 'renderer-handoff' }
+                'Recovery/ground-renderer-switch' { 'renderer-handoff' }
+                'Recovery/private-build-renderer-overlap' { 'concurrent-private-build-and-renderer' }
             }
             $intervals[$key] = [pscustomobject]@{
                 Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $path; Phase = $phase; MeasurementScope = $scope
@@ -590,6 +596,28 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
         $overlap.ToQpc -ne $handoff.FromQpc -or $overlap.ToQpc -le $overlap.FromQpc) {
         throw 'Recovery with flight must report the observed preload-to-handoff window separately.'
     }
+    foreach ($phase in $r09RendererPhases) {
+        if (!$intervals.ContainsKey("Recovery/$phase")) { throw "Missing interval: Recovery/$phase" }
+    }
+    $farStop = $intervals['Recovery/far-renderer-stop']
+    $groundStartup = $intervals['Recovery/ground-renderer-startup']
+    $rendererSwitch = $intervals['Recovery/ground-renderer-switch']
+    $rendererOverlap = $intervals['Recovery/private-build-renderer-overlap']
+    $privateBuild = $intervals['Recovery/prebuild-worker']
+    if ($rendererSwitch.FromQpc -lt $handoff.FromQpc -or $rendererSwitch.FromQpc -ne $farStop.FromQpc -or
+        $farStop.ToQpc -gt $groundStartup.FromQpc -or $groundStartup.ToQpc -ne $rendererSwitch.ToQpc -or
+        $rendererSwitch.ToQpc -gt $intervals['Recovery/upload-to-observed-ready'].FromQpc) {
+        throw 'Invalid Recovery renderer switch ordering.'
+    }
+    $overlapStart = [Math]::Max($rendererSwitch.FromQpc, $privateBuild.FromQpc)
+    $overlapEnd = [Math]::Min($rendererSwitch.ToQpc, $privateBuild.ToQpc)
+    if ($overlapEnd -le $overlapStart) {
+        $overlapStart = $rendererSwitch.FromQpc
+        $overlapEnd = $overlapStart
+    }
+    if ($rendererOverlap.FromQpc -ne $overlapStart -or $rendererOverlap.ToQpc -ne $overlapEnd) {
+        throw 'Recovery renderer overlap does not match the private worker and renderer switch intervals.'
+    }
     $resourcePeaks = @(Complete-ResourceSamples $resourceSamples $gpuOwners $intervals $identities $frequency)
     [pscustomobject]@{
         Intervals = $intervals.Values; Identities = $identities.Values; Pressure = $pressure.Values; Frequency = $frequency
@@ -643,7 +671,7 @@ try {
     Assert-InstalledPayload $installRoot $manifest
     $exe = Join-Path $installRoot 'WorldsYetUnseen.Client.exe'
     $meta = [ordered]@{
-        Schema = 'wyu-r09-installed-flight-v7'; UTC = [DateTime]::UtcNow.ToString('o')
+        Schema = 'wyu-r09-installed-flight-v8'; UTC = [DateTime]::UtcNow.ToString('o')
         OS = [Environment]::OSVersion.VersionString; LogicalProcessors = [Environment]::ProcessorCount
         Adapter = $Adapter; Cohorts = $Cohort; SamplesPerCohort = $Samples; WarmupsPerCohort = 1
         RecoveryMode = $RecoveryMode

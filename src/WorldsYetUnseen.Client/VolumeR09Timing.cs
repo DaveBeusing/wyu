@@ -19,6 +19,33 @@ internal sealed partial class VolumeExploration
     {
         internal Action? WriteWorkers { get; set; }
 
+        internal long FarRendererStopStarted { get; set; }
+        internal long FarRendererStopped { get; set; }
+        internal long GroundRendererStartupStarted { get; set; }
+        private long GroundRendererStarted { get; set; }
+        internal R09WorkerMeasurement? RecoveryPrivateWorker { get; set; }
+
+        internal void RecordGroundRendererStarted() => GroundRendererStarted = Stopwatch.GetTimestamp();
+
+        internal void WriteRecoveryRenderer(long handoffStarted, long submitted)
+        {
+            if (handoffStarted > FarRendererStopStarted || FarRendererStopStarted > FarRendererStopped ||
+                FarRendererStopped > GroundRendererStartupStarted || GroundRendererStartupStarted > GroundRendererStarted ||
+                GroundRendererStarted > submitted ||
+                RecoveryPrivateWorker is not { } worker || worker.Started < Started ||
+                worker.Finished < worker.Started || worker.Finished > submitted)
+                throw new InvalidOperationException("R09 Recovery renderer switch and private build timings do not match the handoff.");
+
+            Write("far-renderer-stop", FarRendererStopStarted, FarRendererStopped);
+            Write("ground-renderer-startup", GroundRendererStartupStarted, GroundRendererStarted);
+            Write("ground-renderer-switch", FarRendererStopStarted, GroundRendererStarted);
+            var overlapStart = Math.Max(FarRendererStopStarted, worker.Started);
+            var overlapEnd = Math.Min(GroundRendererStarted, worker.Finished);
+            if (overlapEnd <= overlapStart)
+                overlapStart = overlapEnd = FarRendererStopStarted;
+            Write("private-build-renderer-overlap", overlapStart, overlapEnd);
+        }
+
         internal void Write(string phase, long start, long end, int attempts = 0, int denials = 0) =>
             Console.WriteLine(FormattableString.Invariant(
                 $"WYU R09 {Path} {phase} {start} {end} {Stopwatch.Frequency} {attempts} {denials}"));
@@ -69,6 +96,7 @@ internal sealed partial class VolumeExploration
                 timing.Write("recovery-no-flight-to-begin-tick", timing.Started, consumed);
             else
                 timing.Write("flight-overlap-window", timing.Started, handoffStarted);
+            timing.WriteRecoveryRenderer(handoffStarted, submitted);
         }
         Console.WriteLine(FormattableString.Invariant(
             $"WYU R09 IDENTITY {timing.Path} {generation} {frame} {view.View} {view.RendererEpoch} {accepted.Tick} {begin.Tick}"));

@@ -126,11 +126,19 @@ internal sealed partial class VolumeExploration
                             beforeSky = await CaptureFlightSkyAsync(renderHost.Active, terrain.View, flight.State.Position,
                                 player.Heading, handoffTick.Value, far: true, token).ConfigureAwait(false);
                         }
+                        var recoveryTiming = returnTerrain?.Timing;
                         var stopStarted = BiomeMeasurements.Start();
+                        if (recoveryTiming is not null)
+                            recoveryTiming.FarRendererStopStarted = Stopwatch.GetTimestamp();
                         await renderHost.StopAsync(qualifyHandoff: scripted).ConfigureAwait(false);
+                        if (recoveryTiming is not null)
+                            recoveryTiming.FarRendererStopped = Stopwatch.GetTimestamp();
                         BiomeMeasurements.Write("far-stop", stopStarted);
                         var prepared = returnTerrain ?? throw new InvalidOperationException("Return terrain was not staged.");
-                        var nearReady = renderHost.NearAsync(terrain, token);
+                        if (recoveryTiming is not null)
+                            recoveryTiming.GroundRendererStartupStarted = Stopwatch.GetTimestamp();
+                        var nearReady = renderHost.NearAsync(terrain, token,
+                            recoveryTiming is null ? null : recoveryTiming.RecordGroundRendererStarted);
                         try
                         {
                             await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, prepared.View.Frame, token,

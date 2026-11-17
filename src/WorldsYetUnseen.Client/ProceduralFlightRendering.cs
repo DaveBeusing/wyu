@@ -34,7 +34,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     }
     internal D3D12Renderer Active => Current ?? throw new InvalidOperationException("No active planet renderer.");
 
-    internal Task NearAsync(VolumeStreamingCoordinator terrain, CancellationToken token) =>
+    internal Task NearAsync(VolumeStreamingCoordinator terrain, CancellationToken token, Action? onStarted = null) =>
         StartAsync(owner =>
         {
             var renderer = D3D12Renderer.CreateWithSessionVolumeTerrain(window, owner, terrain,
@@ -43,7 +43,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
                 R09UploadGate = R09NativeUploadGate.Attach(renderer);
             Props?.Attach(renderer);
             return renderer;
-        }, token);
+        }, token, onStarted);
 
     internal Task FarAsync(RenderMeshPair globe, CancellationToken token) =>
         StartAsync(owner => D3D12Renderer.CreateWithSessionMeshes(window, owner, globe, _device,
@@ -51,7 +51,8 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
 
     public void Dispose() => _device.Dispose();
 
-    private async Task StartAsync(Func<IRuntimeOwnership, D3D12Renderer> create, CancellationToken token)
+    private async Task StartAsync(Func<IRuntimeOwnership, D3D12Renderer> create, CancellationToken token,
+        Action? onStarted = null)
     {
         if (_runtime is not null || Current is not null)
             throw new InvalidOperationException("The previous graphics owner must settle before handoff.");
@@ -63,6 +64,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
         var context = new EngineModuleContext(clock, timing, _runtime.Reporter, _runtime.StopControl);
         await Current.InitializeAsync(context, token).ConfigureAwait(false);
         await Current.StartAsync(token).ConfigureAwait(false);
+        onStarted?.Invoke();
     }
 
     internal async Task StopAsync(bool qualifyHandoff = false)
