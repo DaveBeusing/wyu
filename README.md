@@ -1,37 +1,63 @@
-# Worlds Yet Unseen (WYU)
+# Worlds Yet Unseen
 
-Worlds Yet Unseen is a first-person planetary survival and exploration game.
-It uses the independently packaged Groundwork engine.
+Worlds Yet Unseen (WYU) is a first-person planetary survival and exploration game
+developed by **undefined behavior Studios**. The Windows single-player alpha
+runs on [Groundwork Engine](https://github.com/DaveBeusing/Groundwork), a C# game
+engine targeting .NET 10 with a Direct3D 12 backend.
 
-## Windows single-player alpha
+[Architecture](#architecture) · [Windows alpha](#windows-alpha) · [Build and verification](#build-and-verification) · [Roadmap](#roadmap)
+
+## Architecture
+
+The [solution](WorldsYetUnseen.slnx) contains the game client, gameplay project,
+and gameplay tests.
+
+| Area | Responsibility |
+| --- | --- |
+| Groundwork Engine | Win32 windowing and input, fixed-step simulation, Direct3D 12 rendering, voxel terrain generation and streaming, terrain collision, and checkpoint storage |
+| WYU client | Game input and menus, mission and world selection, save and continue flows, and integration of the engine modules |
+| WYU gameplay | Rules and progression for gathering resources, assembling and activating the rescue beacon, and completing the mission |
+
+WYU consumes exact versions of Groundwork NuGet packages from verified archives.
+The build stages the verified packages and restores against checked-in NuGet
+lockfiles. [Package handover and verification](eng/README.md)
+
+## Windows alpha
 
 Start the installed client from the Windows Start menu or run the client
-without arguments. Choose **Start test mission** in the sidebar. Explore
-the region, mine stone, build and activate the rescue beacon, then fly
-from the planetary pad to orbit and return. **Continue** restores a
-supported checkpoint during construction or after landing.
+without arguments. The sidebar includes these session entry points.
 
-- **W/A/S/D** moves, the **mouse** aims and **E** interacts.
-- **Esc** toggles the sidebar. Use the **arrow keys** and **Enter** to select.
-- **F1** toggles observed FPS, GC and renderer counters.
+| Mode | What it exercises |
+| --- | --- |
+| **Start test mission** | Explore, mine stone, assemble and activate the rescue beacon, then fly from the planetary pad to orbit and return. **Continue** restores a supported checkpoint during construction or after landing. |
+| **New World** | Open the standard planet world selector. |
+| **Free Test World** | Open a seeded planet world or an isolated rescue mission. **New Test World** accepts seed 42 or a custom seed. **Continue** reopens a test slot. Test saves are separate from normal saves. |
 
-## Free Test World
+| Input | Action |
+| --- | --- |
+| **W/A/S/D**, **mouse**, **E** | Move, aim, and interact |
+| **Esc**, **arrow keys**, **Enter** | Toggle the sidebar and navigate its options in the rescue mission |
+| **F1** | Toggle diagnostics. In Free Test World, this includes build, profile, seed, generator version, and position. |
+| **F2** | Open setup actions in Free Test World |
+| **F5**, **F10** | Save or save and exit in Free Test World |
+| **F6** | Request flight on supported worlds, subject to the launch-site check |
 
-Choose **Free Test World** from the main menu, then **Planet worlds** or an
-isolated rescue mission. **New Test World** uses the
-build's default world profile. Accept seed 42 or enter your own. Choose
-**Continue** there to reopen a test slot. Test saves are stored separately
-from the normal worlds.
+In Free Test World, Ember Ridges and Ember Caves can grant ore through the
+setup menu. **New Far Horizon World** exposes time and fog controls and includes
+biomes, vegetation, sky, and terrain shadows.
 
-- **F1** shows the build, profile, seed, generator version, and position.
-- **F2** opens setup actions. Ember Ridges and Ember Caves can grant ore.
-  Choose **New Far Horizon World** for time and fog controls, biomes,
-  vegetation, sky, and terrain shadows.
-- Use the regular controls for movement and terrain edits. **F5** saves,
-  **F10** saves and exits, and **F6** requests flight on supported worlds.
-  The normal launch-site check applies.
+## Build and verification
 
-The [build and verification guide](docs/build-bootstrap.md) covers the
-installer, verified packages and developer smoke modes. The
-[shared roadmap](https://github.com/DaveBeusing/Groundwork/blob/master/docs/roadmap.md) tracks milestone status.
-The [world vision](docs/World_Vision_Consolidated.md) describes the longer-term design.
+Use Windows, the .NET 10 SDK, PowerShell 7, and GitHub CLI. The
+[build and verification guide](docs/build-bootstrap.md) covers verified archive
+setup, locked restore, Release builds, smoke modes, and the Windows installer.
+
+- [Installed planet playtest](docs/wp11-installed-playtest.md)
+- [Volumetric checkpoints and save recovery](docs/wp11-volume-save.md)
+- [Underground geology and caves](docs/wp12-caves.md)
+
+## Roadmap
+
+- [Shared Groundwork and WYU roadmap](https://github.com/DaveBeusing/Groundwork/blob/master/docs/roadmap.md) tracks work packages and acceptance evidence across both repositories.
+- [WYU roadmap](docs/Roadmap.html) is the game's roadmap in HTML.
+- [World vision](docs/World_Vision_Consolidated.md) describes the longer-term game design.
