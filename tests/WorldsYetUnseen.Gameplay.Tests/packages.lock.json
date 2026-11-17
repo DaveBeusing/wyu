@@ -4,21 +4,21 @@
     "net10.0": {
       "Groundwork.Core": {
         "type": "Transitive",
-        "resolved": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
-        "contentHash": "eCV+XqAFaIezwHUTQGbwne33GnsSHorTyaP2NEaLQhMlcY5cJbNteA0xoAwDSysHlc2JCu52Lm68gEUQnZbgzA=="
+        "resolved": "0.1.0-dev.44113592358.1",
+        "contentHash": "hV/HKQDiNupaxMgXNPBMyui7NqTNDtZ/Wp2R9nlFLF/cRCPZAO+H9DJiF3RlPpiO2QJ46vKVwMsxG2DiELh7vg=="
       },
       "Groundwork.Voxels": {
         "type": "Transitive",
-        "resolved": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
-        "contentHash": "w4zpPyBiiMqy6jjCaXThZ58xJ743yoXiZ0iVClUSQ0lWOR8cLoDuMr4vSRGOZbbBqciSBVsIwIQgA0DciXdGoQ==",
+        "resolved": "0.1.0-dev.44113592358.1",
+        "contentHash": "jivLtU25v/BsO2xf5DXihoTiFvQi1RfzBnu84LeorIVKW4zjs7G3sz9RPwIqTqFIAy+EBqG+CFvrUED33bngpw==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04"
+          "Groundwork.Core": "0.1.0-dev.44113592358.1"
         }
       },
       "worldsyetunseen.gameplay": {
         "type": "Project",
         "dependencies": {
-          "Groundwork.Voxels": "[0.1.0-dev.r09recoverymesh.e6e60b0d5c04, 0.1.0-dev.r09recoverymesh.e6e60b0d5c04]"
+          "Groundwork.Voxels": "[0.1.0-dev.44113592358.1, 0.1.0-dev.44113592358.1]"
         }
       }
     }
