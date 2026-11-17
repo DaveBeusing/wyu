@@ -162,7 +162,9 @@ internal sealed partial class VolumeExploration
                         owner.MeshBytes, owner.Charge(selection), owner.Field, out privateWork);
                     if (admission != VolumeAdmission.Accepted || privateWork is null)
                         throw new InvalidOperationException($"R09 could not admit the Recovery private prebuild ({admission}).");
-                    prebuild = await MeasureWorkerAsync(privateWork, null, "private prebuild", token).ConfigureAwait(false);
+                    var reusePublishedBricks = Environment.GetEnvironmentVariable("WYU_R09_TEST_FORCE_RECOVERY_COLD") != "1";
+                    prebuild = await MeasureWorkerAsync(privateWork, null, "private prebuild", token, reusePublishedBricks)
+                        .ConfigureAwait(false);
                     if (prebuild is null)
                         return false;
                     timing.RecoveryPrivateWorker = prebuild;
@@ -179,6 +181,9 @@ internal sealed partial class VolumeExploration
                 {
                     prebuild?.Write(timing, "prebuild-worker");
                     worker.Write(timing, "worker");
+                    if (timing.RecoveryPrivateWorker is { } recovery)
+                        Console.WriteLine(FormattableString.Invariant(
+                            $"WYU R09 RECOVERYBRICKS {recovery.Profile.ReuseSourceGeneration}"));
                     Console.WriteLine(FormattableString.Invariant(
                         $"WYU R09 REUSE {timing.Path} {privateWork?.Generation ?? 0} {work.Generation} {worker.Profile.ReuseSourceGeneration}"));
                 };
@@ -191,7 +196,7 @@ internal sealed partial class VolumeExploration
         }
 
         private async Task<R09WorkerMeasurement?> MeasureWorkerAsync(VolumeStreamingWork work,
-            VolumeStreamingWork? privateWork, string description, CancellationToken token)
+            VolumeStreamingWork? privateWork, string description, CancellationToken token, bool reusePublishedBricks = false)
         {
             RequireSaturated();
             long started = 0, finished = 0;
@@ -200,8 +205,11 @@ internal sealed partial class VolumeExploration
             owner._r09Protected = cancellation =>
             {
                 started = Stopwatch.GetTimestamp();
-                completed = privateWork is null ? work.ExecuteDetailedProfiled(out profile, cancellation)
-                    : work.ExecuteDetailedProfiled(privateWork, out profile, cancellation);
+                if (reusePublishedBricks)
+                    completed = work.ExecuteDetailedProfiledReusingPublishedBricks(out profile, cancellation);
+                else
+                    completed = privateWork is null ? work.ExecuteDetailedProfiled(out profile, cancellation)
+                        : work.ExecuteDetailedProfiled(privateWork, out profile, cancellation);
                 finished = Stopwatch.GetTimestamp();
                 return ValueTask.CompletedTask;
             };

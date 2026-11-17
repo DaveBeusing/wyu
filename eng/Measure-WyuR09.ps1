@@ -7,7 +7,8 @@ param(
     [ValidateSet('hardware','warp')][string]$Adapter = 'hardware',
     [ValidateSet('Normal','Retry')][string[]]$Cohort = @('Normal','Retry'),
     [ValidateSet('Overlap','AtHandoff')][string]$RecoveryMode = 'Overlap',
-    [switch]$RequireEarlyColdFallback
+    [switch]$RequireEarlyColdFallback,
+    [switch]$RequireRecoveryColdFallback
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -47,7 +48,8 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     foreach ($argument in '--volume-flight-smoke','flight',$Slot,$Adapter) { $start.ArgumentList.Add($argument) }
-    foreach ($name in 'WYU_R09_RECOVERY_AT_HANDOFF','WYU_R09_TEST_FORCE_PREFETCH_MISS','WYU_HOST_RETRY_SMOKE','WYU_WP13_MEASURE','WYU_PACKAGE_G','WYU_PACKAGE_G_SMOKE',
+    foreach ($name in 'WYU_R09_RECOVERY_AT_HANDOFF','WYU_R09_TEST_FORCE_PREFETCH_MISS','WYU_R09_TEST_FORCE_RECOVERY_COLD',
+        'WYU_HOST_RETRY_SMOKE','WYU_WP13_MEASURE','WYU_PACKAGE_G','WYU_PACKAGE_G_SMOKE',
         'WYU_WP16','WYU_WP16_SMOKE','WYU_WP15','WYU_WP15_PROBE','WYU_WP15_FLIP','WYU_PACKAGE_E',
         'WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_WALK','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
         'DOTNET_STARTUP_HOOKS','DOTNET_ADDITIONAL_DEPS','DOTNET_SHARED_STORE','DOTNET_DIAGNOSTIC_PORTS',
@@ -59,6 +61,7 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
     if ($RecoveryMode -eq 'AtHandoff') { $start.Environment['WYU_R09_RECOVERY_AT_HANDOFF'] = '1' }
     if ($Mode -eq 'Retry') { $start.Environment['WYU_HOST_RETRY_SMOKE'] = '1' }
     if ($RequireEarlyColdFallback) { $start.Environment['WYU_R09_TEST_FORCE_PREFETCH_MISS'] = '1' }
+    if ($RequireRecoveryColdFallback) { $start.Environment['WYU_R09_TEST_FORCE_RECOVERY_COLD'] = '1' }
 
     $outputStream = [IO.File]::Create($Log)
     try {
@@ -304,6 +307,7 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $resourceSamples = @{}
     $gpuOwners = @{}
     $reuse = @{}
+    $recoveryBrickSource = $null
     $early = @{}
     $brickTimings = @{}
     $bricksByGroup = @{}
@@ -386,7 +390,11 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
                 EarlyStatus = ''; EarlyAttemptQpc = $null; EarlyCutQpc = $null; EarlyAdmittedGeneration = $null
                 EarlyLeadMilliseconds = $null; ReadyBeforeCutMilliseconds = $null; ColdFallback = !$source
                 ReusedBricks = 0; RebuiltBricks = 0; ReusedMeshes = 0; RebuiltMeshes = 0
+                PrivateBrickSourceGeneration = $null; ReusedPrivateBricks = $null; RebuiltPrivateBricks = $null
             }
+        } elseif ($line -cmatch '^WYU R09 RECOVERYBRICKS ([0-9]+)$') {
+            if ($null -ne $recoveryBrickSource) { throw "Duplicate Recovery brick source: $line" }
+            $recoveryBrickSource = [uint64]$Matches[1]
         } elseif ($line -cmatch '^WYU R09 BRICKTIMING (Movement|FirstEdit|Recovery) (publishing|private) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)$') {
             $group = "$($Matches[1])/$($Matches[2])"
             if ($brickTimings.ContainsKey($group)) { throw "Duplicate brick timing: $line" }
@@ -397,7 +405,8 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
             $key = "$x,$y,$z"
             $group = $bricksByGroup["$path/$role"]
             $reused = $Matches[10] -ceq '1'
-            if ($group.Count -ge 512 -or $group.ContainsKey($key) -or ($role -eq 'private' -and $reused)) {
+            if ($group.Count -ge 512 -or $group.ContainsKey($key) -or
+                ($role -ceq 'private' -and $reused -and $path -cne 'Recovery')) {
                 throw "Invalid or duplicate brick: $line"
             }
             $group[$key] = [pscustomobject]@{
@@ -514,6 +523,17 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
                 throw 'Recovery requires a synchronous private profile before publishing.'
             }
             $transfer.EarlyStatus = 'Synchronous'
+            $privateBricks = $bricksByGroup['Recovery/private']
+            $seeded = @($privateBricks.Values | Where-Object Reused).Count
+            if ($null -eq $recoveryBrickSource -or
+                $recoveryBrickSource -ge $transfer.PublishingGeneration -or
+                ($seeded -and !$recoveryBrickSource) -or
+                ($RequireRecoveryColdFallback -and ($recoveryBrickSource -or $seeded))) {
+                throw 'Invalid Recovery private brick source or fallback evidence.'
+            }
+            $transfer.PrivateBrickSourceGeneration = $recoveryBrickSource
+            $transfer.ReusedPrivateBricks = $seeded
+            $transfer.RebuiltPrivateBricks = $privateBricks.Count - $seeded
         } else {
             $decision = $early[$path]
             if ($null -eq $decision -or $decision.AttemptQpc -gt $route.FromQpc -or
@@ -671,11 +691,12 @@ try {
     Assert-InstalledPayload $installRoot $manifest
     $exe = Join-Path $installRoot 'WorldsYetUnseen.Client.exe'
     $meta = [ordered]@{
-        Schema = 'wyu-r09-installed-flight-v8'; UTC = [DateTime]::UtcNow.ToString('o')
+        Schema = 'wyu-r09-installed-flight-v9'; UTC = [DateTime]::UtcNow.ToString('o')
         OS = [Environment]::OSVersion.VersionString; LogicalProcessors = [Environment]::ProcessorCount
         Adapter = $Adapter; Cohorts = $Cohort; SamplesPerCohort = $Samples; WarmupsPerCohort = 1
         RecoveryMode = $RecoveryMode
         EarlyPrefetchMode = if ($RequireEarlyColdFallback) { 'forced-pending' } else { 'natural' }
+        RecoveryBrickMode = if ($RequireRecoveryColdFallback) { 'forced-cold' } else { 'published-bricks' }
         WyuCommit = $manifest.wyuCommit; GroundworkCommit = $manifest.groundworkCommit
         GroundworkVersion = $manifest.groundworkVersion; GroundworkManifestSha256 = $manifest.groundworkManifestSha256
         InstallerSha256 = $manifest.installerSha256; InstallerManifestSha256 = $manifestHash
