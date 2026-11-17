@@ -21,7 +21,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     bool freeTestWorld = false)
 {
     private long MeshBytes => cave is null ? 10 * 1024 * 1024 : 32 * 1024 * 1024;
-    private long NativeBytes => cave is null ? 16 * 1024 * 1024 : 32 * 1024 * 1024;
+    private long NativeBytes => cave is null ? 8 * 1024 * 1024 : 32 * 1024 * 1024;
+    private long PackingBytes => cave is null ? 16 * 1024 * 1024 : 32 * 1024 * 1024;
     private const int RouteSteps = 480;
     private const int OverlayLimit = 8192;
     private static readonly PlanetVector East = new(1, 0, 0);
@@ -583,7 +584,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     }
 
     private VolumeResources Charge(VolumeStreamingSelection selection) =>
-        new(VolumeStreamingCoordinator.RequiredCpuBytes(selection, MeshBytes) + NativeBytes + 64L * OverlayLimit + 4096,
+        new(VolumeStreamingCoordinator.RequiredCpuBytes(selection, MeshBytes) + PackingBytes + 64L * OverlayLimit + 4096,
             NativeBytes, NativeBytes, NativeBytes, 1, 1, 1, 64, 1);
 
     private async Task<BarrierStamp> BeginAsync(CancellationToken token)

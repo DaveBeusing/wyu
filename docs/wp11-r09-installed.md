@@ -56,6 +56,10 @@ If a measured mask or terrain presentation wait times out or is canceled, inspec
 
 ### Combined-pressure resources
 
+The reference-field terrain reserves 8 MiB per generation in each of the Native, Upload and Retirement dimensions. The baseline envelope holds two generations at 16 MiB. Movement, FirstEdit, Recovery and Speculative each retain their own 8 MiB envelope, for a configured total of 48 MiB per dimension. CPU packing retains its separate 16 MiB allowance. The cave-world path uses its existing 32 MiB per-generation allowances.
+
+The early Movement peak can hold the published initial terrain, both private forecasts and the publishing candidate or retry probe. Four reservations then account for 32 MiB per dimension. `pressure.csv` reports the lifetime peak, which can precede the held-upload checkpoints. Completed private work remains charged until its borrowers and owner release it. Geometric requests beyond the renderer's native-related credits use the existing rejection and cleanup paths.
+
 - `resource-samples.csv` records the held-upload and native-ready checkpoints under the occupied speculative worker and queue slot while the previous terrain generation is retained. It includes charged terrain CPU bytes, generation and reader counts, process working set and private bytes. OS peak working set and the coordinator's reservation peak are lifetime counters. `pressure.csv` retains the cumulative CPU/native/upload/retirement reservation peaks.
 - `gpu-owners.csv` contains live, fence-retained and released counts and D3D12 backing bytes by renderer owner and checkpoint. Live and retained backing are disjoint. These aligned tracked allocations measure resource backing. Driver residency, descriptor heaps and command allocator storage are outside this accounting.
 - `combined-peaks.csv` reports the observed maximum across the two checkpoints per route and run. Each GPU total sums live and retained bytes within the same checkpoint. Recovery creates a fresh near renderer, so retained CPU terrain can coexist with zero old terrain backing at the held checkpoint.
