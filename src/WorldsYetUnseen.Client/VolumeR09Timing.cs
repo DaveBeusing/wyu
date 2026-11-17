@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Groundwork.Core;
+using Groundwork.Rendering.D3D12;
 using Groundwork.Voxels;
 
 namespace WorldsYetUnseen.Client;
@@ -24,6 +25,7 @@ internal sealed partial class VolumeExploration
         internal long GroundRendererStartupStarted { get; set; }
         private long GroundRendererStarted { get; set; }
         internal R09WorkerMeasurement? RecoveryPrivateWorker { get; set; }
+        internal (ulong Sequence, long Submitted) RecoveryMask { get; set; }
 
         internal void RecordGroundRendererStarted() => GroundRendererStarted = Stopwatch.GetTimestamp();
 
@@ -62,9 +64,17 @@ internal sealed partial class VolumeExploration
             throw new InvalidOperationException($"R09 did not consume the {timing.Path} receipt at BeginTick.");
         Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
 
-        VolumeStreamingEvent? receipt = null, opened = null;
+        VolumeStreamingEvent? receipt = null, opened = null, maskReceipt = null;
         while (terrain.TryReadEvent(out var entry))
         {
+            if (handoffStarted != 0 && entry.Kind == VolumeEventKind.Accepted && entry.Generation == 0 &&
+                entry.Frame == timing.RecoveryMask.Sequence && entry.View == view)
+            {
+                if (maskReceipt is not null)
+                    throw new InvalidOperationException("R09 observed duplicate Recovery mask presentation evidence.");
+                maskReceipt = entry;
+                continue;
+            }
             if (entry.Generation != generation || entry.Frame != frame || entry.View != view)
                 continue;
             if (entry.Kind == VolumeEventKind.Accepted && receipt is null)
@@ -91,6 +101,10 @@ internal sealed partial class VolumeExploration
             if (timing.Path != VolumeWorkClass.Recovery || handoffStarted > consumed ||
                 (timing.RecoveryAtHandoff ? timing.Started != handoffStarted : timing.Started >= handoffStarted))
                 throw new InvalidOperationException("R09 Recovery and flight handoff timings do not match the chosen route.");
+            if (timing.RecoveryMask.Submitted == 0 || maskReceipt is not { } presentedMask ||
+                presentedMask.MonotonicTimestamp < timing.RecoveryMask.Submitted || presentedMask.MonotonicTimestamp > submitted)
+                throw new InvalidOperationException("R09 could not match the Recovery mask submission to its presentation receipt.");
+            timing.Write("mask-submit-to-receipt", timing.RecoveryMask.Submitted, presentedMask.MonotonicTimestamp);
             timing.Write("handoff-to-begin-tick", handoffStarted, consumed);
             if (timing.RecoveryAtHandoff)
                 timing.Write("recovery-no-flight-to-begin-tick", timing.Started, consumed);
@@ -102,5 +116,22 @@ internal sealed partial class VolumeExploration
             $"WYU R09 IDENTITY {timing.Path} {generation} {frame} {view.View} {view.RendererEpoch} {accepted.Tick} {begin.Tick}"));
         timing.WriteWorkers?.Invoke();
         timing.WriteWorkers = null;
+    }
+
+    private void WriteR09PresentationWaitFailure(R09Timing timing, string stage, D3D12Renderer renderer,
+        VolumeStreamingCoordinator terrain, VolumeViewIdentity view, ulong generation, ulong sequence)
+    {
+        try
+        {
+            var state = renderer.Read();
+            var hostWindow = window.Read();
+            var currentView = terrain.View;
+            Console.Error.WriteLine(FormattableString.Invariant(
+                $"WYU R09 PRESENT_WAIT_FAILURE path={timing.Path} stage={stage} expected={sequence} accepted={state.LastAcceptedSequence} presented={state.LastPresentedSequence} generation={generation} view={view.View} epoch={view.RendererEpoch} currentView={currentView.View} currentEpoch={currentView.RendererEpoch} lifecycle={state.Lifecycle} surface={state.Surface} windowPhase={hostWindow.Phase} focused={hostWindow.Focused} windowWidth={hostWindow.ClientWidth} windowHeight={hostWindow.ClientHeight} appliedWidth={state.AppliedWidth} appliedHeight={state.AppliedHeight} skipped={state.SkippedFrames} replaced={state.ReplacedFrames}"));
+        }
+        catch
+        {
+            // Failure diagnostics must never replace the presentation wait's exception.
+        }
     }
 }

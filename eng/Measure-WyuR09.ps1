@@ -224,7 +224,7 @@ function Compare-MeshInventory($Publishing, $Private, [long]$Frequency, [string]
 
 $r09GpuOwners = @('Presentation','Depth','Terrain','Shadow','Props','Readback','Texture','TextureStaging')
 $r09RendererPhases = @('far-renderer-stop','ground-renderer-startup','ground-renderer-switch',
-    'private-build-renderer-overlap')
+    'private-build-renderer-overlap','mask-submit-to-receipt')
 $r09RecoveryPhases = @('handoff-to-begin-tick','flight-overlap-window','recovery-no-flight-to-begin-tick') + $r09RendererPhases
 
 function Complete-ResourceSamples($ResourceSamples, $GpuOwners, $Intervals, $Identities, [long]$Frequency) {
@@ -467,6 +467,7 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
                 'Recovery/ground-renderer-startup' { 'renderer-handoff' }
                 'Recovery/ground-renderer-switch' { 'renderer-handoff' }
                 'Recovery/private-build-renderer-overlap' { 'concurrent-private-build-and-renderer' }
+                'Recovery/mask-submit-to-receipt' { 'first-ground-mask' }
             }
             $intervals[$key] = [pscustomobject]@{
                 Cohort = $Mode; Run = $Sample; Warmup = ($Sample -eq 0); Path = $path; Phase = $phase; MeasurementScope = $scope
@@ -644,11 +645,13 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $groundStartup = $intervals['Recovery/ground-renderer-startup']
     $rendererSwitch = $intervals['Recovery/ground-renderer-switch']
     $rendererOverlap = $intervals['Recovery/private-build-renderer-overlap']
+    $groundMask = $intervals['Recovery/mask-submit-to-receipt']
     $privateBuild = $intervals['Recovery/prebuild-worker']
     if ($rendererSwitch.FromQpc -lt $handoff.FromQpc -or $rendererSwitch.FromQpc -ne $farStop.FromQpc -or
         $farStop.ToQpc -gt $groundStartup.FromQpc -or $groundStartup.ToQpc -ne $rendererSwitch.ToQpc -or
-        $rendererSwitch.ToQpc -gt $intervals['Recovery/upload-to-observed-ready'].FromQpc) {
-        throw 'Invalid Recovery renderer switch ordering.'
+        $rendererSwitch.ToQpc -gt $groundMask.FromQpc -or
+        $groundMask.ToQpc -gt $intervals['Recovery/upload-to-observed-ready'].FromQpc) {
+        throw 'Invalid Recovery renderer switch or ground mask ordering.'
     }
     $overlapStart = [Math]::Max($rendererSwitch.FromQpc, $privateBuild.FromQpc)
     $overlapEnd = [Math]::Min($rendererSwitch.ToQpc, $privateBuild.ToQpc)
@@ -712,7 +715,7 @@ try {
     Assert-InstalledPayload $installRoot $manifest
     $exe = Join-Path $installRoot 'WorldsYetUnseen.Client.exe'
     $meta = [ordered]@{
-        Schema = 'wyu-r09-installed-flight-v10'; UTC = [DateTime]::UtcNow.ToString('o')
+        Schema = 'wyu-r09-installed-flight-v11'; UTC = [DateTime]::UtcNow.ToString('o')
         OS = [Environment]::OSVersion.VersionString; LogicalProcessors = [Environment]::ProcessorCount
         Adapter = $Adapter; Cohorts = $Cohort; SamplesPerCohort = $Samples; WarmupsPerCohort = 1
         RecoveryMode = $RecoveryMode

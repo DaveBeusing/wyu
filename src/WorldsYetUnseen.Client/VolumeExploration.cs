@@ -429,6 +429,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 var startupStarted = BiomeMeasurements.Start();
                 await rendererReady.ConfigureAwait(false);
                 BiomeMeasurements.Write("near-startup-wait", startupStarted);
+                if (timing is not null && handoffStarted != 0)
+                    timing.RecoveryMask = (mask, Stopwatch.GetTimestamp());
                 RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, camera.Sky));
             }
             catch
@@ -444,8 +446,16 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 return false;
             throw new InvalidOperationException("Terrain generation did not complete.");
         }
-        await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
-            pauseWhileMinimized: true).ConfigureAwait(false);
+        try
+        {
+            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
+                pauseWhileMinimized: true).ConfigureAwait(false);
+        }
+        catch (Exception error) when (timing is not null && error is (OperationCanceledException or TimeoutException))
+        {
+            WriteR09PresentationWaitFailure(timing, "mask", renderer, terrain, view, work.Generation, mask);
+            throw;
+        }
         if (timing is null)
         {
             var packSample = BiomeMeasurements.StartBuild();
@@ -485,8 +495,16 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var sequence = ++_sequence;
         var submitted = timing is null ? 0 : Stopwatch.GetTimestamp();
         RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, camera));
-        await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
-            pauseWhileMinimized: true).ConfigureAwait(false);
+        try
+        {
+            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
+                pauseWhileMinimized: true).ConfigureAwait(false);
+        }
+        catch (Exception error) when (timing is not null && error is (OperationCanceledException or TimeoutException))
+        {
+            WriteR09PresentationWaitFailure(timing, "content", renderer, terrain, view, work.Generation, sequence);
+            throw;
+        }
         var presented = timing is null ? 0 : Stopwatch.GetTimestamp();
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement reopened before the next BeginTick.");

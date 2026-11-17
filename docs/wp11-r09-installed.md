@@ -8,7 +8,7 @@ One speculative job occupies a worker and another fills the speculative queue in
 
 ## Read the profiling results
 
-Evidence schema `wyu-r09-installed-flight-v10` preserves the raw QPC endpoints in `observations.csv` and reports p50, p95, p99 and maximum in `summary.csv`. Compare `worker` (the publishing job) with `prebuild-worker` (the offered private source). Each measured worker has a queue interval before `Execute`, a completion observation interval after `Execute`, and six contiguous phases inside `Execute`. A movement or first-edit sample with no offered private source has no private worker phases or inventory. Publishing, route, upload, receipt and cold-fallback evidence is present for every run. Check the reported sample count before comparing private-phase percentiles.
+Evidence schema `wyu-r09-installed-flight-v11` preserves the raw QPC endpoints in `observations.csv` and reports p50, p95, p99 and maximum in `summary.csv`. Compare `worker` (the publishing job) with `prebuild-worker` (the offered private source). Each measured worker has a queue interval before `Execute`, a completion observation interval after `Execute`, and six contiguous phases inside `Execute`. A movement or first-edit sample with no offered private source has no private worker phases or inventory. Publishing, route, upload, receipt and cold-fallback evidence is present for every run. Check the reported sample count before comparing private-phase percentiles.
 
 | Phase suffix | Work measured |
 | --- | --- |
@@ -48,8 +48,11 @@ Both modes also report separate QPC intervals for the renderer switch.
 - `ground-renderer-startup` measures ground renderer startup through observed readiness.
 - `ground-renderer-switch` spans from the start of the flight renderer stop to observed ground renderer readiness. It includes the elapsed time between stop and startup.
 - `private-build-renderer-overlap` is the intersection of the renderer switch and the private worker's `Execute` interval. Queue and completion observation time are outside the private worker interval. When there is no overlap, both endpoints are the switch start.
+- `mask-submit-to-receipt` starts immediately before the first ground mask submission and ends at its matching authorized receipt in the terrain journal, before terrain upload.
 
 The runner checks the renderer endpoints and recomputes the intersection from the raw QPC ticks in every sample. These intervals add diagnostic measurements with no separate proposed ceilings.
+
+If a measured mask or terrain presentation wait times out or is canceled, inspect `PRESENT_WAIT_FAILURE` in the archived stderr. The failure records the expected, accepted and last presented frame sequences, the requested and current view and renderer epoch, plus the renderer and window snapshots. The original error still fails the run.
 
 ### Combined-pressure resources
 
