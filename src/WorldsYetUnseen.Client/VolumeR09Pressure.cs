@@ -125,6 +125,8 @@ internal sealed partial class VolumeExploration
         }
     }
 
+    private enum R09PublishedReuse { None, Bricks, Terrain }
+
     private sealed class R09Pressure(VolumeExploration owner, JobScheduler scheduler,
         BarrierStamp begin, JobDispatchPhase phase) : IDisposable
     {
@@ -162,8 +164,12 @@ internal sealed partial class VolumeExploration
                         owner.MeshBytes, owner.Charge(selection), owner.Field, out privateWork);
                     if (admission != VolumeAdmission.Accepted || privateWork is null)
                         throw new InvalidOperationException($"R09 could not admit the Recovery private prebuild ({admission}).");
-                    var reusePublishedBricks = Environment.GetEnvironmentVariable("WYU_R09_TEST_FORCE_RECOVERY_COLD") != "1";
-                    prebuild = await MeasureWorkerAsync(privateWork, null, "private prebuild", token, reusePublishedBricks)
+                    var reuse = R09PublishedReuse.Terrain;
+                    if (Environment.GetEnvironmentVariable("WYU_R09_TEST_FORCE_RECOVERY_COLD") == "1")
+                        reuse = R09PublishedReuse.None;
+                    else if (Environment.GetEnvironmentVariable("WYU_R09_TEST_FORCE_RECOVERY_MESH_REBUILD") == "1")
+                        reuse = R09PublishedReuse.Bricks;
+                    prebuild = await MeasureWorkerAsync(privateWork, null, "private prebuild", token, reuse)
                         .ConfigureAwait(false);
                     if (prebuild is null)
                         return false;
@@ -182,8 +188,12 @@ internal sealed partial class VolumeExploration
                     prebuild?.Write(timing, "prebuild-worker");
                     worker.Write(timing, "worker");
                     if (timing.RecoveryPrivateWorker is { } recovery)
+                    {
                         Console.WriteLine(FormattableString.Invariant(
                             $"WYU R09 RECOVERYBRICKS {recovery.Profile.ReuseSourceGeneration}"));
+                        Console.WriteLine(FormattableString.Invariant(
+                            $"WYU R09 RECOVERYMESH {(recovery.Profile.ReusedMeshPlan ? 1 : 0)}"));
+                    }
                     Console.WriteLine(FormattableString.Invariant(
                         $"WYU R09 REUSE {timing.Path} {privateWork?.Generation ?? 0} {work.Generation} {worker.Profile.ReuseSourceGeneration}"));
                 };
@@ -196,7 +206,8 @@ internal sealed partial class VolumeExploration
         }
 
         private async Task<R09WorkerMeasurement?> MeasureWorkerAsync(VolumeStreamingWork work,
-            VolumeStreamingWork? privateWork, string description, CancellationToken token, bool reusePublishedBricks = false)
+            VolumeStreamingWork? privateWork, string description, CancellationToken token,
+            R09PublishedReuse reuse = R09PublishedReuse.None)
         {
             RequireSaturated();
             long started = 0, finished = 0;
@@ -205,7 +216,9 @@ internal sealed partial class VolumeExploration
             owner._r09Protected = cancellation =>
             {
                 started = Stopwatch.GetTimestamp();
-                if (reusePublishedBricks)
+                if (reuse == R09PublishedReuse.Terrain)
+                    completed = work.ExecuteDetailedProfiledReusingPublishedTerrain(out profile, cancellation);
+                else if (reuse == R09PublishedReuse.Bricks)
                     completed = work.ExecuteDetailedProfiledReusingPublishedBricks(out profile, cancellation);
                 else
                     completed = privateWork is null ? work.ExecuteDetailedProfiled(out profile, cancellation)

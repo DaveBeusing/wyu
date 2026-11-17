@@ -4,93 +4,93 @@
     "net10.0-windows7.0": {
       "Groundwork.Core": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.r09recoverybricks.13b7c2d416c0, 0.1.0-dev.r09recoverybricks.13b7c2d416c0]",
-        "resolved": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-        "contentHash": "Lb8JvBy+JOeYfhRKyFx+hNTVgrX3d9v1bwW7Miby7UcK0SZLwgnzu5coWs0ppZhJmH8sIk61YPkOjcEI5YP4QQ=="
+        "requested": "[0.1.0-dev.r09recoverymesh.e6e60b0d5c04, 0.1.0-dev.r09recoverymesh.e6e60b0d5c04]",
+        "resolved": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+        "contentHash": "eCV+XqAFaIezwHUTQGbwne33GnsSHorTyaP2NEaLQhMlcY5cJbNteA0xoAwDSysHlc2JCu52Lm68gEUQnZbgzA=="
       },
       "Groundwork.Diagnostics": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.r09recoverybricks.13b7c2d416c0, 0.1.0-dev.r09recoverybricks.13b7c2d416c0]",
-        "resolved": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-        "contentHash": "p4AoJw9/5n4TXZhO41LmG2VzMl7Y9a0eL2yYiKk4fXSdWd23ogUFhtFjJYWL6PMd81/wCguqqp/x+lo3P0n2EQ==",
+        "requested": "[0.1.0-dev.r09recoverymesh.e6e60b0d5c04, 0.1.0-dev.r09recoverymesh.e6e60b0d5c04]",
+        "resolved": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+        "contentHash": "2K/rguT8/pT3zNL7DgdKYcGEC8i5+pFcpk9H7iQAhqyZjwMufCXJHI3LVR6yyI3gBMTcUQ837vdp6AXb/0Pwkg==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.r09recoverybricks.13b7c2d416c0"
+          "Groundwork.Core": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04"
         }
       },
       "Groundwork.Ecs": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.r09recoverybricks.13b7c2d416c0, 0.1.0-dev.r09recoverybricks.13b7c2d416c0]",
-        "resolved": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-        "contentHash": "brAeKQyhzznyHzWF60y4Up6g8tnIUPka8PxwQDd4KG4CP5AzwdS3GTt9V56A6OdscacL4oQP6wKi1Nv9G8t7XQ==",
+        "requested": "[0.1.0-dev.r09recoverymesh.e6e60b0d5c04, 0.1.0-dev.r09recoverymesh.e6e60b0d5c04]",
+        "resolved": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+        "contentHash": "otrnDkYuSumAxSzcaqaF1G9n+773lHyexfUA39HW++ipPsP2VPle00tMVE8/M4Hcrzb3J2HhXwgsjwjLBYMPvA==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.r09recoverybricks.13b7c2d416c0"
+          "Groundwork.Core": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04"
         }
       },
       "Groundwork.Jobs": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.r09recoverybricks.13b7c2d416c0, 0.1.0-dev.r09recoverybricks.13b7c2d416c0]",
-        "resolved": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-        "contentHash": "HaqxFIKqjQS8RK1j+FEhdVRfDGK8wrYvdLwvKQSlJFwop2Jxx45FABLzQM3Zq8zje8Hb++RyoOfamLy6UeYaFw==",
+        "requested": "[0.1.0-dev.r09recoverymesh.e6e60b0d5c04, 0.1.0-dev.r09recoverymesh.e6e60b0d5c04]",
+        "resolved": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+        "contentHash": "GvZwbojmovFyYrP1YM3AA92S0Goni+3assJ5VLzIj3Pm/fQ8h3s+vu3i3qq1r3IYfc5DAU5vD7KEkDdJbLO6dw==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.r09recoverybricks.13b7c2d416c0"
+          "Groundwork.Core": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04"
         }
       },
       "Groundwork.Persistence": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.r09recoverybricks.13b7c2d416c0, 0.1.0-dev.r09recoverybricks.13b7c2d416c0]",
-        "resolved": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-        "contentHash": "t4swZIT3PnFFJei9YvDDBWUmaLe4vxHV1bOa7gur+jtxYWzjsEnZllWYXuvlDXsKcxltETtmr8oVS5Y+HrqBZw==",
+        "requested": "[0.1.0-dev.r09recoverymesh.e6e60b0d5c04, 0.1.0-dev.r09recoverymesh.e6e60b0d5c04]",
+        "resolved": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+        "contentHash": "/fR+ClgSytwrnRCXJ3HOOCn2vlptEolGDE9iB8D7y6j/zfAdClUvjVbGxO49ouP1CtRg0hmMJBmSpCRtFzTYBA==",
         "dependencies": {
-          "Groundwork.Voxels": "0.1.0-dev.r09recoverybricks.13b7c2d416c0"
+          "Groundwork.Voxels": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04"
         }
       },
       "Groundwork.Platform.Windows": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.r09recoverybricks.13b7c2d416c0, 0.1.0-dev.r09recoverybricks.13b7c2d416c0]",
-        "resolved": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-        "contentHash": "ZE4LeJ9jjJDiMXk1NZhU2JXmanG5992CqhxTab3KP/Pims+TNMUPWYVsVTHyfgQuQlfgleHj7pjSHJDVVWTHvw==",
+        "requested": "[0.1.0-dev.r09recoverymesh.e6e60b0d5c04, 0.1.0-dev.r09recoverymesh.e6e60b0d5c04]",
+        "resolved": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+        "contentHash": "vFfbSx4yHxikXaDJG4kD9+oQuZhMXQlxSMR6sF/wfX/iowh2tzIZ2HggtibLfSIZEsL6pOmqnjSWzW+OfeoUSA==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.r09recoverybricks.13b7c2d416c0"
+          "Groundwork.Core": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04"
         }
       },
       "Groundwork.Rendering": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.r09recoverybricks.13b7c2d416c0, 0.1.0-dev.r09recoverybricks.13b7c2d416c0]",
-        "resolved": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-        "contentHash": "C3kp/8RtYUxvMETG0ttACq4ckhtYVSnOPggvnfM9OCIY/vmHM/kee7S7E9uMWXFtJ1+2et+FkB5FIaiAn4YUSQ==",
+        "requested": "[0.1.0-dev.r09recoverymesh.e6e60b0d5c04, 0.1.0-dev.r09recoverymesh.e6e60b0d5c04]",
+        "resolved": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+        "contentHash": "47BxPliN0L41qsVUZ0PKp4iTlUls7F04LzHAjNcs+BceJuA5A85JUwlAU1FzfFDoR+lXl3NTD+Mo6U0wD4c3lw==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.r09recoverybricks.13b7c2d416c0"
+          "Groundwork.Core": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04"
         }
       },
       "Groundwork.Rendering.D3D12": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.r09recoverybricks.13b7c2d416c0, 0.1.0-dev.r09recoverybricks.13b7c2d416c0]",
-        "resolved": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-        "contentHash": "z66Q0fe7TdFmxRV6P+Q2SZRCenNVOFWwh58C8VBBdTEPPVV+TDgxSVYJi/Nmd9Cu9wE9V24UM0sTrNyg9zkMbw==",
+        "requested": "[0.1.0-dev.r09recoverymesh.e6e60b0d5c04, 0.1.0-dev.r09recoverymesh.e6e60b0d5c04]",
+        "resolved": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+        "contentHash": "Tscvt3ZX10tWdWCKjMyjDVgkOmbeQ2tj9Eq72K0b+ZpZnPoPFwFsC50UjXLU+zwC0Zk4vgGPd0hWOihqP+e8YA==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-          "Groundwork.Platform.Windows": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-          "Groundwork.Rendering": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-          "Groundwork.Voxels": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
+          "Groundwork.Core": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+          "Groundwork.Platform.Windows": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+          "Groundwork.Rendering": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+          "Groundwork.Voxels": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
           "TerraFX.Interop.Windows": "[10.0.26100.6]"
         }
       },
       "Groundwork.Simulation": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.r09recoverybricks.13b7c2d416c0, 0.1.0-dev.r09recoverybricks.13b7c2d416c0]",
-        "resolved": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-        "contentHash": "VKr35zq8JJoAs35DDxBSeCjzJX/nNpO6ALOLnR1xIhJFyztmhB4LGEAb3HFTitCOEKfVeR8/dkjJ8K0k5XpPqA==",
+        "requested": "[0.1.0-dev.r09recoverymesh.e6e60b0d5c04, 0.1.0-dev.r09recoverymesh.e6e60b0d5c04]",
+        "resolved": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+        "contentHash": "MkwUjDKRGWn8tci8C1PECgr8fC605lIxZyYuwuZaVpXgM74tp4nm1RSU4ACbaz26St9nMtw9EY/zwxDLJBU2Ug==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.r09recoverybricks.13b7c2d416c0"
+          "Groundwork.Core": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04"
         }
       },
       "Groundwork.Voxels": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.r09recoverybricks.13b7c2d416c0, 0.1.0-dev.r09recoverybricks.13b7c2d416c0]",
-        "resolved": "0.1.0-dev.r09recoverybricks.13b7c2d416c0",
-        "contentHash": "YT8omsnyGKpdVgpuJKQ8nAPBUx9QIz2re4mRWz34DysOMA78WOTWfTgb1atSEasgnMBMEser4XQzW01rSvYqGg==",
+        "requested": "[0.1.0-dev.r09recoverymesh.e6e60b0d5c04, 0.1.0-dev.r09recoverymesh.e6e60b0d5c04]",
+        "resolved": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04",
+        "contentHash": "w4zpPyBiiMqy6jjCaXThZ58xJ743yoXiZ0iVClUSQ0lWOR8cLoDuMr4vSRGOZbbBqciSBVsIwIQgA0DciXdGoQ==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.r09recoverybricks.13b7c2d416c0"
+          "Groundwork.Core": "0.1.0-dev.r09recoverymesh.e6e60b0d5c04"
         }
       },
       "TerraFX.Interop.Windows": {
@@ -101,7 +101,7 @@
       "worldsyetunseen.gameplay": {
         "type": "Project",
         "dependencies": {
-          "Groundwork.Voxels": "[0.1.0-dev.r09recoverybricks.13b7c2d416c0, 0.1.0-dev.r09recoverybricks.13b7c2d416c0]"
+          "Groundwork.Voxels": "[0.1.0-dev.r09recoverymesh.e6e60b0d5c04, 0.1.0-dev.r09recoverymesh.e6e60b0d5c04]"
         }
       }
     }

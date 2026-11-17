@@ -8,7 +8,8 @@ param(
     [ValidateSet('Normal','Retry')][string[]]$Cohort = @('Normal','Retry'),
     [ValidateSet('Overlap','AtHandoff')][string]$RecoveryMode = 'Overlap',
     [switch]$RequireEarlyColdFallback,
-    [switch]$RequireRecoveryColdFallback
+    [switch]$RequireRecoveryColdFallback,
+    [switch]$RequireRecoveryMeshRebuild
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -49,6 +50,7 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
     $start.RedirectStandardError = $true
     foreach ($argument in '--volume-flight-smoke','flight',$Slot,$Adapter) { $start.ArgumentList.Add($argument) }
     foreach ($name in 'WYU_R09_RECOVERY_AT_HANDOFF','WYU_R09_TEST_FORCE_PREFETCH_MISS','WYU_R09_TEST_FORCE_RECOVERY_COLD',
+        'WYU_R09_TEST_FORCE_RECOVERY_MESH_REBUILD',
         'WYU_HOST_RETRY_SMOKE','WYU_WP13_MEASURE','WYU_PACKAGE_G','WYU_PACKAGE_G_SMOKE',
         'WYU_WP16','WYU_WP16_SMOKE','WYU_WP15','WYU_WP15_PROBE','WYU_WP15_FLIP','WYU_PACKAGE_E',
         'WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_WALK','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
@@ -62,6 +64,7 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
     if ($Mode -eq 'Retry') { $start.Environment['WYU_HOST_RETRY_SMOKE'] = '1' }
     if ($RequireEarlyColdFallback) { $start.Environment['WYU_R09_TEST_FORCE_PREFETCH_MISS'] = '1' }
     if ($RequireRecoveryColdFallback) { $start.Environment['WYU_R09_TEST_FORCE_RECOVERY_COLD'] = '1' }
+    if ($RequireRecoveryMeshRebuild) { $start.Environment['WYU_R09_TEST_FORCE_RECOVERY_MESH_REBUILD'] = '1' }
 
     $outputStream = [IO.File]::Create($Log)
     try {
@@ -308,6 +311,7 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $gpuOwners = @{}
     $reuse = @{}
     $recoveryBrickSource = $null
+    $recoveryMeshPlanReused = $null
     $early = @{}
     $brickTimings = @{}
     $bricksByGroup = @{}
@@ -391,10 +395,14 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
                 EarlyLeadMilliseconds = $null; ReadyBeforeCutMilliseconds = $null; ColdFallback = !$source
                 ReusedBricks = 0; RebuiltBricks = 0; ReusedMeshes = 0; RebuiltMeshes = 0
                 PrivateBrickSourceGeneration = $null; ReusedPrivateBricks = $null; RebuiltPrivateBricks = $null
+                ReusedPrivateMeshPlan = $null; ReusedPrivateMeshes = $null; RebuiltPrivateMeshes = $null
             }
         } elseif ($line -cmatch '^WYU R09 RECOVERYBRICKS ([0-9]+)$') {
             if ($null -ne $recoveryBrickSource) { throw "Duplicate Recovery brick source: $line" }
             $recoveryBrickSource = [uint64]$Matches[1]
+        } elseif ($line -cmatch '^WYU R09 RECOVERYMESH ([01])$') {
+            if ($null -ne $recoveryMeshPlanReused) { throw "Duplicate Recovery mesh plan evidence: $line" }
+            $recoveryMeshPlanReused = $Matches[1] -ceq '1'
         } elseif ($line -cmatch '^WYU R09 BRICKTIMING (Movement|FirstEdit|Recovery) (publishing|private) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)$') {
             $group = "$($Matches[1])/$($Matches[2])"
             if ($brickTimings.ContainsKey($group)) { throw "Duplicate brick timing: $line" }
@@ -422,7 +430,8 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
             $key = "$x,$y,$z"
             $group = $meshesByGroup["$path/$role"]
             $reused = $Matches[10] -ceq '1'
-            if ($group.Count -ge 64 -or $group.ContainsKey($key) -or ($role -eq 'private' -and $reused)) {
+            if ($group.Count -ge 64 -or $group.ContainsKey($key) -or
+                ($role -ceq 'private' -and $reused -and $path -cne 'Recovery')) {
                 throw "Invalid or duplicate mesh: $line"
             }
             $group[$key] = [pscustomobject]@{
@@ -534,6 +543,18 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
             $transfer.PrivateBrickSourceGeneration = $recoveryBrickSource
             $transfer.ReusedPrivateBricks = $seeded
             $transfer.RebuiltPrivateBricks = $privateBricks.Count - $seeded
+            $privateMeshes = $meshesByGroup['Recovery/private']
+            $meshHits = @($privateMeshes.Values | Where-Object Reused).Count
+            if ($null -eq $recoveryMeshPlanReused -or
+                ($recoveryMeshPlanReused -and (!$recoveryBrickSource -or $seeded -ne $privateBricks.Count -or
+                    $meshHits -ne $privateMeshes.Count)) -or
+                (!$recoveryMeshPlanReused -and $meshHits) -or
+                (($RequireRecoveryMeshRebuild -or $RequireRecoveryColdFallback) -and $recoveryMeshPlanReused)) {
+                throw 'Invalid Recovery private mesh evidence.'
+            }
+            $transfer.ReusedPrivateMeshPlan = $recoveryMeshPlanReused
+            $transfer.ReusedPrivateMeshes = $meshHits
+            $transfer.RebuiltPrivateMeshes = $privateMeshes.Count - $meshHits
         } else {
             $decision = $early[$path]
             if ($null -eq $decision -or $decision.AttemptQpc -gt $route.FromQpc -or
@@ -691,12 +712,15 @@ try {
     Assert-InstalledPayload $installRoot $manifest
     $exe = Join-Path $installRoot 'WorldsYetUnseen.Client.exe'
     $meta = [ordered]@{
-        Schema = 'wyu-r09-installed-flight-v9'; UTC = [DateTime]::UtcNow.ToString('o')
+        Schema = 'wyu-r09-installed-flight-v10'; UTC = [DateTime]::UtcNow.ToString('o')
         OS = [Environment]::OSVersion.VersionString; LogicalProcessors = [Environment]::ProcessorCount
         Adapter = $Adapter; Cohorts = $Cohort; SamplesPerCohort = $Samples; WarmupsPerCohort = 1
         RecoveryMode = $RecoveryMode
         EarlyPrefetchMode = if ($RequireEarlyColdFallback) { 'forced-pending' } else { 'natural' }
         RecoveryBrickMode = if ($RequireRecoveryColdFallback) { 'forced-cold' } else { 'published-bricks' }
+        RecoveryMeshMode = if ($RequireRecoveryMeshRebuild -or $RequireRecoveryColdFallback) {
+            'forced-mesh-rebuild'
+        } else { 'published-terrain' }
         WyuCommit = $manifest.wyuCommit; GroundworkCommit = $manifest.groundworkCommit
         GroundworkVersion = $manifest.groundworkVersion; GroundworkManifestSha256 = $manifest.groundworkManifestSha256
         InstallerSha256 = $manifest.installerSha256; InstallerManifestSha256 = $manifestHash
