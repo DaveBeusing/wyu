@@ -52,7 +52,7 @@ Both modes also report separate QPC intervals for the renderer switch.
 
 The runner checks the renderer endpoints and recomputes the intersection from the raw QPC ticks in every sample. These intervals add diagnostic measurements with no separate proposed ceilings.
 
-If a measured mask or terrain presentation wait times out or is canceled, inspect `PRESENT_WAIT_FAILURE` in the archived stderr. The failure records the expected, accepted and last presented frame sequences, the requested and current view and renderer epoch, plus the renderer and window snapshots. The original error still fails the run.
+If a measured mask or terrain presentation wait times out or is canceled, inspect `PRESENT_WAIT_FAILURE` in the archived stderr. The Movement wait also records the exact renderer snapshot that caused the health check to fail in `Stopping`. The failure record includes the expected, accepted and last presented frame sequences, the requested and current view and renderer epoch, plus the renderer and window state. The original error still fails the run.
 
 ### Combined-pressure resources
 

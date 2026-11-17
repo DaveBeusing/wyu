@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Groundwork.Core;
+using Groundwork.Rendering;
 using Groundwork.Rendering.D3D12;
 using Groundwork.Voxels;
 
@@ -118,16 +119,19 @@ internal sealed partial class VolumeExploration
         timing.WriteWorkers = null;
     }
 
-    private void WriteR09PresentationWaitFailure(R09Timing timing, string stage, D3D12Renderer renderer,
-        VolumeStreamingCoordinator terrain, VolumeViewIdentity view, ulong generation, ulong sequence)
+    private readonly record struct R09PresentationWait(VolumeWorkClass Path, string Stage,
+        VolumeStreamingCoordinator Terrain, VolumeViewIdentity View, ulong Generation, ulong Sequence);
+
+    private void WriteR09PresentationWaitFailure(R09PresentationWait wait, D3D12Renderer renderer,
+        RendererSnapshot? observed = null)
     {
         try
         {
-            var state = renderer.Read();
+            var state = observed ?? renderer.Read();
             var hostWindow = window.Read();
-            var currentView = terrain.View;
+            var currentView = wait.Terrain.View;
             Console.Error.WriteLine(FormattableString.Invariant(
-                $"WYU R09 PRESENT_WAIT_FAILURE path={timing.Path} stage={stage} expected={sequence} accepted={state.LastAcceptedSequence} presented={state.LastPresentedSequence} generation={generation} view={view.View} epoch={view.RendererEpoch} currentView={currentView.View} currentEpoch={currentView.RendererEpoch} lifecycle={state.Lifecycle} surface={state.Surface} windowPhase={hostWindow.Phase} focused={hostWindow.Focused} windowWidth={hostWindow.ClientWidth} windowHeight={hostWindow.ClientHeight} appliedWidth={state.AppliedWidth} appliedHeight={state.AppliedHeight} skipped={state.SkippedFrames} replaced={state.ReplacedFrames}"));
+                $"WYU R09 PRESENT_WAIT_FAILURE path={wait.Path} stage={wait.Stage} expected={wait.Sequence} accepted={state.LastAcceptedSequence} presented={state.LastPresentedSequence} generation={wait.Generation} view={wait.View.View} epoch={wait.View.RendererEpoch} currentView={currentView.View} currentEpoch={currentView.RendererEpoch} lifecycle={state.Lifecycle} surface={state.Surface} windowPhase={hostWindow.Phase} focused={hostWindow.Focused} windowWidth={hostWindow.ClientWidth} windowHeight={hostWindow.ClientHeight} appliedWidth={state.AppliedWidth} appliedHeight={state.AppliedHeight} skipped={state.SkippedFrames} replaced={state.ReplacedFrames}"));
         }
         catch
         {
