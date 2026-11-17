@@ -49,13 +49,13 @@ internal sealed class TerrainHostRetry<TRequest> where TRequest : struct
     public int TransientDenials { get; private set; }
     public TerrainHostAdmissionResult? LastAdmission { get; private set; }
 
-    /// <summary>The original deadline remains in effect through final publication, including after admission.</summary>
+    /// <summary>Checks the admission deadline measured from the original operation start.</summary>
     public bool IsDeadlineElapsed => _clock.GetElapsedTime(_started) >= _deadline;
 
     /// <summary>
     /// Attempt admission on an eligible tick. Advance progressVersion only when the owner observes new
-    /// progress or returned credit. An admitted request transfers custody even if the deadline expires
-    /// during admission. Check IsDeadlineElapsed and follow the normal cancellation/settlement path.
+    /// progress or returned credit. Acceptance ends retries and transfers custody to the caller,
+    /// including when the admission call crosses the deadline. The caller owns normal settlement.
     /// </summary>
     public TerrainHostRetryState Advance(ulong tick, ulong progressVersion)
     {

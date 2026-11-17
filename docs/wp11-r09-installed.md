@@ -34,7 +34,7 @@ The Recovery private worker can import immutable bricks from the current committ
 
 `held-upload` starts when the host observes the renderer entering the gate and ends at the actual release. `held-upload-release-to-ready` starts at that release and ends when the host sees the staged generation ready. `upload-to-observed-ready` starts earlier, before native staging. The route begins at the same setup point as v5 and ends at the consuming `BeginTick`. Recovery's route includes its sequential private build. Movement and first edit use lead time during graphics startup and initial terrain loading. The client writes the worker inventories after the consuming `BeginTick`. The gate still checks native readiness after release with scheduler pressure and the previous generation retained. The phase maxima in `summary.csv` can come from different runs.
 
-The proposed #88 ceilings still apply to publishing `worker`, applicable full-route timings and the two existing 50 ms intervals. The added worker phases and hold interval are diagnostic observations.
+The runner compares publishing `worker`, applicable full-route timings and both 50 ms intervals with the proposed #88 ceilings. The host uses its current retry deadline for admission. Full-route ceilings await reference qualification and budget approval. The added worker phases and hold interval are diagnostic observations.
 
 ### Recovery with and without flight overlap
 
@@ -65,7 +65,7 @@ For a deterministic fallback smoke, add `-RequireEarlyColdFallback` to the same 
 
 ## Rebuild
 
-Use .NET SDK 10.0.403, the reviewed Inno Setup 6.7.3 compiler, and the ten Groundwork packages built locally from the pinned #88 reuse commit. The engine work builds on the revision verified by [Windows CI run 43945439532](https://github.com/DaveBeusing/Groundwork/actions/runs/43945439532). Take the exact engine commit, package version and manifest SHA-256 from the build handoff. Supply the original Groundwork `LICENSE` alongside the packages. Local host retry policy is carried forward from the previous R09 qualification candidate.
+Use .NET SDK 10.0.403 and the reviewed Inno Setup 6.7.3 compiler. Download the immutable Groundwork archive using the release tag, package version, source commit and manifest SHA-256 in the [verified build instructions](build-bootstrap.md). Download all release assets into the same directory so the installer builder can verify the original Groundwork `LICENSE` alongside the ten NuGet packages.
 
 Run the existing verified consumer from a clean checkout with the following options. The builder records the exact WYU SHA and all payload hashes.
 

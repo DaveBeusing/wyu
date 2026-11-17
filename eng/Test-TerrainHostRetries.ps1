@@ -26,11 +26,11 @@ try {
             ArgumentList = @('--volume-flight-smoke',$phase,('"' + $world + '"'),$Adapter)
             RedirectStandardOutput = $log
             RedirectStandardError = $errors
-            Wait = $true
             PassThru = $true
         }
         $process = Start-Process @options
         try {
+            if (!$process.WaitForExit(180000)) { throw "WYU $phase timed out. See $log and $errors." }
             $lines = Get-Content -LiteralPath $log
             if ($process.ExitCode -ne 0 -or $lines -cnotcontains 'WP11 HOST RETRY SETTLED terrain=0 readers=0 generations=0') {
                 throw "WYU $phase failed (exit $($process.ExitCode)). See $log and $errors."
@@ -45,7 +45,14 @@ try {
             }
             Write-Host "PASS: $phase, all three host retries and settled shutdown."
         } finally {
-            $process.Dispose()
+            try {
+                if (!$process.HasExited) {
+                    $process.Kill($true)
+                    if (!$process.WaitForExit(5000)) { throw "WYU $phase did not exit after cancellation." }
+                }
+            } finally {
+                $process.Dispose()
+            }
         }
     }
 } finally {
