@@ -1,3 +1,4 @@
+using Groundwork.Core;
 using Groundwork.Persistence;
 using Groundwork.Voxels;
 using WorldsYetUnseen.Gameplay;
@@ -8,6 +9,22 @@ namespace WorldsYetUnseen.Client;
 internal sealed partial class VolumeExploration
 {
     internal async Task RunFlightSmokeAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost,
+        string phase, CancellationToken token)
+    {
+        try
+        {
+            await RunFlightRouteAsync(terrain, renderHost, phase, token).ConfigureAwait(false);
+        }
+        catch (PlanetLoadException) when (_retryExhausted &&
+            ExhaustTerrainRetry is VolumeWorkClass.Movement or VolumeWorkClass.Recovery)
+        {
+            return;
+        }
+        if (ExhaustTerrainRetry is not null && !_retryExhausted)
+            throw new InvalidOperationException("The selected path did not exhaust its host retries.");
+    }
+
+    private async Task RunFlightRouteAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost,
         string phase, CancellationToken token)
     {
         var skyRoute = Environment.GetEnvironmentVariable("WYU_PACKAGE_G_SMOKE") == "1";
@@ -30,12 +47,26 @@ internal sealed partial class VolumeExploration
             else
             {
                 var center = FlightCoverageCenter(player.Position);
+                _measureCoverage = MeasureR09;
                 await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, terrain.View.Frame, token,
-                    coverageCenter: center, supportCells: FlightSupportCells).ConfigureAwait(false);
+                    coverageCenter: center, supportCells: FlightSupportCells, earlyPrebuild: _r09Lookahead?.Movement)
+                    .ConfigureAwait(false);
                 if (!TryFlightPad(terrain, anchor!.Value, out var before, out _, out var blocked))
                     throw new InvalidOperationException($"Unedited comparison pad unavailable ({blocked}).");
-                if (!await EditAsync(terrain, renderHost.Active, player, new(21, 4105, 16), VolumeBrushOperation.Add,
-                        (ushort)ReferenceTerrainMaterial.OchreStone, token).ConfigureAwait(false))
+                var revisionBeforeEdit = _published.TerrainRevision;
+                var edited = await EditAsync(terrain, renderHost.Active, player, new(21, 4105, 16), VolumeBrushOperation.Add,
+                    (ushort)ReferenceTerrainMaterial.OchreStone, token, _r09Lookahead?.FirstEdit).ConfigureAwait(false);
+                if (_retryExhausted && ExhaustTerrainRetry == VolumeWorkClass.FirstEdit)
+                {
+                    var begin = await BeginAsync(token).ConfigureAwait(false);
+                    terrain.BeginTick(begin);
+                    Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
+                    if (edited || _published.TerrainRevision != revisionBeforeEdit || terrain.Statistics.MovementHeld)
+                        throw new InvalidOperationException("The exhausted edit changed terrain or did not restore movement.");
+                    Console.WriteLine($"WP11 HOST RETRY EDIT RECOVERED revision={revisionBeforeEdit}");
+                    return;
+                }
+                if (!edited)
                     throw new InvalidOperationException("The flight fixture could not edit its landing pad.");
                 await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, terrain.View.Frame, token,
                     coverageCenter: center, supportCells: FlightSupportCells).ConfigureAwait(false);

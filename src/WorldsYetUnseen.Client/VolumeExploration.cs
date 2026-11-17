@@ -61,10 +61,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var movement = diagnostics?.LimitPlanetStreaming == true ? unit with { CpuBytes = unit.CpuBytes - 1 } : unit;
         var limits = new VolumeStreamingLimits(baseline + unit + unit + unit + unit,
             baseline, movement, unit, unit, unit, 12, 12, 256);
-        return restore && slot?.Checkpoint is { } checkpoint
+        var terrain = restore && slot?.Checkpoint is { } checkpoint
             ? checkpoint.RestoreTerrain(world, Field, limits, OverlayLimit,
                 cave is null ? VolumeWorldSlot.SupportsMaterial : CavePlanet.SupportsMaterial)
             : new VolumeStreamingCoordinator(world, Field, limits, OverlayLimit);
+        if (MeasureR09)
+            terrain.EnableEventTiming();
+        return terrain;
     }
 
     internal static async Task<ulong?> ChooseSeedAsync(WindowsHostModule window, AlphaOverlay overlay,
@@ -354,8 +357,15 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private async Task<bool> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
-        Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null)
+        Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null,
+        bool recovery = false, long? operationStarted = null, long handoffStarted = 0,
+        R09EarlyPrebuild? earlyPrebuild = null)
     {
+        var started = operationStarted ?? Stopwatch.GetTimestamp();
+        var timing = returnTerrain?.Timing ?? StartR09(edit is not null ? VolumeWorkClass.FirstEdit :
+            recovery ? VolumeWorkClass.Recovery : VolumeWorkClass.Movement, started);
+        using var retained = timing is null ? null : terrain.TryRead()
+            ?? throw new InvalidOperationException("R09 requires the previous terrain generation.");
         VolumeViewIdentity view;
         if (returnTerrain is { } preparedReturn)
         {
@@ -393,10 +403,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var work = returnTerrain?.Work;
         if (work is null)
         {
-            var result = edit is { } brush
-                ? terrain.TryStageEdit(brush.Tick, brush.Id, selection, MeshBytes, Charge(selection), out work)
-                : terrain.TryStage(VolumeWorkClass.Movement, selection, revision, targetRevision, MeshBytes,
-                    Charge(selection), Field, out work);
+            var path = edit is not null ? VolumeWorkClass.FirstEdit :
+                recovery ? VolumeWorkClass.Recovery : VolumeWorkClass.Movement;
+            VolumeAdmission result;
+            (work, result) = await AdmitTerrainAsync(terrain, new(path, view, revision, targetRevision, selection, edit),
+                started, token, timing).ConfigureAwait(false);
             if (result != VolumeAdmission.Accepted || work is null)
             {
                 if (edit is not null)
@@ -405,7 +416,12 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             }
         }
         using var ownedWork = returnTerrain is null ? work : null;
-        var generated = returnTerrain?.Generated ?? ExecuteTerrainAsync(work, token);
+        using var ownedPressure = timing is not null && returnTerrain is null
+            ? await StartR09PressureAsync(token).ConfigureAwait(false) : null;
+        var pressure = returnTerrain?.Pressure ?? ownedPressure;
+        var generated = returnTerrain?.Generated ?? (pressure is null
+            ? ExecuteTerrainAsync(work, token)
+            : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token, earlyPrebuild));
         if (rendererReady is not null)
         {
             try
@@ -413,6 +429,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 var startupStarted = BiomeMeasurements.Start();
                 await rendererReady.ConfigureAwait(false);
                 BiomeMeasurements.Write("near-startup-wait", startupStarted);
+                if (timing is not null && handoffStarted != 0)
+                    timing.RecoveryMask = (mask, Stopwatch.GetTimestamp());
                 RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, camera.Sky));
             }
             catch
@@ -429,16 +447,26 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             throw new InvalidOperationException("Terrain generation did not complete.");
         }
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
-            pauseWhileMinimized: true).ConfigureAwait(false);
-        var packSample = BiomeMeasurements.StartBuild();
-        var upload = renderer.TryStageVolumeTerrain(work.Generation);
-        BiomeMeasurements.WriteBuild("near-pack", packSample);
-        if (edit is not null && upload is MeshReplacementSubmissionResult.Backpressure or MeshReplacementSubmissionResult.InvalidRegion)
-            return false;
-        RequireMesh(upload);
-        await WaitAsync(renderer, () => renderer.IsVolumeTerrainReady(work.Generation), token).ConfigureAwait(false);
-
-        await BeginAsync(token).ConfigureAwait(false);
+            pauseWhileMinimized: true, r09Presentation: timing is null ? null :
+                new(timing.Path, "mask", terrain, view, work.Generation, mask)).ConfigureAwait(false);
+        if (timing is null)
+        {
+            var packSample = BiomeMeasurements.StartBuild();
+            var upload = renderer.TryStageVolumeTerrain(work.Generation);
+            BiomeMeasurements.WriteBuild("near-pack", packSample);
+            if (edit is not null && upload is MeshReplacementSubmissionResult.Backpressure or MeshReplacementSubmissionResult.InvalidRegion)
+                return false;
+            RequireMesh(upload);
+            await WaitAsync(renderer, () => renderer.IsVolumeTerrainReady(work.Generation), token).ConfigureAwait(false);
+            await BeginAsync(token).ConfigureAwait(false);
+        }
+        else
+        {
+            await StageR09UploadAsync(timing, pressure!, terrain, renderer, work.Generation, retained!, token)
+                .ConfigureAwait(false);
+            Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
+            await BeginAsync(token).ConfigureAwait(false);
+        }
         var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
         var prepared = renderer.TryPrepareVolumePublication(work.Generation, commit, [], out var preparation);
         if (prepared is null)
@@ -458,9 +486,12 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             _transitions = CountTransitions(lease);
         }
         var sequence = ++_sequence;
+        var submitted = timing is null ? 0 : Stopwatch.GetTimestamp();
         RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, camera));
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
-            pauseWhileMinimized: true).ConfigureAwait(false);
+            pauseWhileMinimized: true, r09Presentation: timing is null ? null :
+                new(timing.Path, "content", terrain, view, work.Generation, sequence)).ConfigureAwait(false);
+        var presented = timing is null ? 0 : Stopwatch.GetTimestamp();
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement reopened before the next BeginTick.");
         if (Props is { } props)
@@ -468,7 +499,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         _selection = selection;
         _fineBricks = CountFineBricks(selection);
         _views++;
-        Drain(terrain);
+        if (timing is null)
+            Drain(terrain);
+        else
+            await FinishR09Async(timing, terrain, work.Generation, sequence, view, submitted, presented, handoffStarted, token)
+                .ConfigureAwait(false);
         return true;
     }
 
@@ -494,9 +529,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         Task.Run(() =>
         {
             var started = BiomeMeasurements.Start();
-            var completed = work.Execute(token);
+            var result = work.Execute(token);
             BiomeMeasurements.Write(phase, started);
-            return completed;
+            return result;
         }, token);
 
     private static int CountFineBricks(VolumeStreamingSelection selection)
@@ -789,19 +824,32 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     }
 
     private async Task WaitAsync(D3D12Renderer renderer, Func<bool> ready, CancellationToken token,
-        bool pauseWhileMinimized = false)
+        bool pauseWhileMinimized = false, R09PresentationWait? r09Presentation = null)
     {
-        var remaining = TimeSpan.FromSeconds(30);
-        while (!ready())
+        try
         {
-            ReadHealthyRenderer(renderer);
-            var started = Stopwatch.GetTimestamp();
-            var paused = pauseWhileMinimized && window.Read().Phase == HostWindowPhase.Minimized;
-            await Task.Delay(8, token).ConfigureAwait(false);
-            if (!paused)
-                remaining -= Stopwatch.GetElapsedTime(started);
-            if (remaining <= TimeSpan.Zero && !ready())
-                throw new TimeoutException("Timed out waiting for terrain presentation or GPU preparation.");
+            var remaining = TimeSpan.FromSeconds(30);
+            while (!ready())
+            {
+                var state = renderer.Read();
+                if (state.Lifecycle == RendererLifecycle.Stopping &&
+                    r09Presentation is { Path: VolumeWorkClass.Movement } stopping)
+                    WriteR09PresentationWaitFailure(stopping, renderer, state);
+                RequireHealthyRenderer(state);
+                var started = Stopwatch.GetTimestamp();
+                var paused = pauseWhileMinimized && window.Read().Phase == HostWindowPhase.Minimized;
+                await Task.Delay(8, token).ConfigureAwait(false);
+                if (!paused)
+                    remaining -= Stopwatch.GetElapsedTime(started);
+                if (remaining <= TimeSpan.Zero && !ready())
+                    throw new TimeoutException("Timed out waiting for terrain presentation or GPU preparation.");
+            }
+        }
+        catch (Exception error) when (r09Presentation is { } presentation &&
+            error is (OperationCanceledException or TimeoutException))
+        {
+            WriteR09PresentationWaitFailure(presentation, renderer);
+            throw;
         }
     }
 

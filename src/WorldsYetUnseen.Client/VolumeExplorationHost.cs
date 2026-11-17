@@ -34,8 +34,11 @@ internal static partial class GameHost
         Task<bool> watchClose = Task.FromResult(false);
         D3D12Renderer? renderer = null;
         var measure = measureSunlight || scripted && BiomeMeasurements.Enabled;
-        using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure);
+        var measureR09 = scripted && flightSmoke && saveSmoke == "flight" &&
+            Environment.GetEnvironmentVariable("WYU_R09_LATENCY") == "1";
+        using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure, measureR09);
         VolumeStreamingCoordinator? terrain = null;
+        VolumeExploration? exploration = null;
         AlphaOverlay? overlay = null;
         PrototypeMouseLook? mouse = null;
         VolumeWorldSlot? slot = null;
@@ -94,24 +97,40 @@ internal static partial class GameHost
             }
             var world = runtime.OpenWorld(id, WorldQuota,
                 new BarrierSupervisorPolicy(WorldQuota.Diagnostics.RequiredEvidenceRecords), initial,
-                new ExplorationJobScope(), slot?.Checkpoint?.Tick ?? 0);
+                measureR09 ? new R09JobScope() : new ExplorationJobScope(), slot?.Checkpoint?.Tick ?? 0);
             var planet = slot?.Planet ?? (slot?.Cave is null
                 ? new ReferencePlanet(new Guid("d89e4d83-1228-4780-b2c4-1af37f48468e"), smokeSeed!.Value) : null);
             if (!scripted)
                 mouse = new PrototypeMouseLook(window, settings);
-            var exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld);
+            var retrySmoke = scripted ? Environment.GetEnvironmentVariable("WYU_HOST_RETRY_SMOKE") : null;
+            exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld)
+            {
+                VerifyTerrainRetries = retrySmoke == "1",
+                R09RenderHost = measureR09 ? renderHost : null,
+                ExhaustTerrainRetry = retrySmoke switch
+                {
+                    "Movement" => VolumeWorkClass.Movement,
+                    "FirstEdit" => VolumeWorkClass.FirstEdit,
+                    "Recovery" => VolumeWorkClass.Recovery,
+                    _ => null,
+                },
+            };
             var propsSmoke = scripted && Environment.GetEnvironmentVariable("WYU_WP16_SMOKE") == "1";
             if (planet is not null && (propsSmoke || !scripted && Environment.GetEnvironmentVariable("WYU_WP16") != "off"))
                 exploration.Props = renderHost.Props = new ReferenceProps(planet);
             if (planet is not null && (!scripted || BiomeMeasurements.UseBiomes || propsSmoke))
                 renderHost.SetBiomes(new ReferenceBiomes(planet));
+            if (measureR09)
+                terrain = exploration.CreateTerrain();
+            await using var earlyTerrain = terrain is null ? null
+                : await exploration.StartR09LookaheadAsync(terrain, saveSmoke, token).ConfigureAwait(false);
             if (planet is not null)
             {
                 var planStarted = BiomeMeasurements.Start();
                 ProceduralGlobe.Prepare();
                 BiomeMeasurements.Write("globe-plan", planStarted);
             }
-            terrain = exploration.CreateTerrain();
+            terrain ??= exploration.CreateTerrain();
             diagnostics?.Enter("GraphicsStartup");
             diagnostics?.CheckGraphics();
             await renderHost.NearAsync(terrain, token).ConfigureAwait(false);
@@ -160,7 +179,15 @@ internal static partial class GameHost
             {
                 try
                 {
-                    await renderHost.StopAsync().ConfigureAwait(false);
+                    try
+                    {
+                        if (measureR09 && exploration is not null)
+                            await exploration.StopR09JobsAsync().ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await renderHost.StopAsync().ConfigureAwait(false);
+                    }
                 }
                 finally
                 {
@@ -180,8 +207,12 @@ internal static partial class GameHost
         if (scripted)
         {
             DesktopSmoke.VerifyShutdown(renderer!, requireDebugLayer: !measure, requireNvidia: !useWarp, useWarp: useWarp);
-            if (terrain!.Statistics is not { Readers: 0, Generations: 0 })
+            if (terrain!.Statistics is not { Readers: 0, Generations: 0 } settled || settled.Used != default)
                 throw new InvalidOperationException("Exploration retained terrain after shutdown.");
+            if (measureR09)
+                exploration!.WriteR09SettledResources(renderer!, terrain.View.RendererEpoch, settled);
+            if (Environment.GetEnvironmentVariable("WYU_HOST_RETRY_SMOKE") is "1" or "Movement" or "FirstEdit" or "Recovery")
+                Console.WriteLine("WP11 HOST RETRY SETTLED terrain=0 readers=0 generations=0");
             Console.WriteLine(caveSmoke is null ? "PASS: WYU WP11 exploration, rebase and native shutdown."
                 : "PASS: WYU WP12 cave route and native shutdown.");
         }

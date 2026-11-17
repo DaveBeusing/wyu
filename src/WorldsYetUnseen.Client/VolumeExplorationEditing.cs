@@ -96,8 +96,10 @@ internal sealed partial class VolumeExploration
     }
 
     private async Task<bool> EditAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetWalkState state,
-        LatticeCoordinate center, VolumeBrushOperation operation, ushort material, CancellationToken token)
+        LatticeCoordinate center, VolumeBrushOperation operation, ushort material, CancellationToken token,
+        R09EarlyPrebuild? earlyPrebuild = null)
     {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var begin = await BeginAsync(token).ConfigureAwait(false);
         terrain.BeginTick(begin);
         var edit = new VolumeBrushIntent(begin.Tick, 1, _published.TerrainRevision,
@@ -109,14 +111,15 @@ internal sealed partial class VolumeExploration
             return false;
 
         var frame = terrain.View.Frame;
-        if (await LoadAsync(terrain, renderer, state.Position, state.Heading, frame, token, edit).ConfigureAwait(false))
+        if (await LoadAsync(terrain, renderer, state.Position, state.Heading, frame, token, edit,
+                operationStarted: started, earlyPrebuild: earlyPrebuild).ConfigureAwait(false))
         {
             if (!terrain.TryReadEdit(edit.Tick, edit.Id, out var status, out _) || status != VolumeEditStatus.Committed)
                 throw new InvalidOperationException("Terrain presented without a committed edit receipt.");
             return true;
         }
         terrain.RejectEdit(edit.Tick, edit.Id);
-        await LoadAsync(terrain, renderer, state.Position, state.Heading, frame, token).ConfigureAwait(false);
+        await LoadAsync(terrain, renderer, state.Position, state.Heading, frame, token, recovery: true).ConfigureAwait(false);
         return false;
     }
 

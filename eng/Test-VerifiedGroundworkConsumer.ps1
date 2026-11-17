@@ -13,13 +13,15 @@ param(
     [switch]$PrototypeSmoke,
     [switch]$PrototypeSaveSmoke,
     [string]$InstallerCompiler,
-    [string]$InstallerOutputDirectory
+    [string]$InstallerOutputDirectory,
+    [switch]$R09MeasurementInstaller
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ([bool]$InstallerCompiler -ne [bool]$InstallerOutputDirectory) {
     throw 'Specify InstallerCompiler and InstallerOutputDirectory together.'
 }
+if ($R09MeasurementInstaller -and !$InstallerCompiler) { throw 'The R09 installer requires the installer compiler and output directory.' }
 if ($InstallerCompiler) {
     $InstallerCompiler = (Resolve-Path -LiteralPath $InstallerCompiler).Path
     $InstallerOutputDirectory = [IO.Path]::GetFullPath($InstallerOutputDirectory)
@@ -306,7 +308,7 @@ try {
             & (Join-Path $PSScriptRoot 'Build-OfflineInstaller.ps1') -Compiler $InstallerCompiler `
                 -OutputDirectory $InstallerOutputDirectory -WorkDirectory $work -GroundworkVersion $ExpectedVersion `
                 -GroundworkCommit $ExpectedSourceCommit -GroundworkManifestHash $ExpectedManifestSha256 `
-                -GroundworkLicense (Join-Path $artifactRoot 'LICENSE')
+                -GroundworkLicense (Join-Path $artifactRoot 'LICENSE') -R09Measurement:$R09MeasurementInstaller
         }
         Write-Host "PASS: WYU consumed $($expectedIds.Count) verified Groundwork $ExpectedVersion packages with a fresh locked restore."
         $global:LASTEXITCODE = 0

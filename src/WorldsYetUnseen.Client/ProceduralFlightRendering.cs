@@ -13,12 +13,14 @@ namespace WorldsYetUnseen.Client;
 // A renderer Stop fences its owning runtime. Each successive graphics owner therefore
 // has its own bounded lifetime while the world and the HWND keep their original authority.
 internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, RuntimeTimingLimits timing,
-    ResourceQuota quota, bool measure) : IDisposable
+    ResourceQuota quota, bool measure, bool qualifyR09 = false) : IDisposable
 {
     private readonly ProcessResourceBudget _budget = new(new ProcessResourceLimits(1, quota));
     private RuntimeSafetyAuthority? _runtime;
-    private readonly D3D12DeviceSession _device = new(new(!measure, true), warp, reuseDirectQueue: true);
+    private readonly D3D12DeviceSession _device = new(
+        new D3D12DiagnosticsOptions(!measure, true) { EnableResourceSnapshots = qualifyR09 }, warp, reuseDirectQueue: true);
     internal D3D12Renderer? Current { get; private set; }
+    internal R09NativeUploadGate? R09UploadGate { get; private set; }
     private VolumeTerrainColorEvaluator? _colorEvaluator;
     internal ReferenceProps? Props { get; set; }
     internal ReferenceBiomes? Biomes { get; private set; }
@@ -32,14 +34,16 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     }
     internal D3D12Renderer Active => Current ?? throw new InvalidOperationException("No active planet renderer.");
 
-    internal Task NearAsync(VolumeStreamingCoordinator terrain, CancellationToken token) =>
+    internal Task NearAsync(VolumeStreamingCoordinator terrain, CancellationToken token, Action? onStarted = null) =>
         StartAsync(owner =>
         {
             var renderer = D3D12Renderer.CreateWithSessionVolumeTerrain(window, owner, terrain,
                 terrain.View.RendererEpoch, _device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
+            if (qualifyR09)
+                R09UploadGate = R09NativeUploadGate.Attach(renderer);
             Props?.Attach(renderer);
             return renderer;
-        }, token);
+        }, token, onStarted);
 
     internal Task FarAsync(RenderMeshPair globe, CancellationToken token) =>
         StartAsync(owner => D3D12Renderer.CreateWithSessionMeshes(window, owner, globe, _device,
@@ -47,7 +51,8 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
 
     public void Dispose() => _device.Dispose();
 
-    private async Task StartAsync(Func<IRuntimeOwnership, D3D12Renderer> create, CancellationToken token)
+    private async Task StartAsync(Func<IRuntimeOwnership, D3D12Renderer> create, CancellationToken token,
+        Action? onStarted = null)
     {
         if (_runtime is not null || Current is not null)
             throw new InvalidOperationException("The previous graphics owner must settle before handoff.");
@@ -59,6 +64,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
         var context = new EngineModuleContext(clock, timing, _runtime.Reporter, _runtime.StopControl);
         await Current.InitializeAsync(context, token).ConfigureAwait(false);
         await Current.StartAsync(token).ConfigureAwait(false);
+        onStarted?.Invoke();
     }
 
     internal async Task StopAsync(bool qualifyHandoff = false)
@@ -84,6 +90,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
             throw new InvalidOperationException("The planet renderer did not settle for handoff.");
         _runtime = null;
         Current = null;
+        R09UploadGate = null;
         if (qualifyHandoff && renderer is not null)
             DesktopSmoke.VerifyAdapterSettlement(renderer, requireDebugLayer: !measure, requireNvidia: !warp,
                 useWarp: warp, allowRetainedSessionQueue: true);

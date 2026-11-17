@@ -2,7 +2,7 @@
 
 Select New V3 World in Planet worlds to open Ember Ridges, seed 42. Its WYUVOL03 manifest dispatches to the connected geology recipe. The existing V1 and Ember Caves V2 selections retain their own manifests and recipes. F6 checks the current published terrain for an exterior launch surface. The first contact from exterior air must be at the feet, face outward, and have clearance for the player capsule. Underground or unresolved coverage blocks takeoff. V3 saves the cave inventory, depletion, terrain edits and player pose. It does not store the separate V1 craft-touchdown receipt.
 
-WYU pins all ten packages to 0.1.0-dev.43632281999.1 from Groundwork master 905c5682f2988bcd0b74ebeafc01f03ee6b6f01c. [Immutable archive](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.43632281999.1-immutable-complete)
+WYU pins all ten packages to 0.1.0-dev.44118138137.1 from Groundwork master 0d77be0c5da2b9f3ff075a916ead7fa73ac3593f. [Immutable archive](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.44118138137.1-immutable-complete)
 
 Run eng/Test-ConnectedRelief.ps1 after a verified Windows Release build. The two-process route rejects takeoff under the cave roof and qualifies takeoff after the climb. It compares radial heights in the published near collision mesh and the actual orbital render mesh at three matching directions. The near fixture publishes unedited terrain away from the cave route. The tolerance is 0.12 m at each point.
 

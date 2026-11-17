@@ -79,6 +79,8 @@ internal sealed partial class VolumeExploration
         var far = false;
         var usedFar = false;
         var skySmoke = scripted && Environment.GetEnvironmentVariable("WYU_PACKAGE_G_SMOKE") == "1";
+        var recoveryAtHandoff = MeasureR09 && scripted &&
+            Environment.GetEnvironmentVariable("WYU_R09_RECOVERY_AT_HANDOFF") == "1";
         var orbitSkyChecked = false;
         var previousPhase = flight.Phase;
         using var returnCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -113,23 +115,36 @@ internal sealed partial class VolumeExploration
                     {
                         transitionStarted = BiomeMeasurements.Start();
                         transition = "to-ground";
+                        var handoffStarted = MeasureR09 ? Stopwatch.GetTimestamp() : 0;
+                        // Freeze flight at the normal return boundary before starting measured Recovery.
+                        if (recoveryAtHandoff)
+                            returnTerrain = await PrepareFlightReturnAsync(terrain, player, center, revision,
+                                returnCancellation.Token, handoffStarted).ConfigureAwait(false);
                         if (skySmoke)
                         {
                             handoffTick = checked(_environmentTick + (ulong)flight.Tick);
                             beforeSky = await CaptureFlightSkyAsync(renderHost.Active, terrain.View, flight.State.Position,
                                 player.Heading, handoffTick.Value, far: true, token).ConfigureAwait(false);
                         }
+                        var recoveryTiming = returnTerrain?.Timing;
                         var stopStarted = BiomeMeasurements.Start();
+                        if (recoveryTiming is not null)
+                            recoveryTiming.FarRendererStopStarted = Stopwatch.GetTimestamp();
                         await renderHost.StopAsync(qualifyHandoff: scripted).ConfigureAwait(false);
+                        if (recoveryTiming is not null)
+                            recoveryTiming.FarRendererStopped = Stopwatch.GetTimestamp();
                         BiomeMeasurements.Write("far-stop", stopStarted);
                         var prepared = returnTerrain ?? throw new InvalidOperationException("Return terrain was not staged.");
-                        var nearReady = renderHost.NearAsync(terrain, token);
+                        if (recoveryTiming is not null)
+                            recoveryTiming.GroundRendererStartupStarted = Stopwatch.GetTimestamp();
+                        var nearReady = renderHost.NearAsync(terrain, token,
+                            recoveryTiming is null ? null : recoveryTiming.RecordGroundRendererStarted);
                         try
                         {
                             await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, prepared.View.Frame, token,
                                 coverageCenter: center, flightCamera: flight.State.Position, supportCells: FlightSupportCells,
                                 rendererReady: nearReady, returnTerrain: prepared,
-                                flightTick: checked(_environmentTick + (ulong)flight.Tick)).ConfigureAwait(false);
+                                flightTick: checked(_environmentTick + (ulong)flight.Tick), handoffStarted: handoffStarted).ConfigureAwait(false);
                         }
                         finally
                         {
@@ -248,8 +263,8 @@ internal sealed partial class VolumeExploration
                 BiomeMeasurements.Write("orbit", frameStarted);
                 if (transition is not null)
                     BiomeMeasurements.Write(transition, transitionStarted);
-                if (far && returnTerrain is null)
-                    returnTerrain = PrepareFlightReturn(terrain, player, center, revision, returnCancellation.Token);
+                if (far && returnTerrain is null && !recoveryAtHandoff)
+                    returnTerrain = await PrepareFlightReturnAsync(terrain, player, center, revision, returnCancellation.Token).ConfigureAwait(false);
                 if (abortAtFar && far)
                     return (player, true);
                 if (!scripted)
@@ -267,6 +282,7 @@ internal sealed partial class VolumeExploration
             {
                 await returnCancellation.CancelAsync().ConfigureAwait(false);
                 await ((Task)pending.Generated).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                pending.Pressure?.Dispose();
                 pending.Work.Dispose();
             }
             // Both CPU workers settle before the host retires terrain or the window.
@@ -288,22 +304,35 @@ internal sealed partial class VolumeExploration
     }
 
     private sealed record FlightReturnTerrain(VolumeViewIdentity View, ulong Revision, VolumeStreamingSelection Selection,
-        VolumeStreamingWork Work, Task<bool> Generated);
+        VolumeStreamingWork Work, Task<bool> Generated, R09Timing? Timing, R09Pressure? Pressure);
 
-    private FlightReturnTerrain PrepareFlightReturn(VolumeStreamingCoordinator terrain, PlanetWalkState player,
-        PlanetVector center, ulong revision, CancellationToken token)
+    private async Task<FlightReturnTerrain> PrepareFlightReturnAsync(VolumeStreamingCoordinator terrain, PlanetWalkState player,
+        PlanetVector center, ulong revision, CancellationToken token, long? handoffStarted = null)
     {
+        var started = handoffStarted ?? Stopwatch.GetTimestamp();
+        var timing = StartR09(VolumeWorkClass.Recovery, started, recoveryAtHandoff: handoffStarted.HasValue);
         var previous = terrain.View;
         var frame = previous.Frame.TryRebase(player.Position, out var rebased) ? rebased : previous.Frame;
         var view = terrain.ChangeView(frame, checked(previous.RendererEpoch + 1));
         if (view.RendererEpoch <= previous.RendererEpoch || !terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Could not reserve the held return view.");
         var selection = SelectTerrain(center, player.Heading, supportCells: FlightSupportCells);
-        var admission = terrain.TryStage(VolumeWorkClass.Movement, selection, revision, revision, MeshBytes,
-            Charge(selection), Field, out var work);
+        var (work, admission) = await AdmitTerrainAsync(terrain,
+            new(VolumeWorkClass.Recovery, view, revision, revision, selection, null), started, token, timing).ConfigureAwait(false);
         if (admission != VolumeAdmission.Accepted || work is null)
             throw TerrainAdmissionFailure(admission);
-        return new(view, revision, selection, work, ExecuteTerrainAsync(work, token, "return-terrain-build"));
+        try
+        {
+            var pressure = timing is null ? null : await StartR09PressureAsync(token).ConfigureAwait(false);
+            var generated = pressure is null ? ExecuteTerrainAsync(work, token, "return-terrain-build")
+                : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token);
+            return new(view, revision, selection, work, generated, timing, pressure);
+        }
+        catch
+        {
+            work.Dispose();
+            throw;
+        }
     }
 
     private async Task<PlanetWalkState> PublishLandingAsync(VolumeStreamingCoordinator terrain, PlanetWalkState player,
