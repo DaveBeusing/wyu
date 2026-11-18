@@ -1,0 +1,133 @@
+diff --git a/src/Groundwork.Rendering.D3D12/D3D12RenderOwner.cs b/src/Groundwork.Rendering.D3D12/D3D12RenderOwner.cs
+index 475692a..d5b7f1a 100644
+--- a/src/Groundwork.Rendering.D3D12/D3D12RenderOwner.cs
++++ b/src/Groundwork.Rendering.D3D12/D3D12RenderOwner.cs
+@@ -15,6 +15,28 @@ public sealed partial class D3D12Renderer
+     internal Action<D3D12Renderer>? BeforeRetrySelectionForTests { private get; init; }
+     internal Func<long>? FirstContentTimestampForTests { private get; init; }
+ 
++    private Func<ulong, bool>? _shouldReadQualificationPresent;
++    private Action<ulong, int, int, byte[], float[]>? _captureQualificationPresent;
++
++    /// <summary>Observes selected WARP scene frames after Present succeeds and the GPU copy retires.</summary>
++    /// <remarks>
++    /// Configure once before startup. Both delegates run on the render owner. Selection can be retried
++    /// before a frame presents. The callback receives tightly packed RGBA8 and D32 data for that sequence.
++    /// </remarks>
++    public void ConfigureQualificationPresentReadback(Func<ulong, bool> shouldReadback,
++        Action<ulong, int, int, byte[], float[]> capture)
++    {
++        ArgumentNullException.ThrowIfNull(shouldReadback);
++        ArgumentNullException.ThrowIfNull(capture);
++        lock (_lifecycle)
++        {
++            if (!_useWarp || _threadStarted || _captureQualificationPresent is not null)
++                throw new InvalidOperationException("Configure qualification readback once before starting a WARP renderer.");
++            _shouldReadQualificationPresent = shouldReadback;
++            _captureQualificationPresent = capture;
++        }
++    }
++
+     private D3D12PropCells? _props;
+     // The render owner sets this only during the synchronous submit attempt for that registration.
+     private FirstContentRetry? _submittingFirstContentRetry;
+@@ -171,6 +193,8 @@ public sealed partial class D3D12Renderer
+         RenderFrame? volumePresented = null;
+         (ulong Identity, ulong Sequence, ulong Generation)? planetPresented = null;
+         AppearanceSubmission? appearancePresented = null;
++        ulong? qualificationPresented = null;
++        var lastQualificationSequence = 0UL;
+         FirstContentRetry? retry = null;
+         var executedFirst = 0UL;
+         var occluded = false;
+@@ -201,18 +225,19 @@ public sealed partial class D3D12Renderer
+                 pendingRetirement = false;
+                 if (ShouldStop(target))
+                     break;
++                OffscreenFrame? readback = null;
+                 if (volumePresented is { } retired)
+                 {
+                     RecordRetiredVolumeFrame(retired);
+                     if (retired.Scene.HasValue && VolumePresentReadbackForTests is { } capture)
+-                        capture(retired.Sequence, _volumeInstalled!.Info.Generation, gpu.ReadRetiredPresent());
++                        capture(retired.Sequence, _volumeInstalled!.Info.Generation, readback ??= gpu.ReadRetiredPresent());
+                     volumePresented = null;
+                 }
+                 if (appearancePresented is { } painted)
+                 {
+                     if (AppearancePresentReadbackForTests is not null || VolumePresentReadbackForTests is not null)
+                     {
+-                        var pixels = gpu.ReadRetiredPresent();
++                        var pixels = readback ??= gpu.ReadRetiredPresent();
+                         var sequence = painted.View.Frame.Sequence;
+                         var generation = painted.View.Registration.Info.Generation;
+                         AppearancePresentReadbackForTests?.Invoke(painted.Identity, sequence, generation, pixels);
+@@ -222,9 +247,16 @@ public sealed partial class D3D12Renderer
+                 }
+                 if (planetPresented is { } orbit)
+                 {
+-                    PlanetAppearanceReadbackForTests?.Invoke(orbit.Identity, orbit.Sequence, orbit.Generation, gpu.ReadRetiredPresent());
++                    PlanetAppearanceReadbackForTests?.Invoke(orbit.Identity, orbit.Sequence, orbit.Generation,
++                        readback ??= gpu.ReadRetiredPresent());
+                     planetPresented = null;
+                 }
++                if (qualificationPresented is { } qualificationSequence)
++                {
++                    qualificationPresented = null;
++                    lastQualificationSequence = qualificationSequence;
++                    (readback ??= gpu.ReadRetiredPresent()).Deliver(qualificationSequence, _captureQualificationPresent!);
++                }
+             }
+ 
+             if (_textureOwner is { HasSubmittedCopy: true } textures)
+@@ -422,7 +454,10 @@ public sealed partial class D3D12Renderer
+             var firstContent = appearanceOnly ? null : GetUnpresentedRegistration(frame);
+             var selectedRetry = retry is { } pending && ReferenceEquals(pending.Frame, firstContent) ? pending : (FirstContentRetry?)null;
+             var allowPropUploads = !servicedTextureBeforeFrame || retry.HasValue || HasProtectedTextureCompetition();
+-            var submission = TrySubmitFrame(gpu, target, chain, watchdog, frame, selectedRetry, appearance, planetAppearance, allowPropUploads);
++            var qualificationReadback = !appearanceOnly && frame.Scene.HasValue &&
++                frame.Sequence > lastQualificationSequence && _shouldReadQualificationPresent?.Invoke(frame.Sequence) == true;
++            var submission = TrySubmitFrame(gpu, target, chain, watchdog, frame, selectedRetry, appearance, planetAppearance,
++                allowPropUploads, qualificationReadback);
+             if (submission != GpuFrameSubmitResult.Submitted)
+             {
+                 if (!watchdog.Complete())
+@@ -480,6 +515,8 @@ public sealed partial class D3D12Renderer
+                 break;
+             if (result == PresentResult.Presented)
+             {
++                if (qualificationReadback)
++                    qualificationPresented = frame.Sequence;
+                 if (appearance is { } presented)
+                     appearancePresented = presented;
+                 else if (planetAppearance is { } planet)
+@@ -684,7 +721,7 @@ public sealed partial class D3D12Renderer
+ 
+     private GpuFrameSubmitResult TrySubmitFrame(GpuDevice gpu, WindowsPresentationTargetLease target, WindowsSwapChain chain,
+         RendererWatchdog watchdog, in RenderFrame frame, FirstContentRetry? retry, AppearanceSubmission? appearance,
+-        PlanetAppearanceSubmission? planetAppearance, bool allowPropUploads)
++        PlanetAppearanceSubmission? planetAppearance, bool allowPropUploads, bool qualificationReadback)
+     {
+         using var operation = TryBegin(target);
+         if (operation is null || !Matches(operation.Snapshot, chain) || !watchdog.TryAdvance(RendererStage.Submit))
+@@ -726,7 +763,7 @@ public sealed partial class D3D12Renderer
+         gpu.AllowPropUploads = allowPropUploads;
+         try
+         {
+-            return frame.Scene.HasValue && (VolumePresentReadbackForTests is not null ||
++            return frame.Scene.HasValue && (qualificationReadback || VolumePresentReadbackForTests is not null ||
+                 appearance.HasValue && AppearancePresentReadbackForTests is not null || PlanetAppearanceReadbackForTests is not null)
+                 ? gpu.TryRenderWithPresentReadback(chain.CurrentBuffer, frame, this)
+                 : gpu.TryRender(chain.CurrentBuffer, frame, this);
+diff --git a/src/Groundwork.Rendering.D3D12/GpuReadback.cs b/src/Groundwork.Rendering.D3D12/GpuReadback.cs
+index 29585c8..3d4613a 100644
+--- a/src/Groundwork.Rendering.D3D12/GpuReadback.cs
++++ b/src/Groundwork.Rendering.D3D12/GpuReadback.cs
+@@ -202,4 +202,7 @@ internal sealed class OffscreenFrame(int width, byte[] colors, float[] depths)
+ {
+     internal ReadOnlySpan<byte> ColorAt(int x, int y) => colors.AsSpan((y * width + x) * 4, 4);
+     internal float DepthAt(int x, int y) => depths[y * width + x];
++
++    internal void Deliver(ulong sequence, Action<ulong, int, int, byte[], float[]> capture) =>
++        capture(sequence, width, depths.Length / width, colors, depths);
+ }

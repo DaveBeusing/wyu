@@ -20,6 +20,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     private readonly D3D12DeviceSession _device = new(
         new D3D12DiagnosticsOptions(!measure, true) { EnableResourceSnapshots = qualifyR09 }, warp, reuseDirectQueue: true);
     internal D3D12Renderer? Current { get; private set; }
+    internal Wp11WarpReadback? WarpReadback { get; init; }
     internal R09NativeUploadGate? R09UploadGate { get; private set; }
     private VolumeTerrainColorEvaluator? _colorEvaluator;
     internal ReferenceProps? Props { get; set; }
@@ -29,6 +30,8 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     {
         Biomes = biomes;
         _colorEvaluator = [MethodImpl(MethodImplOptions.AggressiveOptimization)] (position, material) => biomes.Color(position, material);
+        if (WarpReadback is { } readback)
+            readback.ColorEvaluator = _colorEvaluator;
         RuntimeHelpers.PrepareDelegate(_colorEvaluator);
         _ = _colorEvaluator(default, (ushort)ReferenceTerrainMaterial.Basalt);
     }
@@ -61,6 +64,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
         var clock = TimeProvider.System;
         _runtime = RuntimeSafetyAuthority.Create(clock, timing, reservation);
         Current = create(_runtime.RuntimeOwnership);
+        WarpReadback?.Attach(Current);
         var context = new EngineModuleContext(clock, timing, _runtime.Reporter, _runtime.StopControl);
         await Current.InitializeAsync(context, token).ConfigureAwait(false);
         await Current.StartAsync(token).ConfigureAwait(false);
@@ -242,6 +246,16 @@ internal static class ProceduralGlobe
         for (var i = 0; i < order.Length; i++)
             indices[i] = offset + order[i];
         colors.Fill(0xff19eaffu);
+    }
+
+    internal static Vector3 MarkerAimPoint(RenderMeshPair globe)
+    {
+        var markerMesh = globe.Second;
+        var positions = markerMesh.Mesh.Positions;
+        var triangle = markerMesh.Mesh.Indices[^6..^3];
+        // Aim inside one triangle to avoid rasterization ties along the diamond's diagonal.
+        return (positions[(int)triangle[0]] + positions[(int)triangle[1]] + positions[(int)triangle[2]]) / 3 +
+            markerMesh.Translation;
     }
 
     internal const float FieldOfView = 1.05f;

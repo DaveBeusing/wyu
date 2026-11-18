@@ -36,7 +36,11 @@ internal static partial class GameHost
         var measure = measureSunlight || scripted && BiomeMeasurements.Enabled;
         var measureR09 = scripted && flightSmoke && saveSmoke == "flight" &&
             Environment.GetEnvironmentVariable("WYU_R09_LATENCY") == "1";
-        using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure, measureR09);
+        using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure, measureR09)
+        {
+            WarpReadback = flightSmoke && saveSmoke is "readback" or "marker-readback"
+                ? new Wp11WarpReadback(saveRoot!, markerOnly: saveSmoke == "marker-readback") : null,
+        };
         VolumeStreamingCoordinator? terrain = null;
         VolumeExploration? exploration = null;
         AlphaOverlay? overlay = null;
@@ -64,7 +68,7 @@ internal static partial class GameHost
             else if (caveSmoke is not null)
                 slot = await OpenCaveSmokeSlotAsync(saveRoot!, caveSmoke, token).ConfigureAwait(false);
             else if (saveSmoke is not null)
-                slot = await OpenVolumeSmokeSlotAsync(saveRoot!, saveSmoke is "flight" or "abort" ? "init" : saveSmoke,
+                slot = await OpenVolumeSmokeSlotAsync(saveRoot!, saveSmoke is "flight" or "abort" or "readback" or "marker-readback" ? "init" : saveSmoke,
                     token, flightSmoke ? smokeSeed ?? 42 : 42)
                     .ConfigureAwait(false);
             if (!scripted && slot is null)
