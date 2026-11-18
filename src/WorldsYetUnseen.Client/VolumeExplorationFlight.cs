@@ -78,6 +78,8 @@ internal sealed partial class VolumeExploration
         }, token);
         var far = false;
         var usedFar = false;
+        var warpReadback = renderHost.WarpReadback;
+        var orbitReadback = false;
         var skySmoke = scripted && Environment.GetEnvironmentVariable("WYU_PACKAGE_G_SMOKE") == "1";
         var recoveryAtHandoff = MeasureR09 && scripted &&
             Environment.GetEnvironmentVariable("WYU_R09_RECOVERY_AT_HANDOFF") == "1";
@@ -126,6 +128,9 @@ internal sealed partial class VolumeExploration
                             beforeSky = await CaptureFlightSkyAsync(renderHost.Active, terrain.View, flight.State.Position,
                                 player.Heading, handoffTick.Value, far: true, token).ConfigureAwait(false);
                         }
+                        if (warpReadback is not null)
+                            await CaptureHandoffAsync(warpReadback, "far-before-return", renderHost.Active, terrain, player,
+                                flight, digest, pad, await globeTask.ConfigureAwait(false), token).ConfigureAwait(false);
                         var recoveryTiming = returnTerrain?.Timing;
                         var stopStarted = BiomeMeasurements.Start();
                         if (recoveryTiming is not null)
@@ -144,7 +149,8 @@ internal sealed partial class VolumeExploration
                             await LoadAsync(terrain, renderHost.Active, player.Position, player.Heading, prepared.View.Frame, token,
                                 coverageCenter: center, flightCamera: flight.State.Position, supportCells: FlightSupportCells,
                                 rendererReady: nearReady, returnTerrain: prepared,
-                                flightTick: checked(_environmentTick + (ulong)flight.Tick), handoffStarted: handoffStarted).ConfigureAwait(false);
+                                flightTick: checked(_environmentTick + (ulong)flight.Tick), handoffStarted: handoffStarted,
+                                warpReturn: warpReadback is null ? null : new(warpReadback, flight.Tick, digest, pad)).ConfigureAwait(false);
                         }
                         finally
                         {
@@ -189,12 +195,24 @@ internal sealed partial class VolumeExploration
                                 player.Heading, handoffTick.Value, far: false, token).ConfigureAwait(false);
                         }
                         var globe = await globeTask.ConfigureAwait(false);
+                        if (warpReadback is { MarkerOnly: false })
+                            await CaptureHandoffAsync(warpReadback, "near-before-ascent", renderHost.Active, terrain, player,
+                                flight, digest, pad, null, token).ConfigureAwait(false);
                         await renderHost.StopAsync(qualifyHandoff: scripted).ConfigureAwait(false);
                         if (terrain.Statistics is not { MovementHeld: true, Readers: 0 })
                             throw new InvalidOperationException("The near renderer retained collision readers during the far handoff.");
                         await renderHost.FarAsync(globe, token).ConfigureAwait(false);
                         far = true;
                         usedFar = true;
+                        if (warpReadback is { MarkerOnly: true })
+                        {
+                            await CaptureHandoffAsync(warpReadback, "landing-marker", renderHost.Active, terrain, player,
+                                flight, digest, pad, globe, token).ConfigureAwait(false);
+                            return (player, true);
+                        }
+                        if (warpReadback is not null)
+                            await CaptureHandoffAsync(warpReadback, "far-after-ascent", renderHost.Active, terrain, player,
+                                flight, digest, pad, globe, token).ConfigureAwait(false);
                         if (beforeSky is not null)
                         {
                             var pixels = await CaptureFlightSkyAsync(renderHost.Active, terrain.View, next.Position,
@@ -224,9 +242,7 @@ internal sealed partial class VolumeExploration
                 var presentationTick = fraction == 1 ? tick : tick - 1;
                 var subTick = fraction == 1 ? 0 : fraction;
                 var camera = FlightCamera(terrain.View, flight.State.Position, player.Heading, presentationTick, subTick);
-                var orbit = camera.Sky is not null ? ProceduralGlobe.Frame(sequence, camera) :
-                    ProceduralGlobe.LegacyFrame(sequence, flight.State.Position, player.Heading,
-                        Atmosphere(FlightEye(flight.State.Position), presentationTick, subTick));
+                var orbit = GlobeFrame(sequence, camera, flight.State.Position, player.Heading, presentationTick, subTick);
                 if (scripted && _weather is not null)
                 {
                     if (camera.Fog is not { } fog || (far && fog.MaxOpacity != 0))
@@ -240,6 +256,9 @@ internal sealed partial class VolumeExploration
                     if (flight.Phase == ProceduralFlightPhase.Landed && fog.MaxOpacity <= 0)
                         throw new InvalidOperationException("Local fog did not return after descent.");
                 }
+                var sampleOrbit = warpReadback is not null && !orbitReadback && far && flight.Phase == ProceduralFlightPhase.Orbit;
+                if (sampleOrbit)
+                    warpReadback!.Arm("orbit-globe", sequence);
                 if (far)
                     RequireFrame(renderer.TrySubmit(orbit));
                 else
@@ -250,6 +269,19 @@ internal sealed partial class VolumeExploration
                 if (scripted || flight.Phase == ProceduralFlightPhase.Landed)
                     await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
                         pauseWhileMinimized: true).ConfigureAwait(false);
+                if (sampleOrbit)
+                {
+                    await warpReadback!.CompleteAsync(renderer, terrain, _published,
+                        new(Descriptor.Seed, flight.Tick, presentationTick, subTick, digest, pad, null, orbit.Scene!.Value, false),
+                        await globeTask.ConfigureAwait(false), token).ConfigureAwait(false);
+                    orbitReadback = true;
+                }
+                if (warpReadback is not null && flight.Phase == ProceduralFlightPhase.FinalApproach)
+                {
+                    await CaptureEditedApproachAsync(warpReadback, renderer, terrain, flight, camera, player.Heading,
+                        digest, pad, token).ConfigureAwait(false);
+                    return (player, true);
+                }
                 if (skySmoke && (transition is not null || !orbitSkyChecked && flight.Phase == ProceduralFlightPhase.Orbit))
                 {
                     var checkpoint = transition ?? "orbit";
@@ -305,6 +337,81 @@ internal sealed partial class VolumeExploration
 
     private sealed record FlightReturnTerrain(VolumeViewIdentity View, ulong Revision, VolumeStreamingSelection Selection,
         VolumeStreamingWork Work, Task<bool> Generated, R09Timing? Timing, R09Pressure? Pressure);
+
+    private sealed record FlightReturnReadback(Wp11WarpReadback Readback, int Tick, string Digest, PlanetVector Pad);
+
+    private RenderFrame GlobeFrame(ulong sequence, VolumeCamera camera, PlanetVector craft, PlanetVector heading,
+        ulong tick, double fraction) => camera.Sky is not null ? ProceduralGlobe.Frame(sequence, camera) :
+        ProceduralGlobe.LegacyFrame(sequence, craft, heading, Atmosphere(FlightEye(craft), tick, fraction));
+
+    private async Task CaptureHandoffAsync(Wp11WarpReadback readback, string checkpoint, D3D12Renderer renderer,
+        VolumeStreamingCoordinator terrain, PlanetWalkState player, ProceduralFlight flight, string digest, PlanetVector pad,
+        RenderMeshPair? globe, CancellationToken token)
+    {
+        var sequence = ++_sequence;
+        var tick = checked(_environmentTick + (ulong)flight.Tick);
+        var camera = FlightCamera(terrain.View, flight.State.Position, player.Heading, tick);
+        readback.Arm(checkpoint, sequence);
+        if (globe is not null)
+        {
+            if (readback.MarkerOnly)
+            {
+                var forward = Vector3.Normalize(ProceduralGlobe.MarkerAimPoint(globe) - ProceduralGlobe.Float(camera.Position));
+                var tangent = ProceduralGlobe.Float(player.Heading);
+                var up = Vector3.Normalize(tangent - forward * Vector3.Dot(forward, tangent));
+                camera = ApplySky(camera with { Forward = forward, Up = up }, tick, 0);
+            }
+            var frame = readback.MarkerOnly ? ProceduralGlobe.Frame(sequence, camera) :
+                GlobeFrame(sequence, camera, flight.State.Position, player.Heading, tick, 0);
+            RequireFrame(renderer.TrySubmit(frame));
+            await readback.CompleteAsync(renderer, terrain, _published,
+                new(Descriptor.Seed, flight.Tick, tick, 0, digest, pad, null, frame.Scene!.Value, false, readback.MarkerOnly), globe, token)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            camera = ApplySunlight(camera, tick, 0);
+            RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, camera));
+            await CompleteNearReadbackAsync(readback, renderer, terrain, camera, flight.Tick, tick, 0, digest, pad, false, token)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private async Task CaptureEditedApproachAsync(Wp11WarpReadback readback, D3D12Renderer renderer,
+        VolumeStreamingCoordinator terrain, ProceduralFlight flight, VolumeCamera flightCamera, PlanetVector heading,
+        string digest, PlanetVector pad, CancellationToken token)
+    {
+        // Keep the actual approach eye. The regular flight tilt can put the pad below the viewport.
+        var tick = checked(_environmentTick + (ulong)flight.Tick);
+        var forward = Vector3.Normalize(ProceduralGlobe.Float(Subtract(pad, flightCamera.Position)));
+        var tangent = ProceduralGlobe.Float(heading);
+        var up = Vector3.Normalize(tangent - forward * Vector3.Dot(forward, tangent));
+        var camera = ApplySunlight(ApplySky(FlightCamera(terrain.View, flight.State.Position, heading, tick) with
+        {
+            Forward = forward,
+            Up = up,
+        }, tick, 0), tick, 0);
+        var sequence = ++_sequence;
+        readback.Arm("edited-final-approach", sequence);
+        RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, camera));
+        await CompleteNearReadbackAsync(readback, renderer, terrain, camera, flight.Tick, tick, 0, digest, pad, true, token)
+            .ConfigureAwait(false);
+    }
+
+    private Task CompleteNearReadbackAsync(Wp11WarpReadback readback, D3D12Renderer renderer,
+        VolumeStreamingCoordinator terrain, VolumeCamera camera, int flightTick, ulong tick, double fraction,
+        string digest, PlanetVector pad, bool aimedAtEdit, CancellationToken token)
+    {
+        var origin = camera.View.Frame;
+        var view = Matrix4x4.CreateLookTo(origin.ToLocal(camera.Position), camera.Forward, camera.Up);
+        var scene = new RenderScene(Matrix4x4.Identity, camera.Tint, view, camera.FieldOfView, camera.NearPlane, camera.FarPlane)
+        {
+            Fog = camera.Fog,
+            Sunlight = camera.Sunlight,
+        };
+        return readback.CompleteAsync(renderer, terrain, _published,
+            new(Descriptor.Seed, flightTick, tick, fraction, digest, pad, origin, scene, aimedAtEdit), null, token);
+    }
 
     private async Task<FlightReturnTerrain> PrepareFlightReturnAsync(VolumeStreamingCoordinator terrain, PlanetWalkState player,
         PlanetVector center, ulong revision, CancellationToken token, long? handoffStarted = null)

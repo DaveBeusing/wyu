@@ -47,3 +47,34 @@ retirement. The pinned
 provides the provider's WARP color and depth readback evidence, including the
 volumetric transition and rebase. The WYU route checks Present and recovery
 on the actual generated planet.
+
+## Focused WARP readback
+
+The diagnostic starts seed 42 with a fresh fixture, crosses both renderer
+handoffs, and ends at the edited final approach. It reads RGBA8 and D32 from
+the same retired WARP Present at each boundary, on orbit, and from the actual
+approach eye aimed at the measured pad. The return probe captures the first
+published Near content frame after the loading mask. The samples compare
+projected globe geometry and colors, and check the edited pad against its
+published mesh palette and collision hit. Each renderer uses its own
+projection for depth verification.
+
+Use `eng/Build-Wp11WarpReadbackProvider.ps1` to build the diagnostic provider
+from Groundwork `49497e4`. Supply the Groundwork Git directory, verified
+release package directory, pinned DXC and TerraFX archives, and a fresh
+output directory. The build verifies stock shader provenance. Check out the
+diagnostic changes in a WYU clone that contains the pinned `24c6c14` source
+tree. Run `eng/Test-Wp11WarpPresentReadback.ps1` on an interactive Windows
+desktop with Graphics Tools. Pass the provider output as `-ProviderBuild`
+and a local NuGet cache containing the verified archives as `-PackageCache`.
+
+The runner builds in a fresh directory from the pinned source plus the
+diagnostic files. It preserves the original package cache and records both
+the stock and loaded provider hashes. The output contains the raw GPU
+attachments, per-Present JSON, assembly provenance, and a checksummed
+`evidence.json` after all six probes and native shutdown pass.
+
+Pass `-LandingMarkerOnly` to take one additional probe on the first Far
+renderer and exit after it retires. The view keeps the ascent eye and aims
+inside a marker triangle. Its GPU color and depth are checked against the
+marker mesh, with the globe terrain behind it as a control on the same ray.
