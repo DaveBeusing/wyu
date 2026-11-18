@@ -25,7 +25,9 @@ internal static partial class GameHost
         var runtime = RuntimeSafetyAuthority.Create(clock, timing, reservation);
         var context = new EngineModuleContext(clock, timing, runtime.Reporter, runtime.StopControl);
         var scripted = smokeSeed.HasValue || saveSmoke is not null || caveSmoke is not null;
-        var orbitSmoke = scripted && caveSmoke is null && Environment.GetEnvironmentVariable("WYU_ORBIT_DEMO_SMOKE") == "1";
+        var readbackSmoke = flightSmoke && saveSmoke is "readback" or "marker-readback";
+        var orbitSmoke = scripted && !readbackSmoke && caveSmoke is null &&
+            Environment.GetEnvironmentVariable("WYU_ORBIT_DEMO_SMOKE") == "1";
         var measureSunlight = scripted && Environment.GetEnvironmentVariable("WYU_WP15_PROBE") == "measure";
         var window = new WindowsHostModule(new WindowsHostOptions(
             scripted ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen — New World", 960, 540, 256),
@@ -37,7 +39,11 @@ internal static partial class GameHost
         var measure = measureSunlight || scripted && BiomeMeasurements.Enabled;
         var measureR09 = scripted && flightSmoke && saveSmoke == "flight" &&
             Environment.GetEnvironmentVariable("WYU_R09_LATENCY") == "1";
-        using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure, measureR09);
+        using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure, measureR09)
+        {
+            WarpReadback = readbackSmoke
+                ? new Wp11WarpReadback(saveRoot!, markerOnly: saveSmoke == "marker-readback") : null,
+        };
         VolumeStreamingCoordinator? terrain = null;
         VolumeExploration? exploration = null;
         AlphaOverlay? overlay = null;
@@ -65,7 +71,7 @@ internal static partial class GameHost
             else if (caveSmoke is not null)
                 slot = await OpenCaveSmokeSlotAsync(saveRoot!, caveSmoke, token).ConfigureAwait(false);
             else if (saveSmoke is not null)
-                slot = await OpenVolumeSmokeSlotAsync(saveRoot!, saveSmoke is "flight" or "abort" ? "init" : saveSmoke,
+                slot = await OpenVolumeSmokeSlotAsync(saveRoot!, readbackSmoke || saveSmoke is "flight" or "abort" ? "init" : saveSmoke,
                     token, flightSmoke ? smokeSeed ?? 42 : 42, orbitSmoke)
                     .ConfigureAwait(false);
             if (!scripted && slot is null)

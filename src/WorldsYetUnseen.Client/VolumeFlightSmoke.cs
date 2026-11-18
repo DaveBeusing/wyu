@@ -32,7 +32,10 @@ internal sealed partial class VolumeExploration
         if (skyRoute && phase == "flight")
             _environmentTick = twilightTick;
         var player = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
-        if (phase is "flight" or "abort")
+        var readback = phase is "readback" or "marker-readback";
+        if (readback && (skyRoute || MeasureR09 || BiomeMeasurements.Enabled))
+            throw new InvalidOperationException("The WARP readback requires the unmeasured edited-pad fixture.");
+        if (readback || phase is "flight" or "abort")
         {
             player = await CommitInitialSmokePoseAsync(terrain, player, token).ConfigureAwait(false);
             var anchor = skyRoute ? (PlanetVector?)null : new PlanetVector(21, 4105, 16);
@@ -75,9 +78,17 @@ internal sealed partial class VolumeExploration
                 Console.WriteLine(FormattableString.Invariant(
                     $"WP11 FLIGHT PAD before={Length(before):R} edited={Length(after):R} revision={_published.TerrainRevision}"));
             }
-            RequireSmokeSave(await SaveAsync(terrain, token).ConfigureAwait(false), 1);
+            if (!readback)
+                RequireSmokeSave(await SaveAsync(terrain, token).ConfigureAwait(false), 1);
             var abort = phase == "abort";
             var flight = await FlyAsync(terrain, renderHost, player, anchor, true, token, abortAtFar: abort).ConfigureAwait(false);
+            if (readback)
+            {
+                if (!flight.Quit || renderHost.WarpReadback is not { } qualification)
+                    throw new InvalidOperationException("The WARP readback did not end at its qualification checkpoint.");
+                qualification.VerifyComplete();
+                return;
+            }
             if (flight.Quit != abort)
                 throw new InvalidOperationException("The scripted route exited before touchdown.");
             if (abort)

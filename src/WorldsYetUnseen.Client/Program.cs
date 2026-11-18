@@ -12,6 +12,7 @@ internal static class Program
         if (args is ["--new-world"] or ["--free-test-world", _] || args is ["--planet-playtest", _] or ["--planet-playtest", _, "graphics" or "budget"] ||
             args is ["--volume-smoke", _, "warp" or "hardware"] ||
             args is ["--volume-save-smoke", "init" or "restore" or "interrupt" or "verify" or "protected", _] ||
+            args is ["--volume-flight-smoke", "readback" or "marker-readback", _, "warp"] ||
             args is ["--volume-flight-smoke", "flight" or "resume" or "abort" or "preflight" or "interrupt" or "interrupt-installed" or "resume-installed", _, "warp" or "hardware"] or
                 ["--volume-flight-smoke", "flight" or "resume", _, "warp" or "hardware", _])
             return await RunExplorationAsync(args).ConfigureAwait(false);

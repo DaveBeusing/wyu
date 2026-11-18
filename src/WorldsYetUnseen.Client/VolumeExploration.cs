@@ -370,7 +370,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
         Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null,
         bool recovery = false, long? operationStarted = null, long handoffStarted = 0,
-        R09EarlyPrebuild? earlyPrebuild = null)
+        R09EarlyPrebuild? earlyPrebuild = null, FlightReturnReadback? warpReturn = null)
     {
         var started = operationStarted ?? Stopwatch.GetTimestamp();
         var timing = returnTerrain?.Timing ?? StartR09(edit is not null ? VolumeWorkClass.FirstEdit :
@@ -498,10 +498,14 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
         var sequence = ++_sequence;
         var submitted = timing is null ? 0 : Stopwatch.GetTimestamp();
+        warpReturn?.Readback.Arm("near-after-return", sequence);
         RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, camera));
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
             pauseWhileMinimized: true, r09Presentation: timing is null ? null :
                 new(timing.Path, "content", terrain, view, work.Generation, sequence)).ConfigureAwait(false);
+        if (warpReturn is { } probe)
+            await CompleteNearReadbackAsync(probe.Readback, renderer, terrain, camera, probe.Tick, presentationTick, 0,
+                probe.Digest, probe.Pad, false, token).ConfigureAwait(false);
         var presented = timing is null ? 0 : Stopwatch.GetTimestamp();
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement reopened before the next BeginTick.");
