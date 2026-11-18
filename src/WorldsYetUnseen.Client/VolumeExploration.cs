@@ -18,7 +18,7 @@ internal sealed class PlanetLoadException(string message) : InvalidOperationExce
 
 internal sealed partial class VolumeExploration(WorldSafetyPorts world, ReferencePlanet? reference, WindowsHostModule window,
     AlphaOverlay? overlay, PrototypeMouseLook? mouse, VolumeWorldSlot? slot, AlphaDiagnostics? diagnostics,
-    bool freeTestWorld = false)
+    bool freeTestWorld = false, bool orbitDemo = false)
 {
     private long MeshBytes => cave is null ? 10 * 1024 * 1024 : 32 * 1024 * 1024;
     private long NativeBytes => cave is null ? 8 * 1024 * 1024 : 32 * 1024 * 1024;
@@ -36,7 +36,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private int _propPeakDraws;
     private int _propPeakInstances;
     private ulong _sequence;
-    private float _yaw, _pitch = -0.2f;
+    private float _yaw, _pitch = orbitDemo ? OrbitDemoPreset.Pitch : -0.2f;
     private bool _debug;
     private bool _testMenu;
     private int _testAction;
@@ -52,7 +52,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private ReferencePlanet planet => reference ?? throw new InvalidOperationException("This world uses cave geology.");
     private PlanetDescriptor Descriptor => cave?.Descriptor ?? planet.Descriptor;
     private IPlanetBrickSource Field => (IPlanetBrickSource?)cave?.Field ?? planet.Field;
-    private string PlanetName => cave is null ? ReferencePlanet.DisplayName : Connected ? CavePlanet.ConnectedName : CavePlanet.Name;
+    private string PlanetName => orbitDemo ? OrbitDemoPreset.DisplayName : cave is null ? ReferencePlanet.DisplayName : Connected ? CavePlanet.ConnectedName : CavePlanet.Name;
 
     internal VolumeStreamingCoordinator CreateTerrain(bool restore = true)
     {
@@ -327,6 +327,12 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 BiomeMeasurements.Write("ground", presentStarted);
             }
             Drain(terrain);
+            if (scripted && steps == 30 && orbitDemo && Environment.GetEnvironmentVariable("WYU_ORBIT_CAPTURE") == "1")
+            {
+                Console.WriteLine($"ORBIT CAPTURE READY step={steps} sequence={frame}");
+                await Task.Delay(TimeSpan.FromSeconds(35), token).ConfigureAwait(false);
+                previousFrame = Stopwatch.GetTimestamp();
+            }
             if (overlay is not null)
             {
                 overlay.Menu = ActiveCaveClimbHint ?? CurrentNotice ?? (prepared is null ? $"Movement held\n{status}" : cave is null ? null : CaveHint(terrain, state));
@@ -641,7 +647,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private static PlanetVector FlightEye(PlanetVector position) => Add(position, Scale(Unit(position), 2.6));
 
     private ReferenceAtmosphere? Atmosphere(PlanetVector position, ulong tick, double fraction = 0) =>
-        _weather?.Evaluate(position, tick, fraction) is { } weather
+        _weather?.Evaluate(position, tick, fraction, orbitDemo ? OrbitDemoPreset.SunDirection(tick, fraction) : null) is { } weather
             ? _testFog switch
             {
                 true => weather with { FogOpacity = 0.9f * (float)Math.Clamp((72 - (Length(position) - Descriptor.RadiusMeters)) / 40, 0, 1), FogStart = 24, FogEnd = 128 },
@@ -657,13 +663,14 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     }
 
     private VolumeCamera ApplySunlight(VolumeCamera camera, ulong tick, double fraction) =>
-        _weather is not null && ReferenceSunlight.Enabled ? ReferenceSunlight.Apply(camera, tick, fraction) : camera;
+        _weather is not null && (orbitDemo ? ReferenceSunlight.OrbitEnabled : ReferenceSunlight.Enabled)
+            ? ReferenceSunlight.Apply(camera, tick, fraction, orbitDemo) : camera;
 
     private VolumeCamera ApplySky(VolumeCamera camera, ulong tick, double fraction) =>
         reference is not null && ReferenceSky.Enabled ? camera with
         {
             Sky = ReferenceSky.Create(camera.Position, camera.Forward, camera.Up, camera.FieldOfView,
-                Descriptor.Seed, tick, fraction),
+                Descriptor.Seed, tick, fraction, orbitDemo ? OrbitDemoPreset.SunDirection(tick, fraction) : null),
         } : camera;
 
     private static VolumeCamera ApplyAtmosphere(VolumeCamera camera, ReferenceAtmosphere? weather)
@@ -879,6 +886,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
 
     private static readonly string[] WeatherTestActions =
         ["Daylight", "Night", "Clear weather", "Dense fog", "Regional weather"];
+    private static readonly string[] OrbitTestActions =
+        ["Sunset", "Night", "Clear weather", "Dense fog", "Regional weather"];
     private static readonly string[] CaveTestActions = ["Grant 16 Ember ore"];
 
     private async Task HandleTestMenuAsync(InputSnapshot input, CancellationToken token)
@@ -894,7 +903,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         // Build the list only while the menu is open. Profiles expose the features their live paths support.
         var actions = (_weather is not null, cave is not null) switch
         {
-            (true, _) => WeatherTestActions,
+            (true, _) => orbitDemo ? OrbitTestActions : WeatherTestActions,
             (_, true) => CaveTestActions,
             _ => Array.Empty<string>(),
         };

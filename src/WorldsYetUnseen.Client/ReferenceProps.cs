@@ -8,7 +8,7 @@ using static WorldsYetUnseen.Client.FlightVector;
 namespace WorldsYetUnseen.Client;
 
 /// <summary>Versioned Far Horizon placement in a planet-centred lattice.</summary>
-internal sealed class ReferenceProps(ReferencePlanet planet)
+internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder = false)
 {
     private const uint Recipe = 1;
     private const int CellSize = 8;
@@ -16,6 +16,8 @@ internal sealed class ReferenceProps(ReferencePlanet planet)
     private const int CellCount = 128;
     private const int Candidates = 8;
     private static readonly D3D12PropAsset[] Assets = CreateAssets();
+    private static readonly Lazy<D3D12PropAsset[]> OrbitAssets = new(CreateOrbitAssets);
+    private readonly D3D12PropAsset[] _assets = orbitBoulder ? OrbitAssets.Value : Assets;
     private readonly ReferenceBiomes _biomes = new(planet);
     private readonly Dictionary<PropCellKey, LatticeCoordinate[]> _supports = [];
     private D3D12PropCells? _stream;
@@ -35,7 +37,7 @@ internal sealed class ReferenceProps(ReferencePlanet planet)
     internal void Attach(D3D12Renderer renderer)
     {
         var stream = new D3D12PropCells(new(CellCount, CellCount, CellCount * Candidates, CellCount * Candidates, 8),
-            Candidates, planet.Descriptor.Seed, Recipe, Assets);
+            Candidates, planet.Descriptor.Seed, Recipe, _assets);
         renderer.AttachPropCells(stream);
         _stream = stream;
         _previous = default;
@@ -305,6 +307,13 @@ internal sealed class ReferenceProps(ReferencePlanet planet)
         new(new(3, 3, 4.5f, 128, 22, 28), Tree(7), Tree(4)),
         new(new(4, 4, 0.9f, 128, 17, 22), Cone(0.72f, 0, 0.46f, 6), Cone(0.72f, 0, 0.46f, 3)),
     ];
+
+    private static D3D12PropAsset[] CreateOrbitAssets()
+    {
+        var assets = (D3D12PropAsset[])Assets.Clone();
+        assets[1] = new(new(2, 2, 1.35f, 128, 18, 23), OrbitDemoPreset.LoadBoulder(0), OrbitDemoPreset.LoadBoulder(1));
+        return assets;
+    }
 
     private static RenderMesh Tuft(float height, float width, int blades)
     {

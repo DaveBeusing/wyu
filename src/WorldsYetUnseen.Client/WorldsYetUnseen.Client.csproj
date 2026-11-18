@@ -10,6 +10,7 @@
     <RootNamespace>WorldsYetUnseen.Client</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Assets/OrbitDemo/boulder_01_lod*.bin" />
     <AssemblyMetadata Include="WorkPackage" Value="WP03" />
     <ProjectReference Include="../WorldsYetUnseen.Gameplay/WorldsYetUnseen.Gameplay.csproj" />
   </ItemGroup>

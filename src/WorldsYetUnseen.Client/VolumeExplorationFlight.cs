@@ -224,7 +224,10 @@ internal sealed partial class VolumeExploration
                 var presentationTick = fraction == 1 ? tick : tick - 1;
                 var subTick = fraction == 1 ? 0 : fraction;
                 var camera = FlightCamera(terrain.View, flight.State.Position, player.Heading, presentationTick, subTick);
-                var orbit = camera.Sky is not null ? ProceduralGlobe.Frame(sequence, camera) :
+                var nearCamera = ApplySunlight(camera, presentationTick, subTick);
+                var orbitCamera = orbitDemo && nearCamera.Sunlight is { } sun
+                    ? camera with { Tint = ReferenceSunlight.GlobeTint(camera.Position, sun) } : camera;
+                var orbit = camera.Sky is not null || orbitDemo ? ProceduralGlobe.Frame(sequence, orbitCamera) :
                     ProceduralGlobe.LegacyFrame(sequence, flight.State.Position, player.Heading,
                         Atmosphere(FlightEye(flight.State.Position), presentationTick, subTick));
                 if (scripted && _weather is not null)
@@ -233,8 +236,9 @@ internal sealed partial class VolumeExploration
                         throw new InvalidOperationException("Flight weather did not fade at the orbit boundary.");
                     if (transition is not null)
                     {
-                        if (camera.ClearColor != orbit.ClearColor || camera.Tint != orbit.Scene!.Value.Tint ||
-                            camera.Sky != orbit.Sky)
+                        if (nearCamera.ClearColor != orbit.ClearColor || orbitCamera.Tint != orbit.Scene!.Value.Tint ||
+                            nearCamera.Sky != orbit.Sky ||
+                            (orbit.Sky is { } sky && nearCamera.Sunlight is { } light && sky.SunDirection != light.Direction))
                             throw new InvalidOperationException("Daylight changed at the renderer handoff.");
                     }
                     if (flight.Phase == ProceduralFlightPhase.Landed && fog.MaxOpacity <= 0)
@@ -245,7 +249,7 @@ internal sealed partial class VolumeExploration
                 else
                 {
                     Props?.Pump();
-                    RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, ApplySunlight(camera, presentationTick, subTick)));
+                    RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, nearCamera));
                 }
                 if (scripted || flight.Phase == ProceduralFlightPhase.Landed)
                     await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,

@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "licenseUrl": "https://polyhaven.com/license",
+  "cooking": {
+    "terrain": "512x512 RGBA8; 10 mips; 2x2 box with linear-light albedo and normalized DX normals; Groundwork.TextureCooker recipe 1",
+    "boulder": "Blender 5.2.2 LTS; weld at 0.00001 m, collapse decimation, centered Y-up WORB 1 mesh",
+    "groundworkPackage": "0.1.0-dev.44364420373.1",
+    "groundworkRenderingSha256": "8ddce73b84c1dfeb9fd35ce26f0e14d7efd22297a973c764aa022006e0238bc2"
+  },
+  "assets": [
+    {
+      "file": "rock_01_diff.gwtx",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/1k/rock_01/rock_01_diff_1k.png",
+      "license": "CC0-1.0",
+      "sourceSha256": "60404f5c3e505db17fc6501b3d0045e7aa6516e0baf08e81487f9a008a9c1dac",
+      "cookedSha256": "417ad5020b3891a363094f74d58afb9af2b131abe58b40fc86dc5cc826e2a610"
+    },
+    {
+      "file": "rock_01_normal.gwtx",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/1k/rock_01/rock_01_nor_dx_1k.png",
+      "license": "CC0-1.0",
+      "sourceSha256": "3f553c334f4c71479c11cac05086759dbb8250f5b1247ccbf403a188e31e6329",
+      "cookedSha256": "c754ce0c2fd6ceb41d981d3a48b37212cadaf793e5843834b5eca4502440bae2"
+    },
+    {
+      "file": "rock_01_rough.gwtx",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/1k/rock_01/rock_01_rough_1k.png",
+      "license": "CC0-1.0",
+      "sourceSha256": "6a99d084b3137ead2f6b76872d71148a8a912de9b7cf4f0509d7dc2515f9f938",
+      "cookedSha256": "dfe35d3f6dbb3bee39f4b994f48d00b36ad477742a78f89209baa6a982ba9765"
+    },
+    {
+      "file": "rocks_ground_05_diff.gwtx",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/1k/rocks_ground_05/rocks_ground_05_diff_1k.png",
+      "license": "CC0-1.0",
+      "sourceSha256": "eb25f853e38d4c43083921c330dce872df355071458ee0038a98088492e3f2d6",
+      "cookedSha256": "25d9ea06acdf42bb6aad3fa96d6f49d160ab4c74675d6649fc277d57bca0f240"
+    },
+    {
+      "file": "rocks_ground_05_normal.gwtx",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/1k/rocks_ground_05/rocks_ground_05_nor_dx_1k.png",
+      "license": "CC0-1.0",
+      "sourceSha256": "b096aa1f0a1d491828b5437d784dbd953452bf0d581b82e096eb73c3aeeb1a0b",
+      "cookedSha256": "f1defc84fe086a678f164efebd59410c7b3bef7ce0c9f744ed9791cf3d775c28"
+    },
+    {
+      "file": "rocks_ground_05_rough.gwtx",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Textures/png/1k/rocks_ground_05/rocks_ground_05_rough_1k.png",
+      "license": "CC0-1.0",
+      "sourceSha256": "47ad1ee100e98d1dbf62f9fe8060f617e92f7240fed36882ee9ca7da527d079b",
+      "cookedSha256": "1a57700a80a206f80a42260c3592db1d07273ff13b93f29331ac33c978db56ad"
+    },
+    {
+      "file": "boulder_01_lod0.bin",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/boulder_01/boulder_01_1k.gltf",
+      "license": "CC0-1.0",
+      "sourceSha256": "51487934db898b4c24072780a451e34eca5c02e3ada24a62bbc600bbc4019e92",
+      "sourceBufferUrl": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/boulder_01/boulder_01.bin",
+      "sourceBufferSha256": "7f5b06503d62bd95bfe9c6b8a354a5cc8ff04a4d271a8cf87a3e3125db4232d7",
+      "cookedSha256": "c44605fce6fad2f71c8096763ad6222fe40f82e31aeb23edf88210d185b8f948",
+      "triangles": 2496
+    },
+    {
+      "file": "boulder_01_lod1.bin",
+      "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/boulder_01/boulder_01_1k.gltf",
+      "license": "CC0-1.0",
+      "sourceSha256": "51487934db898b4c24072780a451e34eca5c02e3ada24a62bbc600bbc4019e92",
+      "sourceBufferUrl": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/boulder_01/boulder_01.bin",
+      "sourceBufferSha256": "7f5b06503d62bd95bfe9c6b8a354a5cc8ff04a4d271a8cf87a3e3125db4232d7",
+      "cookedSha256": "ab9c68d6097c319b8ba103c6f20bdea9766d06d6ad169ce6450f1528a4033192",
+      "triangles": 496
+    }
+  ],
+  "lightingReference": {
+    "sourceUrl": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/toposcope_sunset_1k.hdr",
+    "license": "CC0-1.0",
+    "sourceSha256": "9cd21b7c45380368a87fe6a0251461faae5dd94a81b9d570762a74972d553f12",
+    "use": "Offline reference for warm low sunlight and cool sky/shadow contrast"
+  }
+}
