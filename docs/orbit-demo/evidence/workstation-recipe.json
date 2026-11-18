@@ -1,0 +1,10 @@
+{
+  "AssemblySHA256": "DC18019002124D5FA6B4033FD8EBD71F196D75E832E95AFDEE5DF1BCCCAAD929",
+  "Command": "dotnet <assembly> --volume-smoke 42 hardware",
+  "ClockFrequency": 10000000,
+  "Seed": 42,
+  "WarmupFramesDiscarded": 40,
+  "PairCount": 5,
+  "Variant": "same-build Orbit Demo, Boulder replacement off/on",
+  "Method": "Observer QPC Submit to LastPresentedSequence receipt; not CPU/GPU execution or desktop display intervals"
+}

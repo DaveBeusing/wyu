@@ -327,9 +327,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 BiomeMeasurements.Write("ground", presentStarted);
             }
             Drain(terrain);
-            if (scripted && steps == 30 && orbitDemo && Environment.GetEnvironmentVariable("WYU_ORBIT_CAPTURE") == "1")
+            if (scripted && steps == 100 && orbitDemo && Environment.GetEnvironmentVariable("WYU_ORBIT_CAPTURE") == "1")
             {
-                Console.WriteLine($"ORBIT CAPTURE READY step={steps} sequence={frame}");
+                var propFrame = Props?.Read() ?? default;
+                if (propFrame.Instances == 0)
+                    throw new InvalidOperationException("Orbit capture reached its checkpoint before props were visible.");
+                Console.WriteLine($"ORBIT CAPTURE READY step={steps} sequence={frame} instances={propFrame.Instances}");
+                WriteCheckpoint("orbit-capture", state);
                 await Task.Delay(TimeSpan.FromSeconds(35), token).ConfigureAwait(false);
                 previousFrame = Stopwatch.GetTimestamp();
             }
