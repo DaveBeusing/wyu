@@ -33,6 +33,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private readonly ReferenceWeather? _weather = reference is null ||
         Environment.GetEnvironmentVariable("WYU_PACKAGE_E") == "off" ? null : new(reference);
     internal ReferenceProps? Props { get; set; }
+    internal ProceduralRenderHost? OrbitMaterialHost { get; init; }
     private int _propPeakDraws;
     private int _propPeakInstances;
     private ulong _sequence;
@@ -234,7 +235,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var next = terrain.View.Frame;
             if (next.TryRebase(state.Position, out var rebased))
             {
+                var crossingStarted = scripted && orbitDemo && OrbitPbrMeasurements.Enabled
+                    ? Stopwatch.GetTimestamp() : 0;
                 await LoadAsync(terrain, renderer, state.Position, state.Heading, rebased, token).ConfigureAwait(false);
+                OrbitPbrMeasurements.WriteCrossing(steps, _published.Generation, crossingStarted);
                 // A new tick must capture focus, surface and keys after the potentially long load.
                 continue;
             }
@@ -310,11 +314,16 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                     ? (_environmentTick - 1, fraction) : null);
             Props?.Pump();
             var frame = ++_sequence;
+            OrbitMaterialHost?.RetryMaterials(renderer, frame);
             var presentStarted = scripted ? BiomeMeasurements.Start() : 0;
             RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, frame, camera));
-            if (scripted && Props is { } props)
-            {
+            var scriptedProps = scripted ? Props : null;
+            if (scriptedProps is not null || presentStarted != 0)
                 await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= frame, token).ConfigureAwait(false);
+            var orbitReceipt = presentStarted != 0 && orbitDemo && OrbitPbrMeasurements.Enabled
+                ? Stopwatch.GetTimestamp() : 0;
+            if (scriptedProps is { } props)
+            {
                 var propsFrame = props.Read();
                 _propPeakDraws = Math.Max(_propPeakDraws, propsFrame.Draws);
                 _propPeakInstances = Math.Max(_propPeakInstances, propsFrame.Instances);
@@ -323,8 +332,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             }
             if (presentStarted != 0)
             {
-                await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= frame, token).ConfigureAwait(false);
                 BiomeMeasurements.Write("ground", presentStarted);
+                if (orbitReceipt != 0)
+                    OrbitPbrMeasurements.WriteFrame("surface", steps, frame, _published.Generation,
+                        presentStarted, orbitReceipt, renderer);
             }
             Drain(terrain);
             if (scripted && steps == 100 && orbitDemo && Environment.GetEnvironmentVariable("WYU_ORBIT_CAPTURE") == "1")
@@ -498,6 +509,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
         var sequence = ++_sequence;
         var submitted = timing is null ? 0 : Stopwatch.GetTimestamp();
+        // Later cuts can reuse resident maps without admitting any optional copy ahead of first content.
+        OrbitMaterialHost?.PublishSurfaceMaterials(renderer, terrain.WorldIdentity, _published, presented: false);
         warpReturn?.Readback.Arm("near-after-return", sequence);
         RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, camera));
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
@@ -509,6 +522,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var presented = timing is null ? 0 : Stopwatch.GetTimestamp();
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement reopened before the next BeginTick.");
+        OrbitMaterialHost?.PublishSurfaceMaterials(renderer, terrain.WorldIdentity, _published, presented: true);
         if (Props is { } props)
             props.Refresh(terrain, _published, selection, position, edit, token);
         _selection = selection;

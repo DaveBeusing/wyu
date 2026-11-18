@@ -4,17 +4,17 @@
     "net10.0": {
       "Groundwork.Voxels": {
         "type": "Direct",
-        "requested": "[0.1.0-dev.44364420373.1, 0.1.0-dev.44364420373.1]",
-        "resolved": "0.1.0-dev.44364420373.1",
-        "contentHash": "9YwmSq43egjVn5kA7Ij82xMaPzUMWf6o/iX0p9UVsCGIhtkxbp/uqaGaBooEGxIEP7L7GL9PAa6dGfQq0CpcAw==",
+        "requested": "[0.1.0-dev.44417404996.1, 0.1.0-dev.44417404996.1]",
+        "resolved": "0.1.0-dev.44417404996.1",
+        "contentHash": "mCxJGgkWHDVVjOocHjJSNYt4N6+rE4i4lpioAkh81g509RSNrdTJ5X9AeX2uBR8C6Gk81wBzhHywyyVXlHY5uw==",
         "dependencies": {
-          "Groundwork.Core": "0.1.0-dev.44364420373.1"
+          "Groundwork.Core": "0.1.0-dev.44417404996.1"
         }
       },
       "Groundwork.Core": {
         "type": "Transitive",
-        "resolved": "0.1.0-dev.44364420373.1",
-        "contentHash": "E/+pe5UgB8kXVla11X5ecFQPBBUeCUFs2jMmZQgJ5UOAUyB/eD4dkkCcvepwL0hOZAEHKpZHCQj8uVBn1p3PMQ=="
+        "resolved": "0.1.0-dev.44417404996.1",
+        "contentHash": "NyMFyZmLPRVlR9qoj0est4S7U3/sJPK1ie29D5CSSu+n1WiXanKITcdLgNSJ7rXAGhxqf1tWwlMQkPHOoYbTRQ=="
       }
     },
     "net10.0/win-x64": {}

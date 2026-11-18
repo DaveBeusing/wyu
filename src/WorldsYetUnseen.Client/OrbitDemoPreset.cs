@@ -9,6 +9,7 @@ internal static class OrbitDemoPreset
     internal const string DisplayName = "Orbit Demo";
     internal const ulong Seed = 42;
     internal const float Pitch = -0.12f;
+    internal static bool PbrEnabled => Environment.GetEnvironmentVariable("WYU_ORBIT_PBR") != "off";
     internal static bool BoulderEnabled => Environment.GetEnvironmentVariable("WYU_ORBIT_BOULDER") != "off";
 
     private static readonly Vector3 Sunset = Vector3.Normalize(new(0.68f, 0.18f, 0.70f));

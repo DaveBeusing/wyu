@@ -56,8 +56,8 @@ internal static partial class GameHost
             diagnostics?.Enter("WorldSelection");
             await window.InitializeAsync(context, token).ConfigureAwait(false);
             await window.StartAsync(token).ConfigureAwait(false);
-            if (measureSunlight && !AlphaWindowSize.TryApply((1920, 1080)))
-                throw new InvalidOperationException("The WP15 probe requires a 1920x1080 client area.");
+            if ((measureSunlight || orbitSmoke && OrbitPbrMeasurements.Enabled) && !AlphaWindowSize.TryApply((1920, 1080)))
+                throw new InvalidOperationException("The renderer probe requires a 1920x1080 client area.");
             watchClose = WatchWindowCloseAsync(window, stage);
             var settings = settingsDirectory is null ? AlphaSettings.Defaults : new AlphaSettingsStore(settingsDirectory).Load().Value;
             if (!scripted)
@@ -111,10 +111,13 @@ internal static partial class GameHost
                 mouse = new PrototypeMouseLook(window, settings);
             var retrySmoke = scripted ? Environment.GetEnvironmentVariable("WYU_HOST_RETRY_SMOKE") : null;
             var orbitDemo = slot?.OrbitDemo ?? orbitSmoke;
+            if (orbitDemo && OrbitDemoPreset.PbrEnabled)
+                renderHost.OrbitMaterials = await Task.Run(OrbitTerrainMaterials.Load, token).ConfigureAwait(false);
             exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld, orbitDemo)
             {
                 VerifyTerrainRetries = retrySmoke == "1",
                 R09RenderHost = measureR09 ? renderHost : null,
+                OrbitMaterialHost = renderHost.BuildsOrbitalMaterials ? renderHost : null,
                 ExhaustTerrainRetry = retrySmoke switch
                 {
                     "Movement" => VolumeWorkClass.Movement,
