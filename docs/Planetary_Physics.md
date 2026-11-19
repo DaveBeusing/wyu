@@ -1,8 +1,12 @@
 # Worlds Yet Unseen — Planetary Physics & Environmental Systems
 
-**Stand:** 7. November 2026  
-**Status:** Grundprinzip abgestimmt; Parameterumfang als Vorschlag zur gemeinsamen Entscheidung  
-**Bezug:** [World Vision](World_Vision.md)
+**Stand:** 19. November 2026
+
+**Status:** Abgestimmte Grundlagen mit dem aktuellen Gameplay-Kanon abgeglichen. Parameter und technische Umsetzung bleiben im jeweils bezeichneten Umfang offen.
+
+**Bezug:** [Aktueller Gameplay-Kanon](World_Vision_Consolidated.md#current-decisions-and-precedence) · [Energiegrundlagen](Energy_Systems.md) · [Offene Freigaben](World_Vision_Consolidated.md#decisions-awaiting-owner-approval)
+
+Ausdrückliche Klarstellungen der World Vision ersetzen ältere widersprechende Varianten dieses Grundlagenpapiers. Unabhängige Grundlagen wie 1 g, der 24-Stunden-Sonnentag, Jahreszeiten, Kleidung, Tauchen und Höhenanpassung bleiben erhalten. Die Texte beschreiben Designabsichten und bestätigen keine Laufzeitimplementierung oder gemessenen Budgets.
 
 ## 1. Verbindliches Grundprinzip
 
@@ -13,11 +17,13 @@ Die Physik in **Worlds Yet Unseen (WYU)** soll **glaubwürdig, konsistent und re
 - Simulationstiefe darf von Relevanz und Nähe zum Spieler abhängen, ohne offensichtliche Widersprüche zu erzeugen.
 - Umweltparameter sollen die Erkundung, den Basisbau, Fahrzeuge und später die Raumfahrt nachvollziehbar beeinflussen.
 - Freie Voxel-Geländeveränderung und unterirdischer Bau müssen bei späteren technischen Konzepten berücksichtigt werden.
-- **Gefährliche Solarstürme bleiben ein spätes Spielthema** und werden nicht als früher Überlebensdruck eingeführt.
+- Solarstürme folgen der vereinbarten Eskalation an Tag 30/60/90. Der erste schwache Sturm bringt ein Strahlungsrisiko ohne Elektronikstörung; spätere Stufen verstärken die Gefährdung. Das freie Siedeln und Erkunden bleibt möglich.
 
 ## 2. Startplanet: New Terra — vereinbarte Grundlagen
 
-**Name:** New Terra. Der Startplanet ist grundsätzlich erdähnlich und in den üblichen, bewohnbaren Oberflächenregionen ohne künstliche Atemversorgung begehbar.
+**Name:** New Terra ist die Bezeichnung im Grundlagenbeschluss vom 7. November. Die konsolidierte World Vision führt Himmelskörpernamen zugleich als offen. Ob New Terra fest oder vorläufig ist, wird unter [D5](World_Vision_Consolidated.md#decisions-awaiting-owner-approval) zur Freigabe vorgelegt.
+
+Der Startplanet ist grundsätzlich erdähnlich und in den üblichen, bewohnbaren Oberflächenregionen ohne künstliche Atemversorgung begehbar.
 
 - **Oberflächengravitation:** Rund **1 g = 9,81 m/s²** unter typischen Oberflächenbedingungen, entsprechend der Erde. Bewegung, Springen und Fallen fühlen sich deshalb zunächst vertraut an. Die Schwerkraftrichtung zeigt zur Planetenmitte; mit wachsender Entfernung vom Planetenzentrum darf ihre Stärke plausibel abnehmen.
 - **Tageslänge:** **24 Stunden planetare Ortszeit** je vollständigem Tag-Nacht-Zyklus (erdähnlicher Sonnentag). **Noch offen:** Wie viele Minuten oder Stunden realer Spielzeit einem solchen Tag entsprechen; die Zeitkompression wird später anhand von Gameplay, Erkundung und Performance abgestimmt. Die planetare Tageslänge und die Echtzeit-zu-Spielzeit-Skalierung sind getrennte Parameter.
@@ -48,20 +54,20 @@ Die Physik in **Worlds Yet Unseen (WYU)** soll **glaubwürdig, konsistent und re
 - Temperatur, Wind, Niederschlag, Feuchte, Nebel und Wolken.
 - Lokaler Luftdruck und Luftdichte, insbesondere abhängig von der Höhe.
 - Unterschiede durch Biome, Topografie, Wasserflächen, Tageszeit und **auf New Terra verbindlich vorhandene Jahreszeiten**.
-- Gewöhnliche Stürme und Unwetter unabhängig vom deutlich späteren Solarsturm-Thema.
+- Gewöhnliche Stürme und Unwetter bleiben vom festgelegten stellaren 30-/60-/90-Tage-Zyklus getrennt.
 - Lokale Auswirkungen auf Sicht, Bewegung, Bau, Energiebedarf und Technik.
 
 ## 5. Temperatur und Spielerwohlbefinden — abgestimmte Grundlagen
 
 Hitze und Kälte sollen für den Spieler **spürbare, nachvollziehbare körperliche Folgen** haben, ohne dass bloß normales Sommerwetter automatisch schwerwiegende Gesundheitsschäden auslöst.
 
-- **Hohe Temperaturen:** Erhöhter Flüssigkeitsbedarf bzw. schnellerer Durst. Ungeeignete, zu warme Kleidung und direkte Sonneneinstrahlung erhöhen die Hitzebelastung.
+- **Hohe Temperaturen:** Ungeeignete, zu warme Kleidung und direkte Sonneneinstrahlung erhöhen die Hitzebelastung. Die World Vision sieht keinen eigenen Durstwert vor. Die frühere Durstbeschreibung ist dadurch überholt.
 - **Niedrige Temperaturen:** Bei längerer oder starker Kälteeinwirkung besteht ein Risiko für Unterkühlung. Geeignete Kleidung und Schutzräume sollen vorbeugen.
 - **Kleidung und Umgebung:** Temperatur, Wetter, Sonnenexposition und die gewählte Kleidung sollen gemeinsam berücksichtigt werden; passende Ausrüstung und Verhalten helfen dem Spieler.
 - **Gesundheit:** Folgen sollen grundsätzlich abgestuft sein und von der tatsächlichen Belastung abhängen; das Ausmaß unmittelbarer Gesundheitsschäden, konkrete Statuswerte und Warnsignale bleiben zur späteren Abstimmung offen.
 - **Technische Umsetzung:** Eine performancebewusste, nachvollziehbare Näherung reicht aus; es ist keine vollständige Simulation menschlicher Thermoregulation erforderlich.
 
-**Noch nicht entschieden:** Konkrete Schwellenwerte, Zeitdauern, Flüssigkeitsverbrauch, UI-Anzeigen und Auswirkungen auf Ausdauer oder Lebenspunkte. Auch Temperatureffekte auf Ressourcen und Maschinen sind nicht festgelegt.
+**Noch nicht entschieden:** Verbindliche Schadens-/Expositionskurven, Zeitdauern, UI-Anzeigen und Auswirkungen auf Ausdauer oder Lebenspunkte. Die World Vision enthält erste Temperatur-Richtwerte; konkrete Abnahmegrenzen und Temperatureffekte auf Ressourcen/Maschinen sind offen.
 
 ## 6. Kleidung und persönliche Schutzausrüstung — qualitative Grundlagen
 
@@ -71,12 +77,12 @@ Kleidungsstücke erhalten zunächst **qualitativ beschriebene Eigenschaften stat
 
 - **Wärmeisolierung:** Wärmende Kleidung hilft bei Kälte, kann bei Hitze aber nachteilig sein.
 - **Atmungsaktivität:** Luftige Kleidung unterstützt die Wärmeabgabe bei höheren Temperaturen.
-- **Wetter- und Nässeschutz:** Geeignete Kleidung schützt gegen Wind und Regen und beeinflusst das Risiko auszukühlen.
+- **Wetter- und Nässeschutz:** Geeignete Kleidung schützt vor Nässe und Kälte und beeinflusst das Risiko auszukühlen. Wind beeinflusst die Windgeneratoren; ein eigener direkter Wind-Gesundheitseffekt ist nicht vorgesehen.
 - **Sonnenschutz:** Bedeckende oder dafür geeignete Kleidung vermindert die Belastung durch direkte Sonneneinstrahlung.
 - **Kontextabhängige Wirkung:** Die Eignung ergibt sich aus Wetter, Temperatur, Aktivität und der Kombination der getragenen Teile; es gibt nicht zwingend ein universell „bestes“ Outfit.
 - **Spätere Spezialausrüstung:** Atemmasken, Sauerstoffversorgung, Schutzanzüge und Raumanzüge ergänzen das Grundsystem für anspruchsvollere Umgebungen. Ihre konkrete Funktionsweise bleibt offen.
 
-**Bewusst offen:** Anzahl und Art der Kleidungsslots, numerische Schutzwerte, Qualitäts- und Seltenheitsstufen, Materialwerte, Verschleiß, Crafting, Gewicht, Inventarlogik und konkrete UI. Diese Details sind noch nicht beschlossen.
+**Bewusst offen:** Anzahl und Art der Kleidungsslots, numerische Schutzwerte, Qualitäts- und Seltenheitsstufen, Materialwerte, Crafting und konkrete UI. Gewicht-/Volumenwerte und die Zuordnung getragener Kleidung/Ausrüstung werden mit [Inventar #75](https://github.com/DaveBeusing/wyu/issues/75) festgelegt. Werkzeuge und Waffen zählen gemäß World Vision zum getragenen Gewicht; Kapazitäten und Überlastberechnung bleiben offen. Routinemäßiger Verschleiß ist ausgeschlossen.
 
 ## 7. Sauerstoff und Tauchen auf New Terra — abgestimmte Grundlagen
 
@@ -103,21 +109,21 @@ Die Auswirkungen großer Höhen orientieren sich grundsätzlich an erdähnlicher
 - **Extreme Höhenlagen:** Sauerstoffmangel kann zunehmend gefährlich werden; geeignete zusätzliche Sauerstoffversorgung kann notwendig sein.
 - **Fließende Übergänge:** Die Effekte ergeben sich graduell aus Umweltbedingungen, Belastung und individueller Gewöhnung, statt aus einer abrupten unsichtbaren Höhenbarriere.
 - **Akklimatisierung ist ausdrücklich vorgesehen:** Der Spieler kann sich bei längerem bzw. schrittweisem Aufenthalt an große Höhen anpassen und dadurch bestimmte Belastungen besser verkraften. Die Anpassung macht Sauerstoffmangel nicht beliebig kompensierbar und hebt die physikalischen Grenzen nicht auf.
-- **Getrennte Umwelteinflüsse:** Kälte, Wind und Wetter beeinflussen den Spieler zusätzlich und unabhängig von der Sauerstoffverfügbarkeit.
+- **Getrennte Umwelteinflüsse:** Temperatur, Nässe und Sonnenexposition werden getrennt von der Sauerstoffverfügbarkeit betrachtet. Die Windvariation beeinflusst Windgeneratoren und begründet keinen direkten zusätzlichen Gesundheitseffekt.
 - **Performance:** Die Auswirkungen sollen über ein nachvollziehbares vereinfachtes Zustandsmodell abgebildet werden, nicht über eine vollständige medizinische Simulation.
 
 **Bewusst offen:** Exakte Höhenbereiche, Luftdruckkurve, Stärke und Dauer der Akklimatisierung, möglicher Rückgang bei Aufenthalt in tieferen Lagen, Symptome, UI-Hinweise und konkrete Leistungs- bzw. Gesundheitseffekte.
 
 ## 9. Aktive Lebenserhaltung in Raumschiffen und Raumstationen — abgestimmte Grundlagen
 
-**Verbindliche Designentscheidung:** Raumschiffe und Raumstationen besitzen eine **aktive Lebenserhaltung**, nicht nur einen vereinfachten „bewohnbar“-Schalter. Ein bewohnbarer Innenraum muss mit einer geeigneten Atemluftversorgung, ausreichendem Kabinendruck und der notwendigen Energieversorgung betrieben werden.
+**Verbindliche Designentscheidung:** Vom Spieler als druckbeaufschlagt ausgewählte Abteile besitzen **aktive Lebenserhaltung**. Ein so genutzter Innenraum benötigt Atemluft, Kabinendruck und Energie. Offene Außenkonstruktionen bleiben erlaubt; das gesamte Schiff muss nicht luftdicht sein.
 
 - **Atemluft:** Eine begrenzte Versorgung mit atembarem Gas ist erforderlich; Sauerstoff kann gespeichert und transportiert werden (siehe Abschnitt 7).
 - **Druck:** Atembarkeit und ausreichender Umgebungsdruck sind getrennte Bedingungen. Ein Sauerstofftank allein macht einen drucklosen Raum nicht bewohnbar.
 - **Energie:** Die aktiven Lebenserhaltungssysteme benötigen Energie. Ausfälle sollen grundsätzlich relevante Folgen haben; Zeitverlauf und Notfallreserven sind noch offen.
 - **Technische Systeme als Spielmechanik:** Versorgung, Überwachung, Nachfüllen und langfristiger Betrieb sollen Teil des späteren technischen Fortschritts werden.
 - **Spielerinformation und Steuerung:** Kritische Versorgungszustände, etwa fehlender Sauerstoff, sollen für den Spieler im HUD erkennbar sein. Später sind eigene technische Steuerungsabläufe und Schaltkreise als mögliche Umsetzung für Überwachung und Automatisierung vorgesehen; die konkreten Regeln gehören in ein separates Systemkonzept.
-- **Modularer Bau und Druckzonen:** Raumschiffe werden wie Basen aus frei kombinierbaren Bauteilen errichtet; grundsätzlich sollen isolierbare Druckzonen möglich sein. Die konkrete Erkennung, Abdichtung und Simulation solcher Räume sowie Türen und Luftschleusen werden ausdrücklich erst im gemeinsamen Konstruktionskonzept ausgearbeitet.
+- **Modularer Bau und Druckzonen:** Relevante Block-/Türänderungen lösen eine Prüfung der gewählten Abteile aus. Druck wird je Abteil bilanziert. Die konkrete Erkennung, Abdichtung sowie Tür-/Luftschleusenregeln werden im Konstruktionskonzept ausgearbeitet.
 - **Druckverlust bei Beschädigung:** Sowohl schleichender als auch schneller oder plötzlicher Druckverlust soll grundsätzlich möglich sein. Welcher Verlauf eintritt, hängt insbesondere von Größe und Art der Öffnung, Beschädigung und betroffenen Druckzone ab. **Keine pauschale Vorgabe „immer schleichend“ oder „immer abrupt“.** Leckberechnung, Schadensmodell, Druckausgleich und Reaktion modular gebauter Schiffsräume werden erst im späteren Konstruktions- und Physikkonzept festgelegt.
 - **Geschlossene Basen:** Die Übertragung der Lebenserhaltung auf luftdichte planetare Räume und Unterwasseranlagen ist als spätere Ausarbeitung vorgesehen; konkrete Regeln sind offen.
 - **Performance:** Die Simulation darf mit Zuständen und Bilanzen für abgeschlossene Bereiche arbeiten; eine vollständige Partikelsimulation der Luft in jedem Raum ist nicht erforderlich.
@@ -128,32 +134,32 @@ Die Auswirkungen großer Höhen orientieren sich grundsätzlich an erdähnlicher
 
 ## 10. Luftaufbereitung und Ressourcenkreislauf — abgestimmte Grundlagen
 
-**Verbindliche Designentscheidung: Die Lebenserhaltung verwendet einen weitgehend geschlossenen, aber niemals vollkommen verlustfreien Ressourcenkreislauf.** Atemluft und geeignete Ressourcen sollen wiederaufbereitet werden können, wodurch lang andauernder Betrieb von Raumschiffen und Stationen möglich wird. Dennoch bleiben Nachschub, Energie und Instandhaltung notwendig.
+**Verbindliche Designentscheidung: Die Lebenserhaltung verwendet einen weitgehend geschlossenen, aber niemals vollkommen verlustfreien Ressourcenkreislauf.** Atemluft und geeignete Ressourcen sollen wiederaufbereitet werden können, wodurch lang andauernder Betrieb von Raumschiffen und Stationen möglich wird. Dennoch bleiben Nachschub und Energie notwendig. Verbrauchtstoffe nachzufüllen ist von manueller Reparatur nach Beschädigung zu unterscheiden.
 
 - **Sauerstoff:** Er ist eine begrenzte Ressource. Technische Systeme können Atemsauerstoff bereitstellen bzw. wiedergewinnen; eine vollständige Rückgewinnung ohne externe Stoff- oder Energiezufuhr wird nicht vorausgesetzt.
 - **CO₂-Management:** In geschlossenen bewohnten Bereichen muss ausgeatmetes Kohlendioxid kontrolliert entfernt oder durch geeignete Prozesse weiterverarbeitet werden.
 - **Wasser- und weitere Stoffkreisläufe:** Ein Recycling dieser Ressourcen ist eine passende technische Entwicklungsrichtung. Konkrete Prozesse werden später definiert.
-- **Unvollständige Rückgewinnung:** Verluste und mögliche Verbrauchsmaterialien sorgen dafür, dass selbst fortgeschrittene Systeme gelegentlich aufgefüllt und gewartet werden müssen.
+- **Unvollständige Rückgewinnung:** Verluste und mögliche Verbrauchsmaterialien erfordern Nachfüllen. Der Beschluss vom 15. November schließt routinemäßige Abnutzung und periodische Wartung unbeschädigter Komponenten aus.
 - **Energiebedarf:** Aufbereitung, Umwälzung und Versorgung benötigen weiterhin Energie; auch ein weitgehend geschlossener Stoffkreislauf ist kein energiefreies System.
 - **Performance:** Abstrakte Ressourcen- und Stoffbilanzen je relevantem, abgeschlossenem Bereich genügen zunächst; detaillierte chemische und strömungsmechanische Simulationen sind nicht gefordert.
 
-**Noch offen:** Konkrete Herstellungs- und Recyclingprozesse (etwa Elektrolyse), Wirkungsgrade, Stofflisten, Verbrauchs- und Verlustmengen, Tankgrößen, Wartungsintervalle und Störfallmodelle.
+**Noch offen:** Konkrete Herstellungs- und Recyclingprozesse (etwa Elektrolyse), Wirkungsgrade, Stofflisten, Verbrauchs- und Verlustmengen, Tankgrößen und Störfallmodelle.
 
-## 11. Strahlungsschutz und späte Solarstürme auf New Terra
+## 11. Strahlungsschutz und Solarstürme
 
-**Verbindliche Grundlage:** New Terra hat unter normalen Bedingungen einen erdähnlichen natürlichen Schutz durch Atmosphäre und planetaren Magnetfeldeinfluss. Die gewöhnliche Strahlungsumgebung an der bewohnbaren Oberfläche soll zunächst kein ständiges Überlebensrisiko darstellen.
+**Verbindliche Grundlage:** Der Startplanet hat unter normalen Bedingungen einen erdähnlichen Schutz durch Atmosphäre und Magnetfeldeinfluss. Gewöhnliche Strahlung an der bewohnbaren Oberfläche bildet zunächst kein ständiges Überlebensrisiko.
 
-**Spätes Spielthema:** Im späteren Spiel treten außergewöhnlich starke Solarstürme auf. Sie haben trotz des gewöhnlichen planetaren Schutzes **verbindlich spürbare Auswirkungen in allen drei Bereichen:**
+| Ereignis | Zeitpunkt | Festgelegte Wirkung |
+| --- | --- | --- |
+| Schwach | Tag 30 | Strahlungsrisiko ohne Elektronikstörung |
+| Mittel | Tag 60 | Vorübergehende Maschinen-/Funkprobleme |
+| Extrem | Tag 90, danach jeder dritte Sturm | Exponierte aktive Systeme werden vorübergehend unterbrochen; Batterien behalten Ladung und werden nicht zerstört |
 
-- **Technik und Infrastruktur:** Solarstürme stellen eine reale Gefahr für technische Systeme und deren Betrieb dar. Konkrete Störungen, Schäden und Schutztechniken bleiben offen.
-- **Spieler:** Der Spieler selbst kann gefährdet werden, insbesondere bei ungeschütztem Aufenthalt im Freien. Art, Dauer und Ausmaß der Auswirkungen werden später ausgearbeitet; direkte Strahlungsschäden sind noch nicht als einziges Wirkmodell festgelegt.
-- **Umwelt auf New Terra:** Solarstürme beeinflussen auch die planetare Umgebung. Welche atmosphärischen, ökologischen oder anderen Umweltfolgen konkret auftreten, wird später entschieden.
+Ein Sturm tritt alle **30 Spieltage** auf. Jedes Ereignis umfasst einen Sturmtag und einen Abklingtag. Polarlichter in den **zwei vorhergehenden Nächten** warnen mit zur Stärke passender Intensität. Der Echtzeitfaktor des Spieltages bleibt offen.
 
-**Dramaturgie und Grundschutz:** Die schweren Solarstürme bleiben ausdrücklich ein **spätes Spielthema**; der erdähnliche Schutz und die ruhige frühe Erkundungsphase gelten weiter. **Eine ausreichend vorbereitete und geschützte Basis oder eine geeignet unterirdisch angelegte Basis soll als Zufluchtsort während der Stürme genügen.** Dazu sind nicht zwingend spezielle Schutzanzüge erforderlich. Der mögliche Vorteil unterirdischer Bauweise wird dem Spieler anfangs nicht ausdrücklich verraten. Welche baulichen Voraussetzungen einen ausreichenden Schutz ausmachen, bleibt Teil des späteren Konstruktionskonzepts.
+Geeignete geschlossene Felsdeckung/unterirdische Basen schützen Menschen und Technik. Bei gebauten Schutzhüllen entscheidet das Material über die Strahlungsabschirmung; gewöhnliches Holz genügt dafür nicht. Vorbereitung durch Bau und Ressourcen erhält die Freiheit, auf dem Planeten zu bleiben. Lokale Prognosegeräte benötigen funktionsfähige Energie/Ausrüstung und arbeiten unabhängig von Funk. Detaillierte Schutzwerte und Störungsmodelle bleiben offen.
 
-**Vorläufige Idee zum Ereignisrhythmus (noch nicht beschlossen):** Etwa **alle 30 Spieltage** könnte ein schweres Solarsturmereignis auftreten. In der **einen oder den zwei Nächten davor** sollen sichtbare Polarlichter (Aurora borealis) als atmosphärisches Vorzeichen erscheinen. Das ist zunächst ein Designgedanke, **kein festgelegter Timer, keine garantierte Vorwarnung und keine Aussage über die Echtzeitdauer**. Konkreter Spielzeitfaktor, Auslöser, Variabilität, Intensität und die spätere Freischaltung der gefährlichen Solarstürme bleiben offen.
-
-**Abgrenzung:** Die drei Wirkungsbereiche sind beschlossen. **Wann spezielle Schutzanzüge oder besonders widerstandsfähige Technik verfügbar und notwendig werden, wird erst im Technologiebaum ausgearbeitet.** Konkrete physikalische Mechanismen, Auslöser, Stärke, Häufigkeit, Warnsysteme, genaue Schadensmodelle oder Schutzwerte bleiben ebenfalls offen. Das spätere Detaildesign soll die beobachteten Folgen möglichst plausibel mit dem gewählten Weltmodell sowie mit Performance und Spielbarkeit vereinbaren.
+**Historischer Stand vom 7. November.** Die damalige Einordnung als ausschließlich spätes Thema und der nur vorgeschlagene 30-Tage-Timer werden durch den ausdrücklichen Verlauf der konsolidierten World Vision ersetzt. Spieler-, Technik- und Umweltfolgen werden innerhalb dieses Verlaufs ausgearbeitet.
 
 ## 12. Performance-Leitlinie
 
@@ -163,20 +169,20 @@ Mögliche technische Richtungen (zu prüfen, noch keine Architekturentscheidung)
 - Parameter-/Feldmodelle statt vollständiger globaler Strömungs- und Atmosphärenphysik.
 - Höhere Simulationsauflösung nur in aktuell relevanten Bereichen.
 - Vereinfachte gravitative Modelle für das übliche Gameplay; aufwendigere Orbitalmodelle nur dort, wo es tatsächlich nötig ist.
-- Statische strukturelle Prüfungen für Bauwerke und dynamische Physik primär bei Bewegung, Schäden oder Einsturz.
+- Statische Gebäude folgen der beschlossenen Regel ohne Einsturzsimulation. Verbundene bewegte Konstruktionen werden als aggregierte Starrkörper mit Masse, Schwerpunkt, Trägheit und realen Kräften/Drehmomenten behandelt. Änderungen aktualisieren betroffene Masseigenschaften. Kollision, abtrennbare Teile und Gelenke benötigen eigene Verträge und Messungen.
 - Kontinuierlich wirkende Übergänge zwischen Oberfläche, Atmosphäre und Weltraum ohne notwendigen Anspruch auf vollständige Mehrkörper-Himmelsmechanik.
 
 ## 13. Offene Entscheidungen
 
 1. Welche genauen Höhenbereiche, Auswirkungen und Akklimatisierungszeiten gelten auf New Terra, und welche Tauchzeiten, Tiefengrenzen, Atemgas- und Druckschutzausrüstungen werden später definiert?
 2. Welche physikalischen Eigenschaften sollen tatsächlich von Planet zu Planet variieren und welche nur lokal?
-3. Welchen Grad an realistischem Flug-/Orbitalverhalten soll die Raumfahrt erfordern?
-4. Welche konkreten Schwellenwerte und abgestuften Auswirkungen erhalten Hitzebelastung, Durst und Unterkühlung; welche Auswirkungen von Sauerstoff, Druck und Strahlung sind zusätzlich spielrelevant?
+3. Welche Kollisionsmodelle, numerischen Verfahren und Messgrenzen konkretisieren die beschlossenen aggregierten Starrkörper? Ein später erforschter, stromverbrauchender Flugcomputer stabilisiert nur innerhalb der verfügbaren Aktuatorleistung; exakte Regelung und Schubzuordnung bleiben offen.
+4. Welche abgestuften Expositions-/Schadenskurven konkretisieren Temperatur, Sauerstoff, Druck und Strahlung bei den bekannten Richtwerten?
 5. Wie werden aktive Lebenserhaltung und der beschlossene, nicht verlustfreie Recyclingkreislauf konkret umgesetzt (Luftaufbereitung, Verluste, Nachschub, Energie, Notfallbetrieb)? Wie werden modulare Druckzonen, Öffnungen, Leckgrößen und schleichender bzw. schneller Druckverlust später im Konstruktionssystem berechnet?
 6. Wie schnell sollen die festgelegten 24 planetaren Stunden in Echtzeit vergehen (Spielzeitfaktor)?
 7. Wie lang ist ein New-Terra-Jahr, welche konkreten Temperatur-/Wettergrenzen gelten regional und wie schnell laufen die Jahreszeiten in Echtzeit ab?
 8. Wie werden die qualitativ beschriebenen Kleidungseigenschaften später in Ausrüstungsslots, Werte, Darstellung und Balancing überführt?
-9. Welche konkreten Mechanismen, Schäden und Warnsysteme erhalten die **bereits festgelegten** drei Wirkungsbereiche der späten Solarstürme (Technik, Spieler, Umwelt)? Die Anforderungen an ausreichend geschützte Basen werden im Konstruktionskonzept, Schutzanzüge und robuste Technik im Technologiebaum weiter ausgearbeitet.
+9. Welche Geräte-, Expositions- und Schutzmodelle setzen die festgelegte Sturmfolge und ihre Vorwarnung um? Weitere Balancingwerte und Anforderungen an spätere Schutztechnik bleiben im Konstruktions-/Technologiebaum offen.
 10. Welche Simulationsbudgets, Genauigkeiten und Skalierungsgrenzen werden erst nach Prototypen festgelegt?
 
-**Abgrenzung:** Außer der festgelegten erdähnlichen Oberflächengravitation von rund 1 g und dem 24-Stunden-Sonnentag bleiben die konkreten Zahlen für den Startplaneten offen. Dieses Dokument legt weder eine vollständige Liste aller Himmelskörper noch eine endgültige Simulationsarchitektur fest. Die Vorschläge werden schrittweise mit dem Spielkonzept abgestimmt.
+**Abgrenzung:** Die Oberflächengravitation von rund 1 g, der 24-Stunden-Sonnentag und die ausdrücklichen Zahlen-/Zeitvorgaben der World Vision gelten im jeweiligen Designumfang. Weitere Planetparameter und deren technische Abnahme bleiben offen. Dieses Dokument legt weder eine vollständige Liste aller Himmelskörper noch eine endgültige Simulationsarchitektur fest. Die Vorschläge werden schrittweise mit dem Spielkonzept abgestimmt.
