@@ -328,7 +328,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, frame, camera));
             var scriptedProps = scripted ? Props : null;
             if (scriptedProps is not null || presentStarted != 0)
-                await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= frame, token).ConfigureAwait(false);
+                await WaitForPresentedReceiptAsync(renderer, frame, token).ConfigureAwait(false);
             var orbitReceipt = presentStarted != 0 && orbitDemo && OrbitPbrMeasurements.Enabled
                 ? Stopwatch.GetTimestamp() : 0;
             if (scriptedProps is { } props)
@@ -866,6 +866,23 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private static void Drain(VolumeStreamingCoordinator terrain)
     {
         while (terrain.TryReadEvent(out _)) { }
+    }
+
+    private static async Task WaitForPresentedReceiptAsync(D3D12Renderer renderer, ulong sequence, CancellationToken token)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        try
+        {
+            var state = await renderer.WaitForPresentedAsync(sequence, deadline.Token).ConfigureAwait(false);
+            if (state.LastPresentedSequence < sequence)
+                RequireHealthyRenderer(state);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            if (renderer.Read().LastPresentedSequence < sequence)
+                throw new TimeoutException("Timed out waiting for terrain presentation or GPU preparation.");
+        }
     }
 
     private async Task WaitAsync(D3D12Renderer renderer, Func<bool> ready, CancellationToken token,

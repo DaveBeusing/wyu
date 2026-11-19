@@ -20,14 +20,17 @@ jobs:
       run:
         shell: pwsh
     env:
-      GROUNDWORK_RUN_ID: '44510519303'
-      GROUNDWORK_RUN_ATTEMPT: '1'
-      GROUNDWORK_EXPECTED_HEAD_SHA: '067bb610127b7436431a498fc70d0f12c05f8f7b'
-      GROUNDWORK_EXPECTED_MANIFEST_SHA256: 'BDF297C13C2E719DC7B8919D848E5ABF1C924C349FC5CC3FB5311AEB4307511A'
-      GROUNDWORK_EXPECTED_ARTIFACT_ZIP_SHA256: '468CE26231AEF8BE59B8EC6D2B36F3E7B0AFBBBD2CE9A600CA53F1F6B75509C6'
-      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.44510519303.1'
-      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.44510519303.1-immutable-complete'
-      GROUNDWORK_ARCHIVE_RECORD_SHA256: '1C5296751958869B5E6623DC5F4C20F821084C5E7A6C8EC89595F470AD3E1244'
+      GROUNDWORK_RUN_ID: '44589269470'
+      GROUNDWORK_RUN_ATTEMPT: '2'
+      GROUNDWORK_EXPECTED_BRANCH: 'tasks/issue-88-swapchain-slot-wake'
+      GROUNDWORK_EXPECTED_EVENT: 'workflow_dispatch'
+      GROUNDWORK_EXPECTED_WORKFLOW_PATH: '.github/workflows/windows-ci.yml'
+      GROUNDWORK_EXPECTED_HEAD_SHA: '77799128cfe09ef175a13722c408b6b4ca35282b'
+      GROUNDWORK_EXPECTED_MANIFEST_SHA256: 'AF327C91FF64F13E3F3C80B3DBD117C05879CCD6B9CBB5D2C255166128A245F4'
+      GROUNDWORK_EXPECTED_ARTIFACT_ZIP_SHA256: '089A669031691D8D1046341955A4BD813E076758D0C488A144AD4773CB573767'
+      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.44589269470.2'
+      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.44589269470.2-immutable-complete'
+      GROUNDWORK_ARCHIVE_RECORD_SHA256: '7D207097ED081A1AF496C8A4B507C6FDA366106518FA1762B5B5D01BB58E4D7A'
       GROUNDWORK_LICENSE_SHA256: 'B1D2870F1A00E4D7F56576E5F0870CBA109E041F8AF66866CF5B499478E654E7'
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -46,8 +49,10 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $null -eq $run) { throw 'Groundwork run unavailable.' }
           if ([string]$run.id -ne $env:GROUNDWORK_RUN_ID -or [string]$run.run_attempt -ne $env:GROUNDWORK_RUN_ATTEMPT) { throw 'Run attempt mismatch.' }
           if ($run.status -ne 'completed' -or $run.conclusion -ne 'success') { throw 'Producer CI did not pass.' }
-          if ($run.head_sha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $run.head_branch -ne 'master') { throw 'Producer head is not approved.' }
-          if ($run.name -ne 'Groundwork Windows CI' -or $run.event -ne 'push') { throw 'Unapproved producing workflow.' }
+          if ($run.head_sha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $run.head_branch -cne $env:GROUNDWORK_EXPECTED_BRANCH -or
+              $run.repository.full_name -cne 'DaveBeusing/Groundwork' -or $run.head_repository.full_name -cne 'DaveBeusing/Groundwork') { throw 'Producer head is not approved.' }
+          if ($run.name -cne 'Groundwork Windows CI' -or $run.event -cne $env:GROUNDWORK_EXPECTED_EVENT -or
+              $run.path -cne $env:GROUNDWORK_EXPECTED_WORKFLOW_PATH) { throw 'Unapproved producing workflow.' }
           Write-Host 'PASS: independently pinned Groundwork CI run identity.'
 
       - name: Verify durable Groundwork release metadata
@@ -74,6 +79,9 @@ jobs:
             if ([string]$asset.digest -ine "sha256:$($pair.hash)") { throw "Unapproved release asset digest: $($pair.name)" }
           }
           if (-not $release.immutable) { throw 'Pinned release must be immutable.' }
+          $ref = gh api "repos/DaveBeusing/Groundwork/git/ref/tags/$env:GROUNDWORK_RELEASE_TAG" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $ref.object.type -cne 'commit' -or
+              $ref.object.sha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA) { throw 'Archive tag does not resolve to the pinned commit.' }
           Write-Host 'PASS: durable release identity and independently pinned archive metadata.'
 
       - name: Download durable Groundwork release archive
@@ -105,6 +113,9 @@ jobs:
               [string]$archive.producerRunId -ne $env:GROUNDWORK_RUN_ID -or
               [string]$archive.producerRunAttempt -ne $env:GROUNDWORK_RUN_ATTEMPT -or
               $archive.producerHeadSha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or
+              $archive.producerHeadBranch -cne $env:GROUNDWORK_EXPECTED_BRANCH -or
+              $archive.producerEvent -cne $env:GROUNDWORK_EXPECTED_EVENT -or
+              $archive.producerWorkflowPath -cne $env:GROUNDWORK_EXPECTED_WORKFLOW_PATH -or
               $archive.packagedCommitSha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or
               $archive.packageVersion -cne $env:GROUNDWORK_EXPECTED_VERSION -or
               $archive.manifestSha256 -ine $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256 -or
