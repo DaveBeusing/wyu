@@ -295,11 +295,20 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 steps++;
                 if (steps == 12 && placementGate is not null)
                 {
-                    if (!Props!.PlacementActive || placementGate.Task.IsCompleted || Props.Staged != 0)
+                    var initialProps = Props!;
+                    if (!initialProps.PlacementActive || placementGate.Task.IsCompleted || initialProps.Staged != 0)
                         throw new InvalidOperationException("WP16 placement gate did not hold optional work during movement.");
-                    Props.PlacementGateForSmoke = null;
+                    initialProps.PlacementGateForSmoke = null;
                     placementGate.SetResult();
                     Console.WriteLine("WP16 movement committed 12 ticks while prop placement was blocked.");
+                    // Finish initial placement in warm-up so its uploads cannot land in the camera sweep.
+                    await WaitAsync(renderer, () =>
+                    {
+                        initialProps.Pump();
+                        return !initialProps.PlacementActive;
+                    }, token).ConfigureAwait(false);
+                    if (initialProps.Staged == 0 || initialProps.Failed != 0)
+                        throw new InvalidOperationException("WP16 initial prop placement did not stage successfully.");
                 }
             }
             else if (scripted)
@@ -327,6 +336,12 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 var propsFrame = props.Read();
                 _propPeakDraws = Math.Max(_propPeakDraws, propsFrame.Draws);
                 _propPeakInstances = Math.Max(_propPeakInstances, propsFrame.Instances);
+                if (steps == 59)
+                {
+                    if (props.PlacementActive || propsFrame.DeferredCells != 0 || propsFrame.PayloadBytes != 0 || propsFrame.Instances == 0)
+                        throw new InvalidOperationException("WP16 camera sweep started before initial props were resident and uploads had drained.");
+                    Console.WriteLine("WP16 initial props were resident and payload uploads had drained before the camera sweep.");
+                }
                 if (propsFrame.PayloadBytes > 0 && steps is >= 62 and <= 80)
                     throw new InvalidOperationException("A camera-only turn uploaded prop payload.");
             }
