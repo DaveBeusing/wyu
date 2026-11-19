@@ -1,8 +1,44 @@
 # Worlds Yet Unseen — World Vision, Lore & Gameplay Canon
 
-**Stand:** 15. November 2026  
-**Status:** Konsolidierte Designentscheidungen, keine Aussage über Implementierungsstand.  
+**Stand:** 19. November 2026
+
+**Status:** Konsolidierte Designentscheidungen, keine Aussage über Implementierungsstand.
+
 **Geltung:** Eine zentrale Referenz für Spielvision, Lore und beschlossene Gameplay-Regeln; Groundwork bleibt eine eigenständige Engine.
+
+## Current decisions and precedence
+
+This document is the current gameplay reference. [Energy foundations](Energy_Systems.md) and [planetary physics](Planetary_Physics.md) retain compatible specialist decisions and link back here. Explicit clarification or supersession determines the applicable rule. The merge date of an older design text does not establish precedence. These documents describe design intent; implementation and measured acceptance are tracked in the [roadmap](Roadmap.html) and implementation issues.
+
+| Topic | Current decision | Decision record |
+| --- | --- | --- |
+| Carrying resources | Weight and volume each have a normal capacity. The higher relative load determines overload. Deliberate intake up to 120% is allowed with a warning and slower movement. Tools and weapons count toward carried weight. | 15/19 November · Survival inventory and D1/D2 |
+| Material transport | Players move resources manually. Later automatic mining does not imply automatic transport. | 15 November · Survival inventory |
+| Generation progression | Fuel-burning generators → solar → wind; early batteries automatically cover deficits within their available capacity. | 13/15 November · Energy and wind |
+| Electrical networks | One compatible grid, visible player-routed cables, lossless transmission, network-level energy accounting. | 13 November · Base independence |
+| Survival | Hunger, health, temperature, radiation and injuries; optional sleep; no separate thirst meter. Wind influences wind generation and has no direct player-health mechanic. | Detailed survival/weather rules |
+| Stellar storms | Day 30 weak, day 60 medium, day 90 extreme; one storm day plus one decay day, warned by the two preceding nights. Weak storms do not disrupt electronics; stronger events temporarily interrupt exposed active systems while stored battery charge remains. | Stellar activity and detailed radiation rules |
+| Damage and repair | No routine wear or periodic maintenance during undamaged operation. Damaged blocks are repaired manually using carried materials. Consumable replenishment is separate from repair. | 15 November · Manual repairs |
+| Construction and movement | A 25 cm grid; static buildings have no collapse simulation. Connected moving constructions use aggregate mass, centre of mass, inertia, forces and torque. | 15 November · Modular construction |
+| Flight assistance | A later researched, powered flight-computer block commands available actuators within their physical limits. Manual control remains available. | 15 November · Flight control |
+| Research | Discovery-led research consumes the approved finds without an additional generic research-resource charge. Crafting and station construction may consume materials. | 13 November · Discovery-led research |
+| Pressurisation | Only player-designated compartments require airtight enclosure and active life support. Relevant block/door changes trigger enclosure checks. | Modular spacecraft and flight |
+
+The compatible physical foundations also retain approximately 1 g surface gravity, a 24-hour planetary day with separately undecided real-time scaling, seasons, modular clothing, breathable surface conditions, diving/oxygen rules, and altitude acclimatisation. New Terra is the start planet's working name under D5.
+
+## Approved decisions
+
+The owner approved D1–D5 on 19 November 2026. These rules clarify the earlier inventory wording and name references. [Inventory #75](https://github.com/DaveBeusing/wyu/issues/75) implements D1–D4.
+
+| ID | Approved rule | Implementation boundary |
+| --- | --- | --- |
+| D1 | Relative load is `max(weight / weightCapacity, volume / volumeCapacity)`; overload is the amount above 100%. Spare capacity in one dimension cannot cancel excess in the other. | Define valid capacities, units and rounding. The exact slow-movement curve remains open. |
+| D2 | Normal capacity is 100%. Deliberate intake up to and including 120% is allowed with a warning and slower movement while overloaded, without overload damage. Above 120%, existing contents remain owned and movement is held until capacity is restored or items are removed. | New intake respects the 120% admission ceiling. Capacity reductions can leave an existing load above it without deleting items. |
+| D3 | Move All transfers the subset that fits in a declared stable order as one atomic transfer. The remainder stays in the source and is reported to the player. | Declare the stable order and apply the approved destination capacity/admission rules. |
+| D4 | Dismantling waits until a safe supported drop can be admitted. The container and all its contents remain intact while admission is unavailable. | Join dismantling and drop ownership into the same confirmed operation. |
+| D5 | New Terra remains a working name. | A final start-planet name requires a separate naming decision. |
+
+Capacities, units, rounding, stable transfer order, the slow-movement curve, worn-clothing accounting, recipes, shield overlap/restart formulas, compartment leak rates, flight-control laws and story outcomes retain their separately documented open scope.
 
 ## 1. Core promise
 *Worlds Yet Unseen* is a first-person, single-player survival and discovery game on procedural, persistent, deformable voxel worlds. Its emotional pillars are solitude, wonder, freedom, gradual unease and discovery. The player is free to settle, build, explore and eventually travel into space; escaping the starting planet is not a mandatory ending.
@@ -67,25 +103,37 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 - The rescue capsule emits a limited-range home beacon. Players may create local waypoints and optionally transmit them over radio.
 - The starting multitool scanner identifies materials and detects shallow subsurface resources to approximately **5 m**; upgrades extend depth.
 
-## Inventory, storage and logistics
-- Player inventory and storage are **weight-limited only**, not volume-limited. Backpacks increase carry capacity; identical items stack.
+## Inventory, storage and manual transfers
+
+- Player-carried inventory has **normal weight and volume capacities**. Tools and weapons count toward carried weight; identical items stack and backpacks increase capacity. D1/D2 define the greater-relative-load calculation and deliberate intake up to 120% with overload feedback.
 - Early game offers one simple, unpowered storage chest; larger containers for advanced bases/ships share the same storage abstraction. Exact capacities are TBD.
-- Dismantling a chest drops all contents on the ground. Provide an **Move All** transfer action.
+- Dismantling a chest drops its contents for recovery once a safe supported drop is admitted. Until then the chest and contents remain intact under D4. **Move All** atomically transfers the fitting subset in a declared stable order and reports the remainder under D3.
+- Players carry mined resources manually. Later research may automate mining, while resource transport remains player-controlled.
+- Machines retain an internal output buffer of **8 stacks**, one item type per stack. Production pauses when no output space remains. Manual supply/output interactions require their scoped implementation design.
+- Power loss pauses machines and preserves materials and exact progress; work resumes automatically on restored power. A confirmed dismantling operation cancels production and drops input materials and completed output on the ground; elapsed progress is lost. Apply D4's safe-drop admission before dismantling.
+- Power shortage initially shuts down affected equipment without automatic priorities; later physical logic components can implement priorities.
+- Initial production-time balancing: simple 5–10 s, standard 10–15 s, complex 20–30 s, advanced 30–60 s. Advanced machines operate at roughly **2× speed** and can run **2 parallel jobs**.
+
+<details>
+<summary>Historical inventory and automatic logistics rules superseded on 15 November</summary>
+
+The former weight-only statement and the automatic-transport rules below are retained as historical context.
+
+- Player inventory and storage were described as weight-limited only.
 - Advanced machines can use shared storage through connected logistics networks; early workbenches are manually supplied.
 - Logistics are fully opaque, enclosed **rectangular conduits for solids** and **round pipes for liquids/gases**; no electricity consumption, no rendered per-item motion and **no throughput cap**.
 - Connected machines request inputs automatically. Splitters branch networks; filters only allow/block material types, never allocate percentages.
 - Supply arbitration is FIFO by request time; an unsatisfiable request may be skipped without losing its original priority. Reserve/withdraw all required recipe inputs atomically when the complete set is available.
 - Machines poll for material demand at an initial **1-second** interval (implementation may be event-driven with equivalent semantics).
 - Finished products transfer automatically to a connected container when possible; otherwise to an internal output buffer of **8 stacks**, one item type per stack. When no output space remains, production pauses.
-- Power loss pauses machines and preserves materials and exact progress; work resumes automatically on restored power. Dismantling an active machine cancels production and drops input materials and completed output on the ground; elapsed progress is lost.
-- Power shortage initially shuts down affected equipment without automatic priorities; later physical logic components can implement priorities.
-- Initial production-time balancing: simple 5–10 s, standard 10–15 s, complex 20–30 s, advanced 30–60 s. Advanced machines operate at roughly **2× speed** and can run **2 parallel jobs**.
+
+</details>
 
 ## Multitool and research
 - The multitool starts with basic modules. Interchangeable upgrades can improve efficiency and unlock functions, swapped instantly at a workbench.
 - Initial upgrades: enhanced mining module, energy-efficiency module, precision-building module. No use-based leveling requirement was confirmed.
-- Research combines exploration/scanning and a discovery-gated research tree. Discovery gives immediate information; development at research equipment takes time and resources. No abstract research-point currency.
-- Research continues while the player is away, provided power and materials remain available. Discovered blueprints remain unlocked.
+- Research combines exploration/scanning and a discovery-gated research tree. Discovery gives immediate information; development at research equipment consumes approved finds and takes time. The 13 November clarification removes an additional generic resource charge for discovery-led research. Crafting, station construction and specific technology requirements may still consume ordinary materials. No abstract research-point currency.
+- Research continues while the player is away, provided the required power and approved research inputs remain available. Discovered blueprints remain unlocked.
 - Initial research takes place using the damaged rescue capsule; a separate research station comes later. Initial technology candidates: basic workbench, enhanced mining module, simple generator.
 - Capsule guarantees **metal parts, basic electronics and a small energy store**, plus **one randomly selected extra** from copper wire, seal kit, or emergency battery.
 
@@ -95,7 +143,7 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 - Moving mechanical components (wheels, hinges, joints, pistons, rotors) are part of the planned building system, unlocked through research.
 - Vehicles share the base power-network model. Driver seats/cockpits and remote control are both allowed; controls may be mapped to components and eventually automated.
 - Damage is per block; components have functional consequences and may be repaired in place with the multitool and required materials.
-- Vehicle physics should be simplified but perceptible: mass, center of mass and inertia influence handling, without simulating every block independently.
+- Moving constructions use aggregate rigid-body dynamics: mass, center of mass, inertia, gravity, forces, thrust and off-center torque affect handling. Connected rigid constructions are aggregated bodies. The 15 November clarification preserves real torque while leaving detailed collision and articulation design open.
 
 ## Wireless logic and energy
 - Physical logic components include switches, timers, power sensors and temperature sensors; modules communicate wirelessly.
@@ -129,7 +177,7 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 - Do not make players guess why crafting, building, machines or other actions fail: show explicit actionable reasons such as missing material, missing power, invalid connection. Mystery belongs to world exploration, not opaque interface failures.
 
 ## Deferred and not yet specified
-- Exact item stack sizes and container weights; output buffer when multiple output destinations are full.
+- Exact item stack sizes, container capacities and manual output-buffer withdrawal when destination capacity is unavailable.
 - Blueprint workflow, moving/rotating/copying large structures, exact module costs.
 - Research durations, recipe costs, unlock prerequisites, scan upgrade tiers.
 - Wind zone granularity, radio propagation edge cases, detailed thermal/radiation formulas.
@@ -148,8 +196,15 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 
 ### Production philosophy
 - WYU is not a factory optimization game. Automation primarily removes repetitive work and permits freely arranged production facilities.
-- Solid items use opaque square/rectangular enclosed conduits; liquids and gases use round pipes. No individual objects are visibly simulated in conduits.
-- All logistics conduits have unlimited throughput. No belt-speed, flow-rate or allocation-percentage optimization puzzles.
+- Resources are carried manually under the 15 November survival-first decision.
+
+<details>
+<summary>Historical conduit concept superseded on 15 November</summary>
+
+- Solid items used opaque square/rectangular enclosed conduits; liquids and gases used round pipes. No individual objects were visibly simulated in conduits.
+- Conduits had unlimited throughput, without belt-speed, flow-rate or allocation-percentage puzzles.
+
+</details>
 
 ### Death and respawn
 - Death is player-friendly. Respawn at the rescue capsule or a later designated respawn point.
@@ -159,7 +214,7 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 ### Modular spacecraft and flight
 - Ships, probes and other vehicles are freely constructed from modular blocks; no prescribed first spacecraft.
 - Planetary surface, atmosphere and space connect seamlessly without loading screens.
-- Simplified Newtonian physics includes inertia, acceleration and counter-thrust, with optional switchable flight assistance. Aggregate mass and center of mass without per-block rigid-body simulation. Gravity is simplified; exact orbital mechanics are not required.
+- Newtonian rigid-body behavior includes inertia, acceleration, counter-thrust and off-center torque using aggregate mass, center of mass and inertia. Switchable assistance requires the researched, powered flight-computer block and acts within available actuator authority. Gravity is simplified; exact orbital mechanics are not required.
 - Docking offers magnetic-feeling alignment/snap assistance. Launch and landing fuel requirements are forgiving; re-entry heat is abstracted without detailed heat-shield micromanagement.
 - Only player-designated pressurized compartments require airtight enclosures and functioning life support. Open external structures are permitted.
 - Groundwork checks enclosure integrity when relevant blocks or doors change; pressure is per compartment, not per gas particle. Leak-size-dependent gradual depressurization allows response to small leaks while large breaches depressurize quickly.
@@ -170,14 +225,14 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 ## Canon and conflict resolution
 - **Building statics:** No collapse simulation for constructed buildings; floating structures are allowed. This supersedes the early exploratory suggestion of structural stability. Deformable voxel terrain is a separate system.
 - **Stellar storms:** Every 30 in-game days, every third extreme; the early game remains forgiving because severity escalates. This supersedes any suggestion that all storms begin only late.
-- **Logistics:** Unlimited throughput and comfort-focused automation override proposals for constrained capacity.
+- **Material transport:** The 15 November manual-transport decision supersedes the historical conduit/shared-storage concept. Later automatic mining does not imply automatic transport.
 - **Spaceflight:** Conventional sublight propulsion, seamless traversal and simplified gravity. No fixed vehicle progression.
 - **Pressure:** Only selected compartments must be sealed; leaks cause progressive, size-dependent pressure loss.
 - Balancing numbers are initial design values unless explicitly fixed. Do not treat unresolved story questions as established canon.
 
 ## Open decisions and next planning area
 - Fate of the colony ship, detailed disaster sequence, alien language/society and first contact, specific survivors and encounter timing, named celestial bodies, detailed story events and optional endings.
-- Further base maintenance/repair automation, advanced energy sources, shield collapse/restart behavior, and research-tree dependencies remain open.
+- Advanced energy sources, shield collapse/restart behavior, and research-tree dependencies remain open. Manual repair and the absence of routine wear/periodic maintenance are established decisions.
 - Detailed balancing, exact interfaces, algorithms and acceptance tests belong to future scoped work packages.
 
 ## Design decisions — 13 November 2026: Bases, energy, shields and research
@@ -272,8 +327,8 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 
 ### Survival-first identity and carrying resources
 - WYU is a **first-person survival and exploration game, not a factory game**. Players personally carry the resources they mine in their own inventory. There are **no automated resource transport systems or factory-style transport chains**. Later unlockable functional blocks may automate *mining*, but do not imply automatic transport.
-- The player inventory has **hard weight and volume limits**. Tools and weapons count toward carried weight. This **supersedes** the earlier weight-only inventory rule.
-- At up to **20% overload** relative to carrying capacity, the player can move slowly, without overload damage; above 20% overload, movement is impossible. The exact movement-speed curve and how combined weight/volume overload is calculated remain to be specified.
+- The player inventory has **weight and volume capacities**. Tools and weapons count toward carried weight. This supersedes the earlier weight-only rule. D1/D2, approved on 19 November, clarify normal capacity and the admission ceiling.
+- Relative load uses the greater of weight/capacity and volume/capacity. Deliberate intake up to **120%** is allowed with a warning and slower movement while overloaded, without overload damage. Above 120%, existing items remain owned and movement is held until capacity is restored or items are removed. The exact movement-speed curve, capacities, units and rounding remain open.
 - No early handcarts or sleds as intermediate carrying aids. Transportation assistance comes from player-constructed vehicles.
 - Previous descriptions of connected logistics conduits, automatic machine input/output transfer, and shared storage networks are **not current design commitments**; they conflict with the explicitly rejected automated transport systems and require re-evaluation before implementation. Do not silently preserve them as approved gameplay.
 
@@ -295,6 +350,6 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 - Exact flight-computer control laws, thruster allocation, steering inputs, failure modes and balancing remain open.
 
 ### Reconciliation notes
-- The new survival-first restriction against automated resource transport takes precedence over the older conduit/network automation descriptions in this document; those passages are retained as historical context pending a dedicated cleanup, not as approved features.
+- The new survival-first restriction against automated resource transport takes precedence over the older conduit/network automation descriptions in this document; those passages are marked as historical in this document.
 - The newer weight-and-volume inventory model takes precedence over the older weight-only statement.
 - These design decisions do not claim any Groundwork implementation or measured performance results.
