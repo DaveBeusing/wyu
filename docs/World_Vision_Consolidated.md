@@ -12,7 +12,7 @@ This document is the current gameplay reference. [Energy foundations](Energy_Sys
 
 | Topic | Current decision | Decision record |
 | --- | --- | --- |
-| Carrying resources | Player-carried inventory has weight and volume limits; tools and weapons count. The relationship between hard limits and up to 20% overload remains a decision below. | 15 November · Survival inventory |
+| Carrying resources | Weight and volume each have a normal capacity. The higher relative load determines overload. Deliberate intake up to 120% is allowed with a warning and slower movement. Tools and weapons count toward carried weight. | 15/19 November · Survival inventory and D1/D2 |
 | Material transport | Players move resources manually. Later automatic mining does not imply automatic transport. | 15 November · Survival inventory |
 | Generation progression | Fuel-burning generators → solar → wind; early batteries automatically cover deficits within their available capacity. | 13/15 November · Energy and wind |
 | Electrical networks | One compatible grid, visible player-routed cables, lossless transmission, network-level energy accounting. | 13 November · Base independence |
@@ -24,19 +24,21 @@ This document is the current gameplay reference. [Energy foundations](Energy_Sys
 | Research | Discovery-led research consumes the approved finds without an additional generic research-resource charge. Crafting and station construction may consume materials. | 13 November · Discovery-led research |
 | Pressurisation | Only player-designated compartments require airtight enclosure and active life support. Relevant block/door changes trigger enclosure checks. | Modular spacecraft and flight |
 
-The compatible physical foundations also retain approximately 1 g surface gravity, a 24-hour planetary day with separately undecided real-time scaling, seasons, modular clothing, breathable surface conditions, diving/oxygen rules, and altitude acclimatisation. The start-planet name discrepancy is listed for approval below.
+The compatible physical foundations also retain approximately 1 g surface gravity, a 24-hour planetary day with separately undecided real-time scaling, seasons, modular clothing, breathable surface conditions, diving/oxygen rules, and altitude acclimatisation. New Terra is the start planet's working name under D5.
 
-## Decisions awaiting owner approval
+## Approved decisions
 
-| ID | Decision to approve | Current boundary and implementation dependency |
+The owner approved D1–D5 on 19 November 2026. These rules clarify the earlier inventory wording and name references. [Inventory #75](https://github.com/DaveBeusing/wyu/issues/75) implements D1–D4.
+
+| ID | Approved rule | Implementation boundary |
 | --- | --- | --- |
-| D1 | How should weight and volume combine into overload? | Both limits apply. The combined formula and movement-speed curve are open. Record the decision in [inventory #75](https://github.com/DaveBeusing/wyu/issues/75). |
-| D2 | How do hard capacity limits interact with the allowed 20% overload? | Slow movement up to 20% overload and movement blocked above it are agreed. Admission of new items and capacity-reduction behavior remain open in #75. |
-| D3 | Should Move All transfer a fitting subset or require room for the entire transfer? | Preserve all item ownership and report what remains. Selection order and partial-transfer policy await approval in #75. |
-| D4 | What happens when dismantled-container contents cannot be placed on supported terrain? | Contents must remain recoverable. Deferring dismantling or keeping a durable pending drop are options for approval in #75. |
-| D5 | Is New Terra the fixed start-planet name or a working name? | The physics foundations name New Terra, while the consolidated open-lore list leaves celestial naming open. Confirm the intended scope before fixing names in content. |
+| D1 | Relative load is `max(weight / weightCapacity, volume / volumeCapacity)`; overload is the amount above 100%. Spare capacity in one dimension cannot cancel excess in the other. | Define valid capacities, units and rounding. The exact slow-movement curve remains open. |
+| D2 | Normal capacity is 100%. Deliberate intake up to and including 120% is allowed with a warning and slower movement while overloaded, without overload damage. Above 120%, existing contents remain owned and movement is held until capacity is restored or items are removed. | New intake respects the 120% admission ceiling. Capacity reductions can leave an existing load above it without deleting items. |
+| D3 | Move All transfers the subset that fits in a declared stable order as one atomic transfer. The remainder stays in the source and is reported to the player. | Declare the stable order and apply the approved destination capacity/admission rules. |
+| D4 | Dismantling waits until a safe supported drop can be admitted. The container and all its contents remain intact while admission is unavailable. | Join dismantling and drop ownership into the same confirmed operation. |
+| D5 | New Terra remains a working name. | A final start-planet name requires a separate naming decision. |
 
-All five entries remain open. Capacities, rounding, recipes, shield overlap/restart formulas, compartment leak rates, clothing values, flight-control laws, story outcomes and other explicitly deferred balancing remain subject to their recorded design decisions.
+Capacities, units, rounding, stable transfer order, the slow-movement curve, worn-clothing accounting, recipes, shield overlap/restart formulas, compartment leak rates, flight-control laws and story outcomes retain their separately documented open scope.
 
 ## 1. Core promise
 *Worlds Yet Unseen* is a first-person, single-player survival and discovery game on procedural, persistent, deformable voxel worlds. Its emotional pillars are solitude, wonder, freedom, gradual unease and discovery. The player is free to settle, build, explore and eventually travel into space; escaping the starting planet is not a mandatory ending.
@@ -103,12 +105,12 @@ Early evidence comprises ambiguous anomalies, abandoned structures, artifacts an
 
 ## Inventory, storage and manual transfers
 
-- Player-carried inventory has **weight and volume limits**. Tools and weapons count toward carried weight; identical items stack and backpacks increase capacity. See D1/D2 for the remaining overload/admission rules.
+- Player-carried inventory has **normal weight and volume capacities**. Tools and weapons count toward carried weight; identical items stack and backpacks increase capacity. D1/D2 define the greater-relative-load calculation and deliberate intake up to 120% with overload feedback.
 - Early game offers one simple, unpowered storage chest; larger containers for advanced bases/ships share the same storage abstraction. Exact capacities are TBD.
-- Dismantling a chest drops its contents for recovery. Provide a **Move All** transfer action. D3/D4 cover partial transfers and unavailable drop coverage.
+- Dismantling a chest drops its contents for recovery once a safe supported drop is admitted. Until then the chest and contents remain intact under D4. **Move All** atomically transfers the fitting subset in a declared stable order and reports the remainder under D3.
 - Players carry mined resources manually. Later research may automate mining, while resource transport remains player-controlled.
 - Machines retain an internal output buffer of **8 stacks**, one item type per stack. Production pauses when no output space remains. Manual supply/output interactions require their scoped implementation design.
-- Power loss pauses machines and preserves materials and exact progress; work resumes automatically on restored power. Dismantling an active machine cancels production and drops input materials and completed output on the ground; elapsed progress is lost. Once D4 is approved, apply that safe-drop policy.
+- Power loss pauses machines and preserves materials and exact progress; work resumes automatically on restored power. A confirmed dismantling operation cancels production and drops input materials and completed output on the ground; elapsed progress is lost. Apply D4's safe-drop admission before dismantling.
 - Power shortage initially shuts down affected equipment without automatic priorities; later physical logic components can implement priorities.
 - Initial production-time balancing: simple 5–10 s, standard 10–15 s, complex 20–30 s, advanced 30–60 s. Advanced machines operate at roughly **2× speed** and can run **2 parallel jobs**.
 
@@ -325,8 +327,8 @@ The former weight-only statement and the automatic-transport rules below are ret
 
 ### Survival-first identity and carrying resources
 - WYU is a **first-person survival and exploration game, not a factory game**. Players personally carry the resources they mine in their own inventory. There are **no automated resource transport systems or factory-style transport chains**. Later unlockable functional blocks may automate *mining*, but do not imply automatic transport.
-- The player inventory has **hard weight and volume limits**. Tools and weapons count toward carried weight. This **supersedes** the earlier weight-only inventory rule.
-- At up to **20% overload** relative to carrying capacity, the player can move slowly, without overload damage; above 20% overload, movement is impossible. The exact movement-speed curve and how combined weight/volume overload is calculated remain to be specified.
+- The player inventory has **weight and volume capacities**. Tools and weapons count toward carried weight. This supersedes the earlier weight-only rule. D1/D2, approved on 19 November, clarify normal capacity and the admission ceiling.
+- Relative load uses the greater of weight/capacity and volume/capacity. Deliberate intake up to **120%** is allowed with a warning and slower movement while overloaded, without overload damage. Above 120%, existing items remain owned and movement is held until capacity is restored or items are removed. The exact movement-speed curve, capacities, units and rounding remain open.
 - No early handcarts or sleds as intermediate carrying aids. Transportation assistance comes from player-constructed vehicles.
 - Previous descriptions of connected logistics conduits, automatic machine input/output transfer, and shared storage networks are **not current design commitments**; they conflict with the explicitly rejected automated transport systems and require re-evaluation before implementation. Do not silently preserve them as approved gameplay.
 

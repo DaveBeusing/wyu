@@ -4,7 +4,7 @@
 
 **Status:** Abgestimmte Grundlagen mit dem aktuellen Gameplay-Kanon abgeglichen. Parameter und technische Umsetzung bleiben im jeweils bezeichneten Umfang offen.
 
-**Bezug:** [Aktueller Gameplay-Kanon](World_Vision_Consolidated.md#current-decisions-and-precedence) · [Energiegrundlagen](Energy_Systems.md) · [Offene Freigaben](World_Vision_Consolidated.md#decisions-awaiting-owner-approval)
+**Bezug:** [Aktueller Gameplay-Kanon](World_Vision_Consolidated.md#current-decisions-and-precedence) · [Energiegrundlagen](Energy_Systems.md) · [Freigegebene Entscheidungen](World_Vision_Consolidated.md#approved-decisions)
 
 Ausdrückliche Klarstellungen der World Vision ersetzen ältere widersprechende Varianten dieses Grundlagenpapiers. Unabhängige Grundlagen wie 1 g, der 24-Stunden-Sonnentag, Jahreszeiten, Kleidung, Tauchen und Höhenanpassung bleiben erhalten. Die Texte beschreiben Designabsichten und bestätigen keine Laufzeitimplementierung oder gemessenen Budgets.
 
@@ -21,7 +21,7 @@ Die Physik in **Worlds Yet Unseen (WYU)** soll **glaubwürdig, konsistent und re
 
 ## 2. Startplanet: New Terra — vereinbarte Grundlagen
 
-**Name:** New Terra ist die Bezeichnung im Grundlagenbeschluss vom 7. November. Die konsolidierte World Vision führt Himmelskörpernamen zugleich als offen. Ob New Terra fest oder vorläufig ist, wird unter [D5](World_Vision_Consolidated.md#decisions-awaiting-owner-approval) zur Freigabe vorgelegt.
+**Name:** New Terra ist gemäß [D5](World_Vision_Consolidated.md#approved-decisions), freigegeben am 19. November, der Arbeitstitel des Startplaneten. Die endgültige Benennung folgt einer gesonderten Entscheidung.
 
 Der Startplanet ist grundsätzlich erdähnlich und in den üblichen, bewohnbaren Oberflächenregionen ohne künstliche Atemversorgung begehbar.
 
@@ -82,7 +82,7 @@ Kleidungsstücke erhalten zunächst **qualitativ beschriebene Eigenschaften stat
 - **Kontextabhängige Wirkung:** Die Eignung ergibt sich aus Wetter, Temperatur, Aktivität und der Kombination der getragenen Teile; es gibt nicht zwingend ein universell „bestes“ Outfit.
 - **Spätere Spezialausrüstung:** Atemmasken, Sauerstoffversorgung, Schutzanzüge und Raumanzüge ergänzen das Grundsystem für anspruchsvollere Umgebungen. Ihre konkrete Funktionsweise bleibt offen.
 
-**Bewusst offen:** Anzahl und Art der Kleidungsslots, numerische Schutzwerte, Qualitäts- und Seltenheitsstufen, Materialwerte, Crafting und konkrete UI. Gewicht-/Volumenwerte und die Zuordnung getragener Kleidung/Ausrüstung werden mit [Inventar #75](https://github.com/DaveBeusing/wyu/issues/75) festgelegt. Werkzeuge und Waffen zählen gemäß World Vision zum getragenen Gewicht; Kapazitäten und Überlastberechnung bleiben offen. Routinemäßiger Verschleiß ist ausgeschlossen.
+**Bewusst offen:** Anzahl und Art der Kleidungsslots, numerische Schutzwerte, Qualitäts- und Seltenheitsstufen, Materialwerte, Crafting und konkrete UI. Gewicht-/Volumenwerte und die Zuordnung getragener Kleidung/Ausrüstung werden mit [Inventar #75](https://github.com/DaveBeusing/wyu/issues/75) festgelegt. Werkzeuge und Waffen zählen gemäß World Vision zum getragenen Gewicht. D1/D2 legen die Überlastberechnung und die 120%-Aufnahmegrenze fest; Kapazitäten, Einheiten, Rundung und genaue Bewegungskurve bleiben offen. Routinemäßiger Verschleiß ist ausgeschlossen.
 
 ## 7. Sauerstoff und Tauchen auf New Terra — abgestimmte Grundlagen
 

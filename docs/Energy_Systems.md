@@ -4,9 +4,9 @@
 
 **Status:** Abgestimmte Grundprinzipien mit den ausdrücklichen Beschlüssen vom 13./15. November abgeglichen. Technische Umsetzung und offene Balancingwerte werden gesondert geprüft.
 
-**Bezug:** [Aktueller Gameplay-Kanon](World_Vision_Consolidated.md#current-decisions-and-precedence) · [Planetary Physics](Planetary_Physics.md) · [Offene Freigaben](World_Vision_Consolidated.md#decisions-awaiting-owner-approval)
+**Bezug:** [Aktueller Gameplay-Kanon](World_Vision_Consolidated.md#current-decisions-and-precedence) · [Planetary Physics](Planetary_Physics.md) · [Freigegebene Entscheidungen](World_Vision_Consolidated.md#approved-decisions)
 
-Die konsolidierte World Vision führt die aktuellen Gameplay-Regeln. Dieses Dokument ergänzt die Energiegrundlagen. Ausdrückliche Klarstellungen vom 13./15. November ersetzen die unten benannten älteren Varianten. Der Startplanet wird hier mit der bisherigen Bezeichnung New Terra angesprochen. Die Namensfreigabe bleibt unter D5 offen.
+Die konsolidierte World Vision führt die aktuellen Gameplay-Regeln. Dieses Dokument ergänzt die Energiegrundlagen. Ausdrückliche Klarstellungen vom 13./15. November ersetzen die unten benannten älteren Varianten. New Terra ist gemäß der Freigabe D5 vom 19. November der Arbeitstitel des Startplaneten. Die endgültige Benennung folgt einer gesonderten Entscheidung.
 
 ## 1. Leitidee
 
