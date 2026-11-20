@@ -1,5 +1,6 @@
 param(
     [string]$Assembly = (Join-Path $PSScriptRoot '../artifacts/bin/WorldsYetUnseen.Client/release/WorldsYetUnseen.Client.dll'),
+    [ValidateSet('far-horizon', 'orbit-combined')][string]$Composition = 'far-horizon',
     [string]$OutputDirectory = (Join-Path ([IO.Path]::GetTempPath()) ('wyu-sky-runner-fault-' + [guid]::NewGuid().ToString('N')))
 )
 
@@ -17,14 +18,16 @@ try {
     $env:PATH = ''
     $failure = $null
     try {
-        & (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1') -Smoke -Assembly $Assembly -OutputDirectory $OutputDirectory
+        & (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1') -Smoke -Composition $Composition -Assembly $Assembly -OutputDirectory $OutputDirectory
     } catch { $failure = $_.Exception.Message }
     if ($null -eq $failure -or $failure -notmatch 'start process.*dotnet') {
         throw "Expected the original native launch failure, received: $failure"
     }
     $attempts = @(Import-Csv -LiteralPath (Join-Path $OutputDirectory 'attempts.csv'))
+    $manifest = Get-Content -Raw -LiteralPath (Join-Path $OutputDirectory 'manifest.json') | ConvertFrom-Json
     $result = Get-Content -Raw -LiteralPath (Join-Path $OutputDirectory 'result.json') | ConvertFrom-Json
-    if ($attempts.Count -ne 1 -or $attempts[0].Started -cne 'False' -or $attempts[0].ProcessId -ne '0' -or
+    if ($manifest.Composition -cne $Composition.ToLowerInvariant() -or $attempts.Count -ne 1 -or
+        $attempts[0].Composition -cne $Composition.ToLowerInvariant() -or $attempts[0].Started -cne 'False' -or $attempts[0].ProcessId -ne '0' -or
         $attempts[0].Passed -cne 'False' -or $attempts[0].Failure -cne $failure -or
         $attempts[0].CleanupFailures -or $result.Status -cne 'BLOCKED' -or $result.Failure -cne $failure -or
         $result.Attempts -ne 1 -or $result.FailedAttempts -ne 1) {

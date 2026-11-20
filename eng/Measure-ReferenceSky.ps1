@@ -2,6 +2,7 @@ param(
     [string]$Assembly = (Join-Path $PSScriptRoot '../artifacts/bin/WorldsYetUnseen.Client/release/WorldsYetUnseen.Client.dll'),
     [Parameter(Mandatory)][string]$OutputDirectory,
     [ValidateSet('hardware', 'warp')][string]$Adapter = 'hardware',
+    [ValidateSet('far-horizon', 'orbit-combined')][string]$Composition = 'far-horizon',
     [string]$ExpectedClientSha256,
     [string]$ExpectedRendererSha256,
     [string]$RendererSourceCommit,
@@ -10,6 +11,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+$Composition = $Composition.ToLowerInvariant()
+if ($env:WYU_R09_LATENCY -eq '1') { throw 'Run R09 pressure qualification separately; this sky runner does not compose native pressure hooks.' }
 if (-not $Smoke -and $Adapter -ne 'hardware') { throw 'Full qualification requires the hardware adapter.' }
 $client = (Resolve-Path -LiteralPath $Assembly).Path
 if (Test-Path -LiteralPath $OutputDirectory) { throw 'Use a fresh evidence directory.' }
@@ -40,13 +43,15 @@ $identities = @{}
 $environmentNames = 'WYU_PACKAGE_G_MEASURE','WYU_SKY_MEASURE_SMOKE','WYU_SKY_MEASURE_PHASES',
     'WYU_PACKAGE_G','WYU_PACKAGE_G_SMOKE','WYU_PACKAGE_E','WYU_WP13_MEASURE','WYU_WP15',
     'WYU_WP15_PROBE','WYU_WP16','WYU_WP16_SMOKE','WYU_R09_LATENCY','WYU_HOST_RETRY_SMOKE',
-    'WYU_R09_RECOVERY_AT_HANDOFF','WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_TIMESTAMP_PAIRS'
+    'WYU_R09_RECOVERY_AT_HANDOFF','WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
+    'WYU_SKY_MEASURE_COMPOSITION','WYU_ORBIT_DEMO_SMOKE','WYU_ORBIT_PBR','WYU_ORBIT_BOULDER',
+    'WYU_ORBIT_PBR_MEASURE','WYU_ORBIT_CAPTURE','WYU_WP15_FLIP'
 $previous = @{}
 foreach ($name in $environmentNames) { $previous[$name] = [Environment]::GetEnvironmentVariable($name) }
 $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll' |
     ForEach-Object { [pscustomobject]@{ File=$_.Name; SHA256=(Get-FileHash -LiteralPath $_.FullName).Hash } }
 [pscustomobject]@{
-    Schema=1; Smoke=[bool]$Smoke; Qualified=$false; Adapter=$Adapter; Assembly=$client
+    Schema=2; Smoke=[bool]$Smoke; Qualified=$false; Adapter=$Adapter; Assembly=$client; Composition=$Composition
     StartedUtc=[DateTime]::UtcNow.ToString('O'); OS=[Environment]::OSVersion.VersionString
     Runtime=(& dotnet --version); Hashes=@($hashes); Pairs=$pairs; FlightsPerPairPerVariant=$replays
     SourceCommit=$sourceCommit; WorkingTreeStatus=$workingTree; RendererSourceCommit=$RendererSourceCommit
@@ -55,9 +60,11 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
     GpuFrameInterval='Clear through last draw pass in one graphics command list, excluding separate uploads and native Present. Phase geometry is held fixed.'
     PresentationConfiguration='Native DXGI Present syncInterval=1 flags=0. Actual compositor/scanout mode is not captured by this runner.'
     SamplesPerPhasePerRun=$count; Seeds=@(42,20261111); SkyProfile='wyu.far-horizon.atmosphere.v2'
-    Flags=@{ B='on'; E='on'; CanonicalG='on'; WP15='off'; Props='off' }
+    Flags=@{ B='on'; E='on'; CanonicalG='on'; WP15=$(if ($Composition -ceq 'orbit-combined') { 'on' } else { 'off' })
+        Props=$(if ($Composition -ceq 'orbit-combined') { 'on' } else { 'off' })
+        OrbitPreset=($Composition -ceq 'orbit-combined'); OrbitPbr=($Composition -ceq 'orbit-combined'); Boulder=($Composition -ceq 'orbit-combined') }
+    CpuInterval='Per-sequence sum of synchronous production atmosphere/sky/sunlight preparation and owner sky recording. Await, telemetry serialization, unrelated camera/terrain work are excluded.'
     OpenGates=@('Reference hardware identity and production limits must be supplied by the operator.',
-        'Combined atmosphere preparation/recording CPU and total heap allocation.',
         'Driver-aligned incremental peak GPU memory including overlapping handoff resources.',
         'Protected movement/edit and speculative CPU/GPU pressure qualification.',
         'Published immutable package provenance and installed flight/Continue acceptance.')
@@ -136,7 +143,9 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         $rows = @($lines | Where-Object { $_.StartsWith('PACKAGE G MEASURE ') } |
             ForEach-Object { $_.Substring('PACKAGE G MEASURE '.Length) | ConvertFrom-Json })
         $owners = @($rows | Where-Object kind -CEQ owner)
-        if ($owners.Count -ne 3 -or @($owners | Where-Object { $_.mode -cne $Mode -or $_.engineHash -cne $actualRendererHash }).Count) {
+        if ($owners.Count -ne 3 -or @($owners | Where-Object { $_.mode -cne $Mode -or $_.engineHash -cne $actualRendererHash -or
+                $_.composition -cne $Composition -or [bool]$_.wp15 -ne ($Composition -ceq 'orbit-combined') -or
+                [bool]$_.orbitPbr -ne ($Composition -ceq 'orbit-combined') -or [bool]$_.boulder -ne ($Composition -ceq 'orbit-combined') }).Count) {
             throw 'Missing or inconsistent near/far/near owner records.'
         }
         foreach ($direction in 'to-orbit','to-ground') {
@@ -146,7 +155,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 throw "Missing valid native Present handoff for $direction."
             }
             $h = $handoff[0]
-            $handoffs.Add([pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Seed=$seed; Direction=$direction
+            $handoffs.Add([pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Composition=$Composition; Seed=$seed; Direction=$direction
                 Owner=$h.owner; Fence=$h.fence; Sequence=$h.sequence; SourceFrameSequence=$h.sourceFrameSequence
                 StartQpc=$h.start; EndQpc=$h.end; Frequency=$h.frequency
                 Milliseconds=1000.0 * ($h.end - $h.start) / $h.frequency })
@@ -162,6 +171,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         if ($Replay -eq 1) {
             $gpu = @{}
             $cpu = @{}
+            $preparation = @{}
             foreach ($row in $rows) {
                 if ($row.kind -ceq 'gpu') {
                     $key = "$($row.owner)-$($row.sequence)"
@@ -173,12 +183,18 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                     if ($cpu.ContainsKey($key)) { throw 'Duplicate command recording timing.' }
                     $cpu.Add($key, $row)
                 }
+                if ($row.kind -ceq 'prepare') {
+                    $key = "$($row.owner)-$($row.sequence)"
+                    if ($preparation.ContainsKey($key)) { throw 'Duplicate atmosphere preparation timing.' }
+                    $preparation.Add($key, $row)
+                }
             }
             foreach ($phase in 'surface','ascent','orbit') {
                 $window = @($rows | Where-Object { $_.kind -ceq 'phase' -and $_.phase -ceq $phase })
                 if ($window.Count -ne 1) { throw "Missing $phase sequence window." }
                 $w = $window[0]
                 if ($w.last - $w.first + 1 -ne $count -or
+                    $w.composition -cne $Composition -or
                     (-not $Smoke -and ($w.width -ne 1920 -or $w.height -ne 1080))) { throw 'Unexpected sample window or resolution.' }
                 $identityKey = "$Pair-$phase"
                 if ($identities.ContainsKey($identityKey) -and $identities[$identityKey] -cne $w.identity) {
@@ -187,16 +203,25 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 $identities[$identityKey] = $w.identity
                 for ($i = [ulong]$w.first; $i -le [ulong]$w.last; $i++) {
                     $key = "$($w.owner)-$i"
-                    if (-not $gpu.ContainsKey($key) -or -not $cpu.ContainsKey($key)) { throw "Missing retired native sample $key." }
+                    if (-not $gpu.ContainsKey($key) -or -not $cpu.ContainsKey($key) -or -not $preparation.ContainsKey($key)) { throw "Missing retired native/preparation sample $key." }
                     $g = $gpu[$key]
                     $c = $cpu[$key]
+                    $p = $preparation[$key]
+                    if ($g.phase -cne $phase -or $c.phase -cne $phase -or $p.phase -cne $phase) { throw 'Native/preparation sample phase mismatch.' }
                     if ([bool]$g.hasSky -ne ($Mode -ceq 'on')) { throw 'The measured sky pass does not match the variant.' }
+                    if ([int]$c.draws -ne $(if ($Mode -ceq 'on') { 1 } else { 0 })) { throw 'Native sky draw count does not match the variant.' }
                     $frame = Number $g.frameMicroseconds
                     if ($frame -le 0) { throw 'Zero GPU frame timestamp interval.' }
-                    $samples.Add([pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Phase=$phase; Seed=$seed
+                    $recordMs = (Number $c.recordMicroseconds) / 1000
+                    $prepareMs = (Number $p.preparationMicroseconds) / 1000
+                    $recordAllocated = [long](Number $c.allocatedBytes)
+                    $prepareAllocated = [long](Number $p.allocatedBytes)
+                    $samples.Add([pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Composition=$Composition; Phase=$phase; Seed=$seed
                         Owner=$w.owner; Sequence=$i; Identity=$w.identity; Width=$w.width; Height=$w.height
                         FrameMs=$frame / 1000; SkyMs=(Number $g.skyMicroseconds) / 1000
-                        RecordMs=(Number $c.recordMicroseconds) / 1000; AllocatedBytes=[long]$c.allocatedBytes; Draws=[int]$c.draws })
+                        RecordMs=$recordMs; PreparationMs=$prepareMs; CombinedCpuMs=$recordMs + $prepareMs
+                        RecordAllocatedBytes=$recordAllocated; PreparationAllocatedBytes=$prepareAllocated
+                        AllocatedBytes=$recordAllocated + $prepareAllocated; Draws=[int]$c.draws })
                 }
             }
         }
@@ -222,7 +247,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             try { if ($stream[1]) { $stream[1].Dispose() } }
             catch { $cleanupFailures.Add("$($stream[0]) dispose: $($_.Exception.Message)") }
         }
-        $attempt = [pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Seed=$seed
+        $attempt = [pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Composition=$Composition; Seed=$seed
             Started=$started; ProcessId=$ownedProcessId; ExitCode=$exitCode
             Passed=($passed -and $cleanupFailures.Count -eq 0); Failure=$failure
             CleanupFailures=($cleanupFailures -join ' | '); Stdout=$log; Stderr=$errorLog }
@@ -244,6 +269,11 @@ try {
     $env:WYU_SKY_MEASURE_SMOKE = if ($Smoke) { '1' } else { '0' }
     $env:WYU_PACKAGE_G, $env:WYU_PACKAGE_G_SMOKE, $env:WYU_PACKAGE_E, $env:WYU_WP13_MEASURE = 'on','1','on','on'
     $env:WYU_WP15, $env:WYU_WP16 = 'off','off'
+    $env:WYU_SKY_MEASURE_COMPOSITION = $Composition
+    if ($Composition -ceq 'orbit-combined') {
+        $env:WYU_ORBIT_DEMO_SMOKE, $env:WYU_ORBIT_PBR, $env:WYU_ORBIT_BOULDER = '1','on','on'
+        $env:WYU_WP15, $env:WYU_WP16, $env:WYU_WP16_SMOKE = 'on','on','1'
+    }
     for ($pair = 1; $pair -le $pairs; $pair++) {
         $modes = if ($pair % 2) { 'off','on' } else { 'on','off' }
         foreach ($mode in $modes) {
@@ -275,10 +305,12 @@ foreach ($phase in 'surface','ascent','orbit') {
         $draws = ($on.Draws | Measure-Object -Maximum).Maximum
         $allocated = ($on.AllocatedBytes | Measure-Object -Maximum).Maximum
         $record99 = Percentile $on.RecordMs .99
-        $summary.Add([pscustomobject]@{ Kind='GPU'; Phase=$phase; Pair=$pair; OffCount=$off.Count; OnCount=$on.Count
+        $combined99 = Percentile $on.CombinedCpuMs .99
+        $summary.Add([pscustomobject]@{ Kind='GPU'; Phase=$phase; Pair=$pair; Composition=$Composition; OffCount=$off.Count; OnCount=$on.Count
             FrameP95DeltaPercent=$delta95; FrameP99DeltaPercent=$delta99; SkyP95Ms=$sky95; SkyP99Ms=$sky99
-            RecordP99Ms=$record99; RecordMaxAllocatedBytes=$allocated; SkyDrawsMax=$draws
-            Passed=($delta95 -le 5 -and $delta99 -le 8 -and $sky95 -le .8 -and $sky99 -le 1.2 -and $record99 -le .10 -and $draws -eq 1 -and $allocated -eq 0) })
+            RecordP99Ms=$record99; CombinedCpuP99Ms=$combined99; RecordMaxAllocatedBytes=($on.RecordAllocatedBytes | Measure-Object -Maximum).Maximum
+            CombinedMaxAllocatedBytes=$allocated; SkyDrawsMax=$draws
+            Passed=($delta95 -le 5 -and $delta99 -le 8 -and $sky95 -le .8 -and $sky99 -le 1.2 -and $combined99 -le .10 -and $draws -eq 1 -and $allocated -eq 0) })
     }
 }
 foreach ($direction in 'to-orbit','to-ground') {
@@ -288,9 +320,9 @@ foreach ($direction in 'to-orbit','to-ground') {
         $expected = if ($pair -eq 0) { $pairs * $replays } else { $replays }
         if ($off.Count -ne $expected -or $on.Count -ne $expected) { throw "Incomplete $direction handoff denominator." }
         $delta = 100 * ((Percentile $on.Milliseconds .95) / (Percentile $off.Milliseconds .95) - 1)
-        $summary.Add([pscustomobject]@{ Kind='handoff'; Phase=$direction; Pair=$pair; OffCount=$off.Count; OnCount=$on.Count
+        $summary.Add([pscustomobject]@{ Kind='handoff'; Phase=$direction; Pair=$pair; Composition=$Composition; OffCount=$off.Count; OnCount=$on.Count
             FrameP95DeltaPercent=$delta; FrameP99DeltaPercent=$null; SkyP95Ms=$null; SkyP99Ms=$null
-            RecordP99Ms=$null; RecordMaxAllocatedBytes=$null; SkyDrawsMax=$null; Passed=($delta -le 10) })
+            RecordP99Ms=$null; CombinedCpuP99Ms=$null; RecordMaxAllocatedBytes=$null; CombinedMaxAllocatedBytes=$null; SkyDrawsMax=$null; Passed=($delta -le 10) })
     }
 }
 $summary | Export-Csv -LiteralPath (Join-Path $root 'summary.csv') -NoTypeInformation

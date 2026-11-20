@@ -5,6 +5,11 @@ qualification passed after the DPI capture correction. The owner will run
 the performance evidence on the accepted i9-10850K / RTX 5070 reference system.
 Results from the RTX PRO 5000 workstation are diagnostic evidence only.
 
+The integrated candidate now includes Orbit Demo from WYU master and the complete
+Groundwork #186 follow-up. Earlier evidence applies only to its recorded heads.
+See [combined candidate acceptance](final-acceptance.md) for the integration
+boundary, current package baseline and the required renewed checks.
+
 ## Freeze the inputs
 
 Use clean checkouts of the final reviewed heads of Groundwork PR #193 and
@@ -63,13 +68,16 @@ or a production WYU installation.
 From the clean WYU checkout, with those recorded values:
 
 ```powershell
-./eng/Measure-ReferenceSky.ps1 `
-  -Assembly $clientAssembly `
-  -OutputDirectory D:\Evidence\sky-integrated-reference-01 `
-  -Adapter hardware `
-  -ExpectedClientSha256 $recordedClientSha256 `
-  -ExpectedRendererSha256 $recordedRendererSha256 `
-  -RendererSourceCommit $recordedRendererCommit
+foreach ($composition in 'far-horizon', 'orbit-combined') {
+  ./eng/Measure-ReferenceSky.ps1 `
+    -Assembly $clientAssembly `
+    -OutputDirectory "D:\Evidence\sky-$composition-reference-01" `
+    -Adapter hardware `
+    -Composition $composition `
+    -ExpectedClientSha256 $recordedClientSha256 `
+    -ExpectedRendererSha256 $recordedRendererSha256 `
+    -RendererSourceCommit $recordedRendererCommit
+}
 ```
 
 The variables above identify the controlled build; do not substitute values
@@ -80,20 +88,31 @@ Full mode runs five alternating off/on pairs with six fresh child flights
 per pair and variant: 60 attempts total, at least 30 handoffs in each
 direction per variant. The first child of each run supplies 400 retained
 samples after 40 warmups in each surface/ascent/orbit phase, giving 2,000
-samples per phase and variant. All required attempts must complete.
+samples per phase and variant. Each composition requires its own complete
+60-attempt run, for 120 attempts total. Retain failures from both compositions.
 
 Packages B/E and canonical G cameras stay enabled in both variants. Only the
 submitted sky value is removed in the off variant, after camera and globe
 construction, so the legacy off-camera/FOV cannot distort the comparison.
 The script rejects mismatching phase/route identities and incomplete counts.
+Far Horizon retains its original WP15/props-off measurement. Orbit combined
+uses its actual preset sun, PBR maps, boulders, sunlight/shadows and props in
+both variants. Strict held phases reject texture uploads that did not settle
+during warm-up. Canonical identities include sky, sunlight and scene transforms.
 
 The tool checks direct graphics-command-list GPU timestamps, sky cost,
-recording CPU/allocation/draw observations and exact successful-native-Present
+preparation plus recording CPU/allocation/draw observations and exact successful-native-Present
 handoffs. It retains per-run and pooled results and enforces unchanged total
 GPU p95 ≤+5% / p99 ≤+8%, sky ≤0.8/1.2 ms and handoff p95 ≤+10% limits. The
 graphics interval excludes separate uploads and native Present; phase geometry
 is held fixed. Native `Present(1, 0)` configuration is not verified compositor
 scanout/presentation-mode evidence.
+
+The integrated CPU interval now sums synchronous production weather/sky/sunlight
+preparation and owner sky recording for the exact owner/sequence. It excludes
+awaits, telemetry serialization and unrelated camera/terrain work. The 0.10 ms
+p99 and zero warmed allocation limits apply to the combined interval, not only
+the renderer recording subset. Raw samples retain both components.
 
 Return the **complete evidence directory**, including failed attempt logs,
 manifest, raw samples/handoffs and summary/result files. `SMOKE ONLY` is a
@@ -106,7 +125,8 @@ Do not edit those fields into an approval.
 | Gate | Required disposition |
 | --- | --- |
 | Reference results | Run the fixed protocol on the accepted machine; inspect every required phase/pair and retain failures. |
-| Application CPU and memory | Complete combined atmosphere preparation/recording and allocation evidence, and incremental peak GPU memory including overlapping handoff resources. The renderer-only counters do not prove these by themselves. |
+| CPU qualification | Inspect the measured combined atmosphere preparation/recording and allocation results on the reference system. This is not overall application frame CPU or protected-work evidence. |
+| Memory | Complete incremental peak GPU memory including driver backing and overlapping handoff resources. The resource ledger does not prove this by itself. |
 | Protected workload | Retain WP11 movement/edit/recovery and speculative CPU/GPU pressure limits against the accepted baseline. A static warm phase is not pressure qualification. |
 | Published package | Obtain the required final code approval and authorized engine merge, green master push CI and qualified immutable archive through existing policy. |
 | WYU package integration | Update all ten exact package pins, lockfiles and provenance digests together, then repeat the affected installed flight/Continue routes and CI. |

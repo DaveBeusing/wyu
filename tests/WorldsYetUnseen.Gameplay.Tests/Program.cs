@@ -19,6 +19,7 @@ internal static class Program
             (nameof(ReferenceDaylightTests.DarkNightsAndWarmTwilight), ReferenceDaylightTests.DarkNightsAndWarmTwilight),
             (nameof(ReferenceDaylightTests.ContinuousBoundedAndAllocationFree), ReferenceDaylightTests.ContinuousBoundedAndAllocationFree),
             (nameof(ReferenceDaylightTests.ClockAndRestoreParity), ReferenceDaylightTests.ClockAndRestoreParity),
+            (nameof(ReferenceDaylightTests.PresetSunOverridesClockWithoutChangingWeather), ReferenceDaylightTests.PresetSunOverridesClockWithoutChangingWeather),
             (nameof(ReferencePlanetTests.SeedAudit), ReferencePlanetTests.SeedAudit),
             (nameof(ReferencePlanetTests.ChartContinuity), ReferencePlanetTests.ChartContinuity),
             (nameof(ReferencePlanetTests.PublishedSpawnAndLanding), ReferencePlanetTests.PublishedSpawnAndLanding),

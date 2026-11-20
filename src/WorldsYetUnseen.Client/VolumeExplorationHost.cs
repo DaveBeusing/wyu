@@ -25,6 +25,9 @@ internal static partial class GameHost
         var runtime = RuntimeSafetyAuthority.Create(clock, timing, reservation);
         var context = new EngineModuleContext(clock, timing, runtime.Reporter, runtime.StopControl);
         var scripted = smokeSeed.HasValue || saveSmoke is not null || caveSmoke is not null;
+        var readbackSmoke = flightSmoke && saveSmoke is "readback" or "marker-readback";
+        var orbitSmoke = scripted && !readbackSmoke && caveSmoke is null &&
+            Environment.GetEnvironmentVariable("WYU_ORBIT_DEMO_SMOKE") == "1";
         var measureSunlight = scripted && Environment.GetEnvironmentVariable("WYU_WP15_PROBE") == "measure";
         var window = new WindowsHostModule(new WindowsHostOptions(
             scripted ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen — New World", 960, 540, 256),
@@ -38,7 +41,7 @@ internal static partial class GameHost
             Environment.GetEnvironmentVariable("WYU_R09_LATENCY") == "1";
         using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure, measureR09)
         {
-            WarpReadback = flightSmoke && saveSmoke is "readback" or "marker-readback"
+            WarpReadback = readbackSmoke
                 ? new Wp11WarpReadback(saveRoot!, markerOnly: saveSmoke == "marker-readback") : null,
         };
         VolumeStreamingCoordinator? terrain = null;
@@ -53,8 +56,9 @@ internal static partial class GameHost
             diagnostics?.Enter("WorldSelection");
             await window.InitializeAsync(context, token).ConfigureAwait(false);
             await window.StartAsync(token).ConfigureAwait(false);
-            if ((measureSunlight || SkyMeasurements.Enabled && !SkyMeasurements.Smoke) && !AlphaWindowSize.TryApply((1920, 1080)))
-                throw new InvalidOperationException("The WP15 probe requires a 1920x1080 client area.");
+            if ((measureSunlight || orbitSmoke && OrbitPbrMeasurements.Enabled || SkyMeasurements.Enabled && !SkyMeasurements.Smoke) &&
+                !AlphaWindowSize.TryApply((1920, 1080)))
+                throw new InvalidOperationException("The renderer probe requires a 1920x1080 client area.");
             watchClose = WatchWindowCloseAsync(window, stage);
             var settings = settingsDirectory is null ? AlphaSettings.Defaults : new AlphaSettingsStore(settingsDirectory).Load().Value;
             if (!scripted)
@@ -68,8 +72,8 @@ internal static partial class GameHost
             else if (caveSmoke is not null)
                 slot = await OpenCaveSmokeSlotAsync(saveRoot!, caveSmoke, token).ConfigureAwait(false);
             else if (saveSmoke is not null)
-                slot = await OpenVolumeSmokeSlotAsync(saveRoot!, saveSmoke is "flight" or "abort" or "readback" or "marker-readback" ? "init" : saveSmoke,
-                    token, flightSmoke ? smokeSeed ?? 42 : 42)
+                slot = await OpenVolumeSmokeSlotAsync(saveRoot!, readbackSmoke || saveSmoke is "flight" or "abort" ? "init" : saveSmoke,
+                    token, flightSmoke ? smokeSeed ?? 42 : 42, orbitSmoke)
                     .ConfigureAwait(false);
             if (!scripted && slot is null)
             {
@@ -107,10 +111,31 @@ internal static partial class GameHost
             if (!scripted)
                 mouse = new PrototypeMouseLook(window, settings);
             var retrySmoke = scripted ? Environment.GetEnvironmentVariable("WYU_HOST_RETRY_SMOKE") : null;
-            exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld)
+            var orbitDemo = slot?.OrbitDemo ?? orbitSmoke;
+            string? orbitMaterialFallbackNotice = null;
+            if (orbitDemo && OrbitDemoPreset.PbrEnabled)
+            {
+                try
+                {
+                    renderHost.OrbitMaterials = await Task.Run(OrbitTerrainMaterials.Load, token).ConfigureAwait(false);
+                }
+                catch (InvalidDataException error)
+                {
+                    if (scripted && OrbitPbrMeasurements.Enabled)
+                        throw new InvalidDataException($"Orbit PBR measurement stopped. {error.Message}", error);
+
+                    orbitMaterialFallbackNotice = $"{error.Message}\nUsing base colors for Orbit terrain.";
+                    diagnostics?.Write("orbit-texture-fallback", error.ToString());
+                    if (scripted)
+                        Console.Error.WriteLine(orbitMaterialFallbackNotice);
+                }
+            }
+            exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld, orbitDemo)
             {
                 VerifyTerrainRetries = retrySmoke == "1",
                 R09RenderHost = measureR09 ? renderHost : null,
+                OrbitMaterialHost = renderHost.BuildsOrbitalMaterials ? renderHost : null,
+                OrbitMaterialFallbackNotice = orbitMaterialFallbackNotice,
                 ExhaustTerrainRetry = retrySmoke switch
                 {
                     "Movement" => VolumeWorkClass.Movement,
@@ -119,9 +144,9 @@ internal static partial class GameHost
                     _ => null,
                 },
             };
-            var propsSmoke = scripted && Environment.GetEnvironmentVariable("WYU_WP16_SMOKE") == "1";
+            var propsSmoke = scripted && (orbitDemo || Environment.GetEnvironmentVariable("WYU_WP16_SMOKE") == "1");
             if (planet is not null && (propsSmoke || !scripted && Environment.GetEnvironmentVariable("WYU_WP16") != "off"))
-                exploration.Props = renderHost.Props = new ReferenceProps(planet);
+                exploration.Props = renderHost.Props = new ReferenceProps(planet, orbitDemo && OrbitDemoPreset.BoulderEnabled);
             if (planet is not null && (!scripted || BiomeMeasurements.UseBiomes || propsSmoke))
                 renderHost.SetBiomes(new ReferenceBiomes(planet));
             if (measureR09)
@@ -267,13 +292,15 @@ internal static partial class GameHost
         var selected = 0;
         var caveOption = slots.Length + 1;
         var connectedOption = caveOption + 1;
-        var referenceOption = connectedOption + 1;
+        var orbitOption = freeTestWorld ? connectedOption + 1 : -1;
+        var referenceOption = connectedOption + (freeTestWorld ? 2 : 1);
         var optionCount = referenceOption + 1;
         ulong? replacementSeed = null;
         string? notice = null;
         while (true)
         {
             var label = selected == 0 ? (freeTestWorld ? $"New Test World\n{VolumeWorldSlot.ProfileName(defaultProfile)}" : "New World") :
+                selected == orbitOption ? $"New {OrbitDemoPreset.DisplayName}\nSeed {OrbitDemoPreset.Seed} · sunset lighting" :
                 selected == referenceOption ? "New Far Horizon World\nBiomes, weather, sky, shadows and vegetation" : selected == connectedOption
                 ? $"New V3 World\n{CavePlanet.ConnectedName} · seed {CavePlanet.Seed}" : selected == caveOption
                 ? $"New Cave World\n{CavePlanet.Name} · seed {CavePlanet.Seed}" : $"Continue {selected}/{slots.Length}\n{slots[selected - 1]:N}";
@@ -291,6 +318,9 @@ internal static partial class GameHost
             if (!PrototypeMenu.Pressed(input, InputControl.Enter))
                 continue;
 
+            if (selected == orbitOption)
+                return await Task.Run(() => VolumeWorldSlot.Create(root, OrbitDemoPreset.Seed, VolumeWorldSlot.WorldProfile.OrbitDemo))
+                    .ConfigureAwait(false);
             if (selected == connectedOption)
                 return await Task.Run(() => VolumeWorldSlot.Create(root, CavePlanet.Seed, VolumeWorldSlot.WorldProfile.Connected)).ConfigureAwait(false);
             if (selected == caveOption)

@@ -23,8 +23,15 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     internal Wp11WarpReadback? WarpReadback { get; init; }
     internal R09NativeUploadGate? R09UploadGate { get; private set; }
     private VolumeTerrainColorEvaluator? _colorEvaluator;
+    private D3D12TextureHandoff? _materialStream;
+    private D3D12TextureView? _materialCut;
+    private bool _materialRequestsPending;
+    private bool _orbitalMaterialCut;
     internal ReferenceProps? Props { get; set; }
     internal ReferenceBiomes? Biomes { get; private set; }
+    internal OrbitTerrainMaterials? OrbitMaterials { private get; set; }
+
+    internal bool BuildsOrbitalMaterials => OrbitMaterials is not null;
 
     internal void SetBiomes(ReferenceBiomes biomes)
     {
@@ -40,17 +47,68 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     internal Task NearAsync(VolumeStreamingCoordinator terrain, CancellationToken token, Action? onStarted = null) =>
         StartAsync(owner =>
         {
-            var renderer = D3D12Renderer.CreateWithSessionVolumeTerrain(window, owner, terrain,
-                terrain.View.RendererEpoch, _device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
+            D3D12Renderer renderer;
+            if (OrbitMaterials is { } materials)
+            {
+                renderer = D3D12Renderer.CreateWithTexturedSessionVolumeTerrain(window, owner, terrain,
+                    terrain.View.RendererEpoch, _device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
+                var stream = materials.CreateStream();
+                renderer.AttachTextureHandoff(stream);
+                _materialStream = stream;
+            }
+            else
+                renderer = D3D12Renderer.CreateWithSessionVolumeTerrain(window, owner, terrain,
+                    terrain.View.RendererEpoch, _device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
             if (qualifyR09)
                 R09UploadGate = R09NativeUploadGate.Attach(renderer);
             Props?.Attach(renderer);
             return renderer;
         }, token, onStarted);
 
-    internal Task FarAsync(RenderMeshPair globe, CancellationToken token) =>
-        StartAsync(owner => D3D12Renderer.CreateWithSessionMeshes(window, owner, globe, _device,
-            timing.Shutdown, timing.Shutdown), token);
+    internal void PublishSurfaceMaterials(D3D12Renderer renderer, Guid world, in VolumePublicationInfo publication, bool presented)
+    {
+        if (OrbitMaterials is not { } materials || _materialStream is not { } stream ||
+            !ReferenceEquals(renderer, Current) || (!presented && !_materialCut.HasValue))
+            return;
+
+        var view = new D3D12TextureView(world, publication.View, publication.TerrainRevision, publication.Generation);
+        if (_materialCut == view && !_materialRequestsPending)
+            return;
+        QueueMaterialCut(materials, stream, view);
+    }
+
+    // A superseded copy can temporarily occupy a slot. Retry at a bounded cadence
+    // without gating a protected terrain frame on optional upload admission.
+    internal void RetryMaterials(D3D12Renderer renderer, ulong sequence)
+    {
+        if (_materialRequestsPending && (sequence & 15) == 0 && ReferenceEquals(renderer, Current) &&
+            OrbitMaterials is { } materials && _materialStream is { } stream && _materialCut is { } cut)
+            QueueMaterialCut(materials, stream, cut);
+    }
+
+    private void QueueMaterialCut(OrbitTerrainMaterials materials, D3D12TextureHandoff stream, D3D12TextureView cut)
+    {
+        _materialCut = cut;
+        _materialRequestsPending = materials.Publish(stream, cut, _orbitalMaterialCut) == OrbitTerrainMaterials.Scheduling.Retry;
+    }
+
+    internal Task FarAsync(ProceduralGlobe.Geometry globe, Guid world, VolumePublicationInfo near, CancellationToken token) =>
+        StartAsync(owner =>
+        {
+            if (!globe.Textured || OrbitMaterials is not { } materials)
+                return D3D12Renderer.CreateWithSessionMeshes(window, owner, globe.Meshes, _device,
+                    timing.Shutdown, timing.Shutdown);
+
+            var view = new VolumeViewIdentity(checked(near.View.RendererEpoch + 1), 1, PlanetLocalFrame.Create(default));
+            var cut = new D3D12TextureView(world, view, near.TerrainRevision, 1);
+            var stream = materials.CreateStream();
+            _materialStream = stream;
+            _orbitalMaterialCut = true;
+            QueueMaterialCut(materials, stream, cut);
+            var region = new RenderMeshRegion([globe.Meshes.First, globe.Meshes.Second]);
+            return D3D12Renderer.CreateWithSessionTexturedMeshes(window, owner, region, _device, stream, cut,
+                timing.Shutdown, timing.Shutdown);
+        }, token);
 
     public void Dispose() => _device.Dispose();
 
@@ -96,6 +154,10 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
         _runtime = null;
         Current = null;
         R09UploadGate = null;
+        _materialStream = null;
+        _materialCut = null;
+        _materialRequestsPending = false;
+        _orbitalMaterialCut = false;
         if (qualifyHandoff && renderer is not null)
             DesktopSmoke.VerifyAdapterSettlement(renderer, requireDebugLayer: !measure, requireNvidia: !warp,
                 useWarp: warp, allowRetainedSessionQueue: true);
@@ -113,13 +175,15 @@ internal static class ProceduralGlobe
     // Directions and topology depend only on the fixed globe LOD.
     internal static void Prepare() => _ = Plan.Value;
 
-    internal static RenderMeshPair Build(ReferencePlanet planet, PlanetVector pad, ReferenceBiomes? biomes, CancellationToken token)
-    {
-        return Build(planet.Descriptor, planet.Field.SampleLandform, planet.Field.SampleMaterial, pad, biomes, token);
-    }
+    internal sealed record Geometry(RenderMeshPair Meshes, bool Textured);
 
-    internal static RenderMeshPair Build(PlanetDescriptor descriptor, Func<LatticeCoordinate, PlanetLandform> landform,
-        Func<LatticeCoordinate, ushort> material, PlanetVector pad, ReferenceBiomes? biomes, CancellationToken token)
+    internal static Geometry Build(ReferencePlanet planet, PlanetVector pad, ReferenceBiomes? biomes, CancellationToken token,
+        bool textured = false) =>
+        Build(planet.Descriptor, planet.Field.SampleLandform, planet.Field.SampleMaterial, pad, biomes, token, textured);
+
+    internal static Geometry Build(PlanetDescriptor descriptor, Func<LatticeCoordinate, PlanetLandform> landform,
+        Func<LatticeCoordinate, ushort> material, PlanetVector pad, ReferenceBiomes? biomes, CancellationToken token,
+        bool textured = false)
     {
         var plan = Plan.Value;
         var samples = new GlobeSample[plan.Directions.Length];
@@ -136,8 +200,11 @@ internal static class ProceduralGlobe
         });
 
         token.ThrowIfCancellationRequested();
-        return new(new(BuildHalf(plan.First, samples, pad, false), Vector3.Zero),
-            new(BuildHalf(plan.Second, samples, pad, true), Vector3.Zero));
+        var first = BuildHalf(plan.First, samples, pad, marker: false, textured, out var texturedFirst);
+        var second = BuildHalf(plan.Second, samples, pad, marker: true, textured, out var texturedSecond);
+        return texturedFirst is not null && texturedSecond is not null
+            ? new(new(new(texturedFirst, Vector3.Zero), new(texturedSecond, Vector3.Zero)), true)
+            : new(new(new(first, Vector3.Zero), new(second, Vector3.Zero)), false);
     }
 
     internal static GlobeSample Sample(PlanetDescriptor descriptor, Func<LatticeCoordinate, PlanetLandform> landform,
@@ -160,28 +227,48 @@ internal static class ProceduralGlobe
         var material = sampleMaterial(vertex);
         var color = biomes?.Color(position, material) ??
             (material == (ushort)ReferenceTerrainMaterial.Basalt ? 0xff6f806au : 0xff76a3c4u);
-        return new(Float(position), color);
+        return new(position, material, color);
     }
 
-    private static RenderMesh BuildHalf(HalfPlan half, GlobeSample[] samples, PlanetVector pad, bool marker)
+    private static RenderMesh BuildHalf(HalfPlan half, GlobeSample[] samples, PlanetVector pad, bool marker,
+        bool textured, out RenderMesh? mapped)
     {
         var count = half.SampleIndices.Length;
         var vertices = new Vector3[count + (marker ? 4 : 0)];
         var colors = new uint[vertices.Length];
+        var canonical = textured ? new PlanetVector[vertices.Length] : [];
+        var materials = textured ? new ushort[vertices.Length] : [];
         for (var i = 0; i < count; i++)
         {
             var sample = samples[half.SampleIndices[i]];
-            vertices[i] = sample.Position;
+            vertices[i] = Float(sample.Position);
             colors[i] = sample.Color;
+            if (textured)
+            {
+                canonical[i] = sample.Position;
+                materials[i] = sample.Material;
+            }
         }
 
-        if (!marker)
-            return RenderMesh.Create(vertices, half.Indices, colors);
+        var indices = half.Indices;
+        if (marker)
+        {
+            indices = new uint[half.Indices.Length + 6];
+            half.Indices.CopyTo(indices, 0);
+            AddMarker(vertices.AsSpan(count), indices.AsSpan(half.Indices.Length), colors.AsSpan(count), pad, (uint)count);
+            for (var i = count; textured && i < vertices.Length; i++)
+            {
+                var point = vertices[i];
+                canonical[i] = new(point.X, point.Y, point.Z);
+                materials[i] = OrbitTerrainMaterials.OrbitalMarkerMaterial;
+            }
+        }
 
-        var indices = new uint[half.Indices.Length + 6];
-        half.Indices.CopyTo(indices, 0);
-        AddMarker(vertices.AsSpan(count), indices.AsSpan(half.Indices.Length), colors.AsSpan(count), pad, (uint)count);
-        return RenderMesh.Create(vertices, indices, colors);
+        var mesh = RenderMesh.Create(vertices, indices, colors);
+        mapped = null;
+        if (textured)
+            D3D12Renderer.TryBuildOrbitalTerrainMesh(mesh, canonical, materials, out mapped);
+        return mesh;
     }
 
     private static SamplingPlan CreatePlan()
@@ -230,7 +317,7 @@ internal static class ProceduralGlobe
 
     private sealed record SamplingPlan(PlanetVector[] Directions, HalfPlan First, HalfPlan Second);
     private sealed record HalfPlan(int[] SampleIndices, uint[] Indices);
-    internal readonly record struct GlobeSample(Vector3 Position, uint Color);
+    internal readonly record struct GlobeSample(PlanetVector Position, ushort Material, uint Color);
 
     private static void AddMarker(Span<Vector3> vertices, Span<uint> indices, Span<uint> colors, PlanetVector pad, uint offset)
     {
@@ -273,7 +360,8 @@ internal static class ProceduralGlobe
     internal static RenderFrame Frame(ulong sequence, VolumeCamera camera) =>
         new(sequence, camera.Sky is not null || camera.Fog is not null ? camera.ClearColor : Space,
             new RenderScene(Matrix4x4.Identity, camera.Tint,
-                Matrix4x4.CreateLookTo(Float(camera.Position), camera.Forward, camera.Up), FieldOfView, 1f, 10_000f))
+                Matrix4x4.CreateLookTo(Float(camera.Position), camera.Forward, camera.Up), FieldOfView, 1f, 10_000f)
+            { Sunlight = camera.Sunlight })
         { Sky = camera.Sky };
 
     internal static RenderFrame LegacyFrame(ulong sequence, PlanetVector position, PlanetVector heading, ReferenceAtmosphere? atmosphere)

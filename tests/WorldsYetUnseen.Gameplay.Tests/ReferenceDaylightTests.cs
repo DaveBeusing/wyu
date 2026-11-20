@@ -67,6 +67,33 @@ internal static class ReferenceDaylightTests
             "The existing 36,000-tick solar cycle was discontinuous.");
     }
 
+    internal static void PresetSunOverridesClockWithoutChangingWeather()
+    {
+        foreach (var seed in new ulong[] { 42, 20261111 })
+        {
+            var planet = new ReferencePlanet(new("aa0567e4-de48-416b-a55d-e21caf4fef6a"), seed);
+            var weather = new ReferenceWeather(planet);
+            var position = new PlanetVector(0, ReferencePlanet.RadiusMeters, 0);
+            foreach (var tick in new ulong[] { 0, 9_000, 18_000, 27_000, 35_999 })
+            {
+                var clock = weather.Evaluate(position, tick, 0.5);
+                foreach (var direction in new[] { Vector3.UnitY, -Vector3.UnitY,
+                    Vector3.Normalize(new Vector3(0.68f, 0.18f, 0.70f)) })
+                {
+                    var actual = weather.Evaluate(position, tick, 0.5, direction);
+                    var expected = ReferenceDaylight.Evaluate(direction.Y);
+                    Require(actual.Tint == expected.Tint && actual.Sky == expected.Background,
+                        "Preset sky/weather lighting ignored the shared solar direction.");
+                    Require(actual.FogStart == clock.FogStart && actual.FogEnd == clock.FogEnd &&
+                        actual.FogOpacity == clock.FogOpacity,
+                        "A presentation-only sun override changed the weather-density recipe.");
+                    Require(actual == new ReferenceWeather(planet).Evaluate(position, tick, 0.5, direction),
+                        "Preset lighting changed after a fresh weather cache/Continue.");
+                }
+            }
+        }
+    }
+
     private static Vector3 AsVector3(this Vector4 value) => new(value.X, value.Y, value.Z);
     private static bool Bounded(Vector3 v) => float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z) &&
         v.X is >= 0 and <= 1 && v.Y is >= 0 and <= 1 && v.Z is >= 0 and <= 1;

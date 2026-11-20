@@ -15,11 +15,13 @@ public sealed class ReferenceWeather(ReferencePlanet planet)
     private readonly ReferenceBiomes _biomes = new(planet);
     private readonly Entry[] _entries = new Entry[16];
 
-    public ReferenceAtmosphere Evaluate(PlanetVector position, ulong tick, double fraction = 0)
+    public ReferenceAtmosphere Evaluate(PlanetVector position, ulong tick, double fraction = 0, Vector3? sunDirection = null)
     {
         var radius = Math.Sqrt(position.X * position.X + position.Y * position.Y + position.Z * position.Z);
         var sun = SolarComponents(tick, fraction);
-        var elevation = (position.Y * sun.Sin + position.Z * sun.Cos) / radius;
+        var elevation = sunDirection is { } direction
+            ? (position.X * direction.X + position.Y * direction.Y + position.Z * direction.Z) / radius
+            : (position.Y * sun.Sin + position.Z * sun.Cos) / radius;
         var light = ReferenceDaylight.Evaluate((float)elevation);
         var altitude = radius - planet.Descriptor.RadiusMeters;
         var density = altitude >= 72 ? 0f : (float)Density(position, tick, fraction);

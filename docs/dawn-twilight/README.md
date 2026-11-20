@@ -1,5 +1,9 @@
 # Dawn and twilight candidate
 
+For the integrated Orbit/master candidate, renewed evidence and remaining gates,
+see [combined candidate acceptance](final-acceptance.md). Captures and raw logs
+below retain their original source identities; they do not certify a later merge.
+
 These are unretouched captures of the seed-42 disposable WYU reference-world
 fixture. BMP captures were converted losslessly to PNG. Matching JSON files
 record canonical eye/view, solar elevation, clock sample, weather opacity and

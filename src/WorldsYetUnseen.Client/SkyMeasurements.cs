@@ -33,6 +33,8 @@ internal sealed class SkyMeasurements
     internal static bool CollectPhases => Enabled && Environment.GetEnvironmentVariable("WYU_SKY_MEASURE_PHASES") == "1";
     internal static int Warmup => Smoke ? 4 : 40;
     internal static int Samples => Smoke ? 8 : 400;
+    internal static string Composition => Environment.GetEnvironmentVariable("WYU_SKY_MEASURE_COMPOSITION") ?? "far-horizon";
+    internal static bool OrbitCombined => Composition == "orbit-combined";
 
     internal static VolumeCamera Submit(VolumeCamera camera) => Enabled && Mode == "off" ? camera with { Sky = null } : camera;
     internal static RenderFrame Submit(RenderFrame frame) => Enabled && Mode == "off" ? frame with { Sky = null } : frame;
@@ -41,6 +43,21 @@ internal sealed class SkyMeasurements
     {
         if (!Enabled)
             return;
+        if (Composition is not ("far-horizon" or "orbit-combined"))
+            throw new InvalidOperationException("Unknown sky measurement composition.");
+        if (Environment.GetEnvironmentVariable("WYU_R09_LATENCY") == "1")
+            throw new InvalidOperationException("Sky and R09 qualification hooks must run separately; combined pressure is not qualified by this route.");
+        if (OrbitCombined && (Environment.GetEnvironmentVariable("WYU_ORBIT_DEMO_SMOKE") != "1" ||
+            Environment.GetEnvironmentVariable("WYU_ORBIT_PBR") != "on" ||
+            Environment.GetEnvironmentVariable("WYU_ORBIT_BOULDER") != "on" ||
+            Environment.GetEnvironmentVariable("WYU_WP15") != "on" ||
+            Environment.GetEnvironmentVariable("WYU_WP16") != "on" ||
+            Environment.GetEnvironmentVariable("WYU_WP16_SMOKE") != "1"))
+            throw new InvalidOperationException("Orbit-combined sky measurement requires the Orbit preset, PBR, boulder and WP15/WP16 in both variants.");
+        if (!OrbitCombined && (Environment.GetEnvironmentVariable("WYU_ORBIT_DEMO_SMOKE") == "1" ||
+            Environment.GetEnvironmentVariable("WYU_WP15") == "on" ||
+            Environment.GetEnvironmentVariable("WYU_WP16_SMOKE") == "1"))
+            throw new InvalidOperationException("Far-horizon sky measurement cannot silently include Orbit, WP15 or props.");
         if (!ReferenceSky.Enabled || !BiomeMeasurements.UseBiomes || Environment.GetEnvironmentVariable("WYU_PACKAGE_E") != "on")
             throw new InvalidOperationException("Sky measurement requires canonical G cameras and Packages B/E enabled.");
         var type = typeof(D3D12Renderer);
@@ -71,7 +88,9 @@ internal sealed class SkyMeasurements
         Owners.Add(renderer, observer);
         Write(new { kind = "owner", owner = observer._owner, mode = Mode, frequency = Stopwatch.Frequency,
             smoke = Smoke, engine = assembly.GetName().Version?.ToString(), engineHash = EngineHash.Value,
-            wp15 = ReferenceSunlight.Enabled });
+            wp15 = ReferenceSunlight.Enabled, composition = Composition,
+            orbitPbr = OrbitCombined && OrbitDemoPreset.PbrEnabled,
+            boulder = OrbitCombined && OrbitDemoPreset.BoulderEnabled });
 
         void Bind(string name, Delegate callback)
         {
@@ -140,7 +159,16 @@ internal sealed class SkyMeasurements
         if (!Smoke && (size.AppliedWidth != 1920 || size.AppliedHeight != 1080))
             throw new InvalidOperationException("Full sky measurements require a 1920x1080 render extent.");
         Write(new { kind = "phase", owner = observer._owner, phase, first, last, identity,
-            width = size.AppliedWidth, height = size.AppliedHeight });
+            width = size.AppliedWidth, height = size.AppliedHeight, composition = Composition });
+    }
+
+    internal static void Prepared(D3D12Renderer renderer, ulong sequence, double microseconds, long allocatedBytes)
+    {
+        var observer = Owners.GetValue(renderer, _ => throw Mismatch());
+        var window = Volatile.Read(ref observer._window);
+        if (window is not null && sequence >= window.First && sequence <= window.Last)
+            Write(new { kind = "prepare", owner = observer._owner, sequence, phase = window.Phase,
+                preparationMicroseconds = microseconds, allocatedBytes });
     }
 
     internal static void Write(object value) => Console.WriteLine("PACKAGE G MEASURE " + JsonSerializer.Serialize(value));
@@ -153,44 +181,96 @@ internal sealed partial class VolumeExploration
 {
     private static readonly JsonSerializerOptions SkyMeasurementJson = new() { IncludeFields = true };
     private async Task MeasureSkyPhaseAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
-        VolumeCamera camera, string phase, bool far, ulong tick, CancellationToken token)
+        VolumeCamera camera, string phase, bool far, ulong tick, CancellationToken token, bool texturedOrbit = false)
     {
         if (!SkyMeasurements.CollectPhases)
             return;
-        if (!far)
-            camera = ApplySunlight(camera, tick, 0);
+        if (SkyMeasurements.OrbitCombined && (!orbitDemo || OrbitMaterialHost is null || !far && Props is null || far && !texturedOrbit))
+            throw new InvalidOperationException("Orbit-combined measurement requires the production Orbit material/prop route, without a base-color fallback.");
+        var supplied = camera;
+        var suppliedNear = supplied.Sunlight.HasValue ? supplied : ApplySunlight(supplied, tick, 0);
+        var expected = !far || texturedOrbit ? suppliedNear : orbitDemo && suppliedNear.Sunlight is { } suppliedSun
+            ? supplied with { Tint = ReferenceSunlight.GlobeTint(supplied.Position, suppliedSun) } : supplied;
+        // Production cameras start with neutral environment fields. Preserve the
+        // fixed pose/projection while rebuilding exactly the synchronous weather,
+        // sky and sunlight chain; never include await/logging in its CPU interval.
+        var baseCamera = camera with { Tint = System.Numerics.Vector4.One, ClearColor = Sky,
+            Fog = null, Sky = null, Sunlight = null, TerrainShadows = false };
+        camera = PrepareCamera();
+        if (camera != expected)
+            throw new InvalidOperationException("The held preparation does not reproduce the production atmosphere camera.");
+        var canonicalScene = far ? ProceduralGlobe.Frame(1, camera).Scene : null;
         var canonical = new { seed = Descriptor.Seed, tick, camera.Position, camera.Forward, camera.Up,
-            camera.FieldOfView, camera.Tint, camera.ClearColor, camera.Fog, revision = _published.TerrainRevision };
+            camera.FieldOfView, camera.NearPlane, camera.FarPlane, camera.Tint, camera.ClearColor, camera.Fog,
+            camera.Sunlight, camera.Sky, camera.TerrainShadows, camera.View.Frame, scene = canonicalScene,
+            revision = _published.TerrainRevision, profile = ReferenceSky.Profile,
+            composition = SkyMeasurements.Composition, orbitDemo, texturedOrbit,
+            pbr = SkyMeasurements.OrbitCombined && OrbitDemoPreset.PbrEnabled,
+            boulder = SkyMeasurements.OrbitCombined && OrbitDemoPreset.BoulderEnabled,
+            wp15 = ReferenceSunlight.Enabled, props = Props is not null };
         var bytes = JsonSerializer.SerializeToUtf8Bytes(canonical, SkyMeasurementJson);
         var identity = Convert.ToHexString(SHA256.HashData(bytes));
         var count = SkyMeasurements.Warmup + SkyMeasurements.Samples;
         var first = _sequence + 1;
         SkyMeasurements.BeginPhase(renderer, phase, first + (ulong)SkyMeasurements.Warmup,
             first + (ulong)count - 1, identity);
+        var heldTextures = renderer.ReadTextureDiagnostics();
         for (var i = 0; i < count + 1; i++)
         {
             var begin = await BeginAsync(token).ConfigureAwait(false);
             terrain.BeginTick(begin);
             Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
             var sequence = ++_sequence;
+            var allocated = GC.GetAllocatedBytesForCurrentThread();
+            var started = Stopwatch.GetTimestamp();
+            var prepared = PrepareCamera();
+            var preparationMicroseconds = Stopwatch.GetElapsedTime(started).TotalMicroseconds;
+            var preparationAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocated;
+            if (prepared != camera)
+                throw new InvalidOperationException("The held atmosphere preparation changed its canonical inputs.");
+            SkyMeasurements.Prepared(renderer, sequence, preparationMicroseconds, preparationAllocatedBytes);
+            OrbitMaterialHost?.RetryMaterials(renderer, sequence);
             if (far)
-                RequireFrame(renderer.TrySubmit(SkyMeasurements.Submit(ProceduralGlobe.Frame(sequence, camera))));
+                RequireFrame(renderer.TrySubmit(SkyMeasurements.Submit(ProceduralGlobe.Frame(sequence, prepared))));
             else
-                RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, SkyMeasurements.Submit(camera)));
+            {
+                Props?.Pump();
+                RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, SkyMeasurements.Submit(prepared)));
+            }
             await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
             Drain(terrain);
+            if (i == SkyMeasurements.Warmup - 1)
+                heldTextures = renderer.ReadTextureDiagnostics();
+            if (!SkyMeasurements.Smoke && SkyMeasurements.OrbitCombined && i >= SkyMeasurements.Warmup)
+            {
+                var currentTextures = renderer.ReadTextureDiagnostics();
+                if (heldTextures.UploadedBytes == 0 || currentTextures.UploadedBytes != heldTextures.UploadedBytes || currentTextures.StagingBytes != 0)
+                    throw new InvalidOperationException("Orbit texture uploads did not settle before the held measurement window.");
+            }
         }
         using var published = terrain.TryRead();
         if (!far && (published is null || published.Info.TerrainRevision != _published.TerrainRevision))
             throw new InvalidOperationException("Sky-only sampling changed the terrain revision.");
         if (!renderer.TryReadResourceDiagnostics(out var resources))
             throw new InvalidOperationException("Sky measurement resource snapshot is unavailable.");
+        var textureSnapshot = renderer.ReadTextureDiagnostics();
+        SkyMeasurements.Write(new { kind = "textures", phase, composition = SkyMeasurements.Composition,
+            textureSnapshot.UploadedBytes, textureSnapshot.NativeHighWaterBytes });
         foreach (var owner in Enum.GetValues<D3D12ResourceOwner>())
         {
             var balance = resources.GetBalance(owner);
             SkyMeasurements.Write(new { kind = "resource", phase, resourceOwner = owner.ToString(),
                 balance.Live, balance.LiveBytes, balance.Retained, balance.RetainedBytes,
                 resources.LedgerHasUnknownSizes, resources.LedgerOverflowed });
+        }
+
+        VolumeCamera PrepareCamera()
+        {
+            var weather = Atmosphere(baseCamera.Position, tick);
+            var environment = ApplySky(ApplyAtmosphere(baseCamera, weather), tick, 0, weather);
+            var nearCamera = ApplySunlight(environment, tick, 0);
+            return !far || texturedOrbit ? nearCamera : orbitDemo && nearCamera.Sunlight is { } sun
+                ? environment with { Tint = ReferenceSunlight.GlobeTint(environment.Position, sun) } : environment;
         }
     }
 }
