@@ -71,6 +71,16 @@ internal sealed partial class VolumeExploration
                 Drain(terrain);
                 if (frame % 24 == 0)
                 {
+                    SkyPixels? capture = null;
+                    var size = renderer.Read();
+                    if (output is not null)
+                    {
+                        await Task.Delay(50, token).ConfigureAwait(false);
+                        size = renderer.Read();
+                        captureWindow!.RequireUnobstructed(size.AppliedWidth, size.AppliedHeight);
+                        capture = SkyPixels.Capture(size.AppliedWidth, size.AppliedHeight, clientSurface: true);
+                        capture.SaveBmp(Path.Combine(output, $"{phase}-{frame:D3}.bmp"));
+                    }
                     var metadata = JsonSerializer.Serialize(new
                     {
                         phase, frame, Descriptor.Seed, tick, fraction, solarElevation = elevation,
@@ -80,15 +90,14 @@ internal sealed partial class VolumeExploration
                         daylight = ReferenceDaylight.ProfileId, weather = ReferenceWeather.RecipeId,
                         haze = camera.Fog?.MaxOpacity, wp15 = orbitDemo ? ReferenceSunlight.OrbitEnabled : ReferenceSunlight.Enabled,
                         composition = orbitDemo ? "orbit-combined" : "far-horizon",
+                        renderWidth = size.AppliedWidth, renderHeight = size.AppliedHeight,
+                        captureWidth = capture?.Width, captureHeight = capture?.Height,
+                        captureRegion = output is null ? null : "full-physical-client",
+                        sunDirection = new[] { sky.SunDirection.X, sky.SunDirection.Y, sky.SunDirection.Z },
                     });
                     Console.WriteLine($"TWILIGHT FRAME {metadata}");
                     if (output is not null)
                     {
-                        await Task.Delay(50, token).ConfigureAwait(false);
-                        var size = renderer.Read();
-                        captureWindow!.RequireUnobstructed(size.AppliedWidth, size.AppliedHeight);
-                        SkyPixels.Capture(size.AppliedWidth, size.AppliedHeight, clientSurface: true)
-                            .SaveBmp(Path.Combine(output, $"{phase}-{frame:D3}.bmp"));
                         await File.WriteAllTextAsync(Path.Combine(output, $"{phase}-{frame:D3}.json"), metadata, token)
                             .ConfigureAwait(false);
                     }

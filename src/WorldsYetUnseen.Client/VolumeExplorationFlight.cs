@@ -684,10 +684,9 @@ internal sealed partial class VolumeExploration
             await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
             await Task.Delay(100, token).ConfigureAwait(false);
             var surface = renderer.Read();
-            captureWindow.RequireUnobstructed(surface.AppliedWidth,
-                index == 0 ? surface.AppliedHeight * 2 / 3 : surface.AppliedHeight);
-            captures[index] = SkyPixels.Capture(surface.AppliedWidth,
-                index == 0 ? surface.AppliedHeight * 2 / 3 : surface.AppliedHeight, clientSurface: true);
+            captureWindow.RequireUnobstructed(surface.AppliedWidth, surface.AppliedHeight, upperTwoThirds: index == 0);
+            captures[index] = SkyPixels.Capture(surface.AppliedWidth, surface.AppliedHeight,
+                clientSurface: true, upperTwoThirds: index == 0);
         }
         return captures;
     }

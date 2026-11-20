@@ -1,6 +1,7 @@
 param(
     [string]$Assembly = (Join-Path $PSScriptRoot '../artifacts/bin/WorldsYetUnseen.Client/release/WorldsYetUnseen.Client.dll'),
     [ValidateSet('far-horizon', 'orbit-combined')][string]$Composition = 'far-horizon',
+    [ValidateSet('hardware', 'warp')][string]$Adapter = 'hardware',
     [string]$OutputDirectory = (Join-Path ([IO.Path]::GetTempPath()) ('wyu-sky-runner-fault-' + [guid]::NewGuid().ToString('N')))
 )
 
@@ -18,7 +19,7 @@ try {
     $env:PATH = ''
     $failure = $null
     try {
-        & (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1') -Smoke -Composition $Composition -Assembly $Assembly -OutputDirectory $OutputDirectory
+        & (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1') -Smoke -Composition $Composition -Adapter $Adapter -Assembly $Assembly -OutputDirectory $OutputDirectory
     } catch { $failure = $_.Exception.Message }
     if ($null -eq $failure -or $failure -notmatch 'start process.*dotnet') {
         throw "Expected the original native launch failure, received: $failure"
@@ -26,7 +27,7 @@ try {
     $attempts = @(Import-Csv -LiteralPath (Join-Path $OutputDirectory 'attempts.csv'))
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $OutputDirectory 'manifest.json') | ConvertFrom-Json
     $result = Get-Content -Raw -LiteralPath (Join-Path $OutputDirectory 'result.json') | ConvertFrom-Json
-    if ($manifest.Composition -cne $Composition.ToLowerInvariant() -or $attempts.Count -ne 1 -or
+    if ($manifest.Composition -cne $Composition.ToLowerInvariant() -or $manifest.Adapter -cne $Adapter.ToLowerInvariant() -or $attempts.Count -ne 1 -or
         $attempts[0].Composition -cne $Composition.ToLowerInvariant() -or $attempts[0].Started -cne 'False' -or $attempts[0].ProcessId -ne '0' -or
         $attempts[0].Passed -cne 'False' -or $attempts[0].Failure -cne $failure -or
         $attempts[0].CleanupFailures -or $result.Status -cne 'BLOCKED' -or $result.Failure -cne $failure -or
@@ -133,6 +134,27 @@ try {
         Write-Host 'PASS: Distinct fences on one logical sequence retained and matched; preparation charged once; strict extras, duplicate fences and missing records rejected.'
     }
     Assert-NativeExecutionJoining
+    function Assert-DeadlinePolicy {
+        $tokens = $null; $parseErrors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1'), [ref]$tokens, [ref]$parseErrors)
+        $assignment = $ast.Find({ param($node)
+            $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -ceq '$deadline'
+        }, $true)
+        $policy = [scriptblock]::Create($assignment.Right.Extent.Text)
+        foreach ($Smoke in $false, $true) {
+            foreach ($Adapter in 'hardware', 'warp') {
+                foreach ($Composition in 'far-horizon', 'orbit-combined') {
+                    $actual = & $policy
+                    $expected = if (-not $Smoke) { 660000 }
+                        elseif ($Adapter -eq 'warp' -and $Composition -eq 'orbit-combined') { 390000 } else { 210000 }
+                    if ($actual -ne $expected) { throw 'Measurement deadline changed outside the software combined smoke scope.' }
+                }
+            }
+        }
+        Write-Host 'PASS: Software combined smoke has a bounded allowance; hardware and full-run deadlines remain unchanged.'
+    }
+    Assert-DeadlinePolicy
 } finally {
     $env:PATH = $priorPath
 }

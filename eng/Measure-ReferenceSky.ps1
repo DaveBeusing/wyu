@@ -13,6 +13,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $Composition = $Composition.ToLowerInvariant()
+$Adapter = $Adapter.ToLowerInvariant()
 if ($env:WYU_R09_LATENCY -eq '1') { throw 'Run R09 pressure qualification separately; this sky runner does not compose native pressure hooks.' }
 if (-not $Smoke -and $Adapter -ne 'hardware') { throw 'Full qualification requires the hardware adapter.' }
 $client = (Resolve-Path -LiteralPath $Assembly).Path
@@ -39,7 +40,7 @@ $invariant = [Globalization.CultureInfo]::InvariantCulture
 $pairs = if ($Smoke) { 1 } else { 5 }
 $replays = if ($Smoke) { 1 } else { 6 }
 $count = if ($Smoke) { 8 } else { 400 }
-$deadline = if ($Smoke) { 210000 } else { 660000 }
+$deadline = if (-not $Smoke) { 660000 } elseif ($Adapter -eq 'warp' -and $Composition -ceq 'orbit-combined') { 390000 } else { 210000 }
 $attempts = [Collections.Generic.List[object]]::new()
 $samples = [Collections.Generic.List[object]]::new()
 $handoffs = [Collections.Generic.List[object]]::new()
@@ -57,6 +58,7 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
     ForEach-Object { [pscustomobject]@{ File=$_.Name; SHA256=(Get-FileHash -LiteralPath $_.FullName).Hash } }
 [pscustomobject]@{
     Schema=3; HookSchema=2; Smoke=[bool]$Smoke; Qualified=$false; Adapter=$Adapter; Assembly=$client; Composition=$Composition
+    ProcessDeadlineMilliseconds=$deadline
     StartedUtc=[DateTime]::UtcNow.ToString('O'); OS=[Environment]::OSVersion.VersionString
     Runtime=(& dotnet --version); Hashes=@($hashes); Pairs=$pairs; FlightsPerPairPerVariant=$replays
     SourceCommit=$sourceCommit; WorkingTreeStatus=$workingTree; RendererSourceCommit=$RendererSourceCommit

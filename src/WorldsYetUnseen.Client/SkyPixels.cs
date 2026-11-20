@@ -7,17 +7,17 @@ namespace WorldsYetUnseen.Client;
 // Desktop smoke capture of the presented client surface.
 internal sealed partial class SkyPixels(int width, int height, byte[] colors)
 {
-    private int Width { get; } = width;
-    private int Height { get; } = height;
+    internal int Width { get; } = width;
+    internal int Height { get; } = height;
     private byte[] Colors { get; } = colors;
 
-    internal static SkyPixels Capture(int width, int height, bool clientSurface = false)
+    internal static SkyPixels Capture(int width, int height, bool clientSurface = false, bool upperTwoThirds = false)
     {
         using var dpi = new CaptureDpiScope();
         using var process = Process.GetCurrentProcess();
         var origin = new Point();
         if (clientSurface)
-            PhysicalClientBounds(process.MainWindowHandle, ref width, ref height, out origin);
+            PhysicalClientBounds(process.MainWindowHandle, ref width, ref height, out origin, upperTwoThirds);
         else if (ClientToScreen(process.MainWindowHandle, ref origin) == 0)
             throw new Win32Exception();
         var screen = GetDC(0);

@@ -31,6 +31,23 @@ try {
         $frames = @($lines | Where-Object { $_ -cmatch '^TWILIGHT FRAME ' } |
             ForEach-Object { $_.Substring(15) | ConvertFrom-Json } | Where-Object phase -ceq $phase)
         if ($frames.Count -ne 7) { throw "Missing $phase checkpoints." }
+        if ($OutputDirectory) {
+            foreach ($frame in $frames) {
+                $path = Join-Path $OutputDirectory ('{0}-{1:D3}.bmp' -f $phase, [int]$frame.frame)
+                $stream = [IO.File]::OpenRead($path)
+                try {
+                    $header = [byte[]]::new(26)
+                    $stream.ReadExactly($header)
+                } finally { $stream.Dispose() }
+                if ($header[0] -ne 0x42 -or $header[1] -ne 0x4d -or
+                    [BitConverter]::ToInt32($header, 18) -ne $frame.captureWidth -or
+                    [Math]::Abs([BitConverter]::ToInt32($header, 22)) -ne $frame.captureHeight -or
+                    $frame.captureRegion -cne 'full-physical-client' -or
+                    $frame.renderWidth -lt 1 -or $frame.renderHeight -lt 1) {
+                    throw 'Capture metadata does not match the physical BMP bounds.'
+                }
+            }
+        }
     }
 } finally {
     foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $prior[$name]) }

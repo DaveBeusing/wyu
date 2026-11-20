@@ -32,10 +32,10 @@ internal sealed partial class SkyPixels
             }
         }
 
-        internal void RequireUnobstructed(int width, int height)
+        internal void RequireUnobstructed(int width, int height, bool upperTwoThirds = false)
         {
             using var dpi = new CaptureDpiScope();
-            PhysicalClientBounds(_window, ref width, ref height, out var origin);
+            PhysicalClientBounds(_window, ref width, ref height, out var origin, upperTwoThirds);
             foreach (var point in new[]
             {
                 new Point { X = origin.X + 1, Y = origin.Y + 1 },
@@ -63,15 +63,19 @@ internal sealed partial class SkyPixels
         }
     }
 
-    private static void PhysicalClientBounds(nint window, ref int width, ref int height, out Point origin)
+    private static void PhysicalClientBounds(nint window, ref int width, ref int height, out Point origin, bool upperTwoThirds)
     {
         using var dpi = new CaptureDpiScope();
         origin = new Point();
-        var end = new Point { X = width, Y = height };
         if (!GetClientRect(window, out var client))
             throw new Win32Exception();
-        if (width > client.Right - client.Left || height > client.Bottom - client.Top)
+        if (width < 1 || height < 1 || width > client.Right - client.Left || height > client.Bottom - client.Top)
             throw new InvalidOperationException("Requested capture extends beyond the current client surface.");
+        // Backbuffer extents can be DPI-scaled by Windows. Capture the actual
+        // physical client instead of a render-sized upper-left subsection.
+        // Only the horizon fixture intentionally selects a physical fraction.
+        var end = new Point { X = client.Right, Y = upperTwoThirds
+            ? client.Top + (client.Bottom - client.Top) * 2 / 3 : client.Bottom };
         // In a per-monitor-aware thread ClientToScreen already returns device
         // coordinates. Converting them again scales the screen origin twice.
         if (ClientToScreen(window, ref origin) == 0 || ClientToScreen(window, ref end) == 0)

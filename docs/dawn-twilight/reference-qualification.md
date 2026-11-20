@@ -87,6 +87,20 @@ The variables above identify the controlled build; do not substitute values
 from an unverified downloaded binary. The runner rejects mismatches. Do not
 use `-Smoke` for reference qualification.
 
+The software-only `-Smoke -Adapter warp -Composition orbit-combined` diagnostic
+allows six minutes inside the child and 390 seconds in the parent. The complete
+PBR/shadow route exceeded the older three-minute smoke deadline while continuing
+to render. This allowance is not a performance acceptance limit. Hardware smoke
+remains 180/210 seconds, and full hardware runs remain 600/660 seconds. Failed
+earlier attempts are retained.
+
+Desktop image fixtures capture the complete physical client without rescaling.
+JSON separates native render dimensions from physical BMP dimensions. Horizon
+handoff checks explicitly select the upper two-thirds of the physical client;
+sun/stars and twilight captures use the full client. Earlier render-sized desktop
+captures at non-unit DPI could be cropped and cannot establish full-frame visual
+equivalence. Pixel/centroid tolerances remain unchanged.
+
 Full mode runs five alternating off/on pairs with six fresh child flights
 per pair and variant: 60 attempts total, at least 30 handoffs in each
 direction per variant. The first child of each run supplies 400 retained
