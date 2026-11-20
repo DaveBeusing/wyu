@@ -43,6 +43,7 @@ $deadline = if ($Smoke) { 210000 } else { 660000 }
 $attempts = [Collections.Generic.List[object]]::new()
 $samples = [Collections.Generic.List[object]]::new()
 $handoffs = [Collections.Generic.List[object]]::new()
+$nativeExtras = [Collections.Generic.List[object]]::new()
 $identities = @{}
 $environmentNames = 'WYU_PACKAGE_G_MEASURE','WYU_SKY_MEASURE_SMOKE','WYU_SKY_MEASURE_PHASES',
     'WYU_PACKAGE_G','WYU_PACKAGE_G_SMOKE','WYU_PACKAGE_E','WYU_WP13_MEASURE','WYU_WP15',
@@ -55,7 +56,7 @@ foreach ($name in $environmentNames) { $previous[$name] = [Environment]::GetEnvi
 $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll' |
     ForEach-Object { [pscustomobject]@{ File=$_.Name; SHA256=(Get-FileHash -LiteralPath $_.FullName).Hash } }
 [pscustomobject]@{
-    Schema=2; Smoke=[bool]$Smoke; Qualified=$false; Adapter=$Adapter; Assembly=$client; Composition=$Composition
+    Schema=3; HookSchema=2; Smoke=[bool]$Smoke; Qualified=$false; Adapter=$Adapter; Assembly=$client; Composition=$Composition
     StartedUtc=[DateTime]::UtcNow.ToString('O'); OS=[Environment]::OSVersion.VersionString
     Runtime=(& dotnet --version); Hashes=@($hashes); Pairs=$pairs; FlightsPerPairPerVariant=$replays
     SourceCommit=$sourceCommit; WorkingTreeStatus=$workingTree; RendererSourceCommit=$RendererSourceCommit
@@ -69,6 +70,7 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
         Props=$(if ($Composition -ceq 'orbit-combined') { 'on' } else { 'off' })
         OrbitPreset=($Composition -ceq 'orbit-combined'); OrbitPbr=($Composition -ceq 'orbit-combined'); Boulder=($Composition -ceq 'orbit-combined') }
     CpuInterval='Per-sequence sum of synchronous production atmosphere/sky/sunlight preparation and owner sky recording. Await, telemetry serialization, unrelated camera/terrain work are excluded.'
+    NativeIdentity='GPU/record rows join by owner+native fence. Repeated logical sequences are retained; preparation is charged once to the lowest fence, later executions explicitly reuse it. Strict controlled windows reject native extras after preserving evidence.'
     OpenGates=@('Reference hardware identity and production limits must be supplied by the operator.',
         'Driver-aligned incremental peak GPU memory including overlapping handoff resources.',
         'Protected movement/edit and speculative CPU/GPU pressure qualification.',
@@ -85,6 +87,82 @@ function Percentile($values, [double]$percentile) {
     $sorted = @($values | Sort-Object)
     if ($sorted.Count -eq 0) { throw 'No percentile samples.' }
     $sorted[[int][Math]::Ceiling($sorted.Count * $percentile) - 1]
+}
+
+function Get-SkyNativeExecutions($Rows, $Window, [string]$Mode) {
+    $gpu = @{}
+    $cpu = @{}
+    $preparation = @{}
+    $bySequence = @{}
+    foreach ($row in $Rows) {
+        if ($row.kind -ceq 'gpu' -or $row.kind -ceq 'record') {
+            if ([ulong]$row.fence -eq 0) { throw 'Native timing requires a nonzero fence.' }
+            $key = "$($row.owner)-$($row.fence)"
+            $index = if ($row.kind -ceq 'gpu') { $gpu } else { $cpu }
+            if ($index.ContainsKey($key)) { throw "Duplicate native $($row.kind) fence $key." }
+            $index.Add($key, $row)
+            if ($row.kind -ceq 'gpu') {
+                $logicalKey = "$($row.owner)-$($row.sequence)"
+                if (-not $bySequence.ContainsKey($logicalKey)) { $bySequence.Add($logicalKey, [Collections.Generic.List[object]]::new()) }
+                $bySequence[$logicalKey].Add($row)
+            }
+        }
+        if ($row.kind -ceq 'prepare') {
+            $key = "$($row.owner)-$($row.sequence)"
+            if ($preparation.ContainsKey($key)) { throw 'Duplicate atmosphere preparation timing.' }
+            $preparation.Add($key, $row)
+        }
+    }
+    foreach ($key in @($gpu.Keys) + @($cpu.Keys) | Sort-Object -Unique) {
+        if (-not $gpu.ContainsKey($key) -or -not $cpu.ContainsKey($key)) { throw "Missing native GPU/record pair for fence $key." }
+        if ($gpu[$key].sequence -ne $cpu[$key].sequence -or $gpu[$key].phase -cne $cpu[$key].phase) {
+            throw "Native fence $key has inconsistent sequence/phase."
+        }
+    }
+    $joined = [Collections.Generic.List[object]]::new()
+    for ($sequence = [ulong]$Window.first; $sequence -le [ulong]$Window.last; $sequence++) {
+        $logicalKey = "$($Window.owner)-$sequence"
+        if (-not $preparation.ContainsKey($logicalKey)) { throw "Missing preparation sample $logicalKey." }
+        $p = $preparation[$logicalKey]
+        if ($p.phase -cne $Window.phase) { throw 'Preparation phase mismatch.' }
+        $executions = if ($bySequence.ContainsKey($logicalKey)) {
+            @($bySequence[$logicalKey] | Sort-Object { [ulong]$_.fence })
+        } else { @() }
+        $executions = @($executions)
+        if ($executions.Count -eq 0) { throw "Missing retired native sample $logicalKey." }
+        for ($executionIndex = 0; $executionIndex -lt $executions.Count; $executionIndex++) {
+            $g = $executions[$executionIndex]
+            $c = $cpu["$($g.owner)-$($g.fence)"]
+            if ($g.phase -cne $Window.phase) { throw 'Native timing phase mismatch.' }
+            if ([bool]$g.hasSky -ne ($Mode -ceq 'on')) { throw 'The measured sky pass does not match the variant.' }
+            if ([int]$c.draws -ne $(if ($Mode -ceq 'on') { 1 } else { 0 })) { throw 'Native sky draw count does not match the variant.' }
+            $frame = Number $g.frameMicroseconds
+            if ($frame -le 0) { throw 'Zero GPU frame timestamp interval.' }
+            $recordMs = (Number $c.recordMicroseconds) / 1000
+            $prepareMs = if ($executionIndex -eq 0) { (Number $p.preparationMicroseconds) / 1000 } else { 0.0 }
+            $recordAllocated = [long](Number $c.allocatedBytes)
+            $prepareAllocated = if ($executionIndex -eq 0) { [long](Number $p.allocatedBytes) } else { 0L }
+            $joined.Add([pscustomobject]@{
+                Owner=$Window.owner; Sequence=$sequence; Fence=[ulong]$g.fence; ExecutionIndex=$executionIndex
+                ReusedPreparation=($executionIndex -gt 0); FrameMs=$frame / 1000; SkyMs=(Number $g.skyMicroseconds) / 1000
+                RecordMs=$recordMs; PreparationMs=$prepareMs; CombinedCpuMs=$recordMs + $prepareMs
+                RecordAllocatedBytes=$recordAllocated; PreparationAllocatedBytes=$prepareAllocated
+                AllocatedBytes=$recordAllocated + $prepareAllocated; Draws=[int]$c.draws
+            })
+        }
+    }
+    [pscustomobject]@{ Rows=$joined.ToArray(); RawNativeExtras=$joined.Count - ([long]$Window.last - [long]$Window.first + 1) }
+}
+
+function Assert-SkyControlledWindow([long]$RawNativeExtras, [bool]$Smoke) {
+    if (-not $Smoke -and $RawNativeExtras -ne 0) {
+        throw 'Strict controlled sky windows require exactly one native execution per requested sequence; all extra observations were retained.'
+    }
+}
+
+function Get-SkyNativeExtraCount($Observations) {
+    if ($Observations.Count -eq 0) { return 0L }
+    [long]($Observations | Measure-Object RawNativeExtras -Sum).Sum
 }
 
 function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
@@ -175,26 +253,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         }
         $identities[$identityKey] = $routeIdentity
         if ($Replay -eq 1) {
-            $gpu = @{}
-            $cpu = @{}
-            $preparation = @{}
-            foreach ($row in $rows) {
-                if ($row.kind -ceq 'gpu') {
-                    $key = "$($row.owner)-$($row.sequence)"
-                    if ($gpu.ContainsKey($key)) { throw 'Duplicate retired GPU timing.' }
-                    $gpu.Add($key, $row)
-                }
-                if ($row.kind -ceq 'record') {
-                    $key = "$($row.owner)-$($row.sequence)"
-                    if ($cpu.ContainsKey($key)) { throw 'Duplicate command recording timing.' }
-                    $cpu.Add($key, $row)
-                }
-                if ($row.kind -ceq 'prepare') {
-                    $key = "$($row.owner)-$($row.sequence)"
-                    if ($preparation.ContainsKey($key)) { throw 'Duplicate atmosphere preparation timing.' }
-                    $preparation.Add($key, $row)
-                }
-            }
+            $replayNativeExtras = 0L
             foreach ($phase in 'surface','ascent','orbit') {
                 $window = @($rows | Where-Object { $_.kind -ceq 'phase' -and $_.phase -ceq $phase })
                 if ($window.Count -ne 1) { throw "Missing $phase sequence window." }
@@ -207,29 +266,22 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                     throw "Canonical $phase camera/clock/terrain changed between variants."
                 }
                 $identities[$identityKey] = $w.identity
-                for ($i = [ulong]$w.first; $i -le [ulong]$w.last; $i++) {
-                    $key = "$($w.owner)-$i"
-                    if (-not $gpu.ContainsKey($key) -or -not $cpu.ContainsKey($key) -or -not $preparation.ContainsKey($key)) { throw "Missing retired native/preparation sample $key." }
-                    $g = $gpu[$key]
-                    $c = $cpu[$key]
-                    $p = $preparation[$key]
-                    if ($g.phase -cne $phase -or $c.phase -cne $phase -or $p.phase -cne $phase) { throw 'Native/preparation sample phase mismatch.' }
-                    if ([bool]$g.hasSky -ne ($Mode -ceq 'on')) { throw 'The measured sky pass does not match the variant.' }
-                    if ([int]$c.draws -ne $(if ($Mode -ceq 'on') { 1 } else { 0 })) { throw 'Native sky draw count does not match the variant.' }
-                    $frame = Number $g.frameMicroseconds
-                    if ($frame -le 0) { throw 'Zero GPU frame timestamp interval.' }
-                    $recordMs = (Number $c.recordMicroseconds) / 1000
-                    $prepareMs = (Number $p.preparationMicroseconds) / 1000
-                    $recordAllocated = [long](Number $c.allocatedBytes)
-                    $prepareAllocated = [long](Number $p.allocatedBytes)
+                $joined = Get-SkyNativeExecutions $rows $w $Mode
+                $replayNativeExtras += $joined.RawNativeExtras
+                $nativeExtras.Add([pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Composition=$Composition; Phase=$phase
+                    RequestedSequences=$count; NativeExecutions=$joined.Rows.Count; RawNativeExtras=$joined.RawNativeExtras })
+                foreach ($execution in $joined.Rows) {
                     $samples.Add([pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Composition=$Composition; Phase=$phase; Seed=$seed
-                        Owner=$w.owner; Sequence=$i; Identity=$w.identity; Width=$w.width; Height=$w.height
-                        FrameMs=$frame / 1000; SkyMs=(Number $g.skyMicroseconds) / 1000
-                        RecordMs=$recordMs; PreparationMs=$prepareMs; CombinedCpuMs=$recordMs + $prepareMs
-                        RecordAllocatedBytes=$recordAllocated; PreparationAllocatedBytes=$prepareAllocated
-                        AllocatedBytes=$recordAllocated + $prepareAllocated; Draws=[int]$c.draws })
+                        Owner=$execution.Owner; Sequence=$execution.Sequence; Fence=$execution.Fence
+                        ExecutionIndex=$execution.ExecutionIndex; ReusedPreparation=$execution.ReusedPreparation
+                        Identity=$w.identity; Width=$w.width; Height=$w.height
+                        FrameMs=$execution.FrameMs; SkyMs=$execution.SkyMs
+                        RecordMs=$execution.RecordMs; PreparationMs=$execution.PreparationMs; CombinedCpuMs=$execution.CombinedCpuMs
+                        RecordAllocatedBytes=$execution.RecordAllocatedBytes; PreparationAllocatedBytes=$execution.PreparationAllocatedBytes
+                        AllocatedBytes=$execution.AllocatedBytes; Draws=$execution.Draws })
                 }
             }
+            Assert-SkyControlledWindow $replayNativeExtras ([bool]$Smoke)
         }
         $passed = $true
     } catch {
@@ -258,7 +310,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             Passed=($passed -and $cleanupFailures.Count -eq 0); Failure=$failure
             CleanupFailures=($cleanupFailures -join ' | '); Stdout=$log; Stderr=$errorLog }
         $attempts.Add($attempt)
-        foreach ($export in @(@('attempts', $attempts), @('samples', $samples), @('handoffs', $handoffs))) {
+        foreach ($export in @(@('attempts', $attempts), @('samples', $samples), @('handoffs', $handoffs), @('native-extras', $nativeExtras))) {
             try { $export[1] | Export-Csv -LiteralPath (Join-Path $root "$($export[0]).csv") -NoTypeInformation }
             catch { $cleanupFailures.Add("$($export[0]) evidence: $($_.Exception.Message)") }
         }
@@ -290,7 +342,8 @@ try {
     [pscustomobject]@{ Status='BLOCKED'; FullQualification=$false; Failure=$_.Exception.Message
         CleanupFailures=@($attempts | Where-Object { $_.CleanupFailures } | Select-Object Pair,Replay,Mode,CleanupFailures)
         Attempts=$attempts.Count; FailedAttempts=@($attempts | Where-Object { -not $_.Passed }).Count
-        RequiredAttempts=2*$pairs*$replays; RemainingGates='See manifest.json OpenGates.' } |
+        RequiredAttempts=2*$pairs*$replays; RawNativeExtras=(Get-SkyNativeExtraCount $nativeExtras)
+        RemainingGates='See manifest.json OpenGates.' } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'result.json')
     throw
 } finally {
@@ -303,7 +356,8 @@ foreach ($phase in 'surface','ascent','orbit') {
         $off = @($samples | Where-Object { $_.Phase -ceq $phase -and $_.Mode -ceq 'off' -and ($pair -eq 0 -or $_.Pair -eq $pair) })
         $on = @($samples | Where-Object { $_.Phase -ceq $phase -and $_.Mode -ceq 'on' -and ($pair -eq 0 -or $_.Pair -eq $pair) })
         $expected = if ($pair -eq 0) { $pairs * $count } else { $count }
-        if ($off.Count -ne $expected -or $on.Count -ne $expected) { throw "Incomplete $phase GPU denominator." }
+        if ((-not $Smoke -and ($off.Count -ne $expected -or $on.Count -ne $expected)) -or
+            ($Smoke -and ($off.Count -lt $expected -or $on.Count -lt $expected))) { throw "Incomplete $phase GPU denominator." }
         $delta95 = 100 * ((Percentile $on.FrameMs .95) / (Percentile $off.FrameMs .95) - 1)
         $delta99 = 100 * ((Percentile $on.FrameMs .99) / (Percentile $off.FrameMs .99) - 1)
         $sky95 = Percentile $on.SkyMs .95
@@ -313,6 +367,7 @@ foreach ($phase in 'surface','ascent','orbit') {
         $record99 = Percentile $on.RecordMs .99
         $combined99 = Percentile $on.CombinedCpuMs .99
         $summary.Add([pscustomobject]@{ Kind='GPU'; Phase=$phase; Pair=$pair; Composition=$Composition; OffCount=$off.Count; OnCount=$on.Count
+            RequestedCountPerVariant=$expected; OffNativeExtras=$off.Count-$expected; OnNativeExtras=$on.Count-$expected
             FrameP95DeltaPercent=$delta95; FrameP99DeltaPercent=$delta99; SkyP95Ms=$sky95; SkyP99Ms=$sky99
             RecordP99Ms=$record99; CombinedCpuP99Ms=$combined99; RecordMaxAllocatedBytes=($on.RecordAllocatedBytes | Measure-Object -Maximum).Maximum
             CombinedMaxAllocatedBytes=$allocated; SkyDrawsMax=$draws
@@ -327,6 +382,7 @@ foreach ($direction in 'to-orbit','to-ground') {
         if ($off.Count -ne $expected -or $on.Count -ne $expected) { throw "Incomplete $direction handoff denominator." }
         $delta = 100 * ((Percentile $on.Milliseconds .95) / (Percentile $off.Milliseconds .95) - 1)
         $summary.Add([pscustomobject]@{ Kind='handoff'; Phase=$direction; Pair=$pair; Composition=$Composition; OffCount=$off.Count; OnCount=$on.Count
+            RequestedCountPerVariant=$expected; OffNativeExtras=0; OnNativeExtras=0
             FrameP95DeltaPercent=$delta; FrameP99DeltaPercent=$null; SkyP95Ms=$null; SkyP99Ms=$null
             RecordP99Ms=$null; CombinedCpuP99Ms=$null; RecordMaxAllocatedBytes=$null; CombinedMaxAllocatedBytes=$null; SkyDrawsMax=$null; Passed=($delta -le 10) })
     }
@@ -336,7 +392,9 @@ $summary | Where-Object Pair -EQ 0 | Format-Table -AutoSize
 $failed = @($summary | Where-Object { -not $_.Passed }).Count
 [pscustomobject]@{ Status=if ($Smoke) { 'SMOKE ONLY' } elseif ($failed) { 'CHANGES REQUIRED' } else { 'MEASURED GATES PASSED' }
     FullQualification=$false; Attempts=$attempts.Count; FailedAttempts=@($attempts | Where-Object { -not $_.Passed }).Count
-    RequiredAttempts=2*$pairs*$replays; FailedSummaryRows=$failed; RemainingGates='See manifest.json OpenGates.' } |
+    RequiredAttempts=2*$pairs*$replays; FailedSummaryRows=$failed
+    RawNativeExtras=(Get-SkyNativeExtraCount $nativeExtras)
+    RemainingGates='See manifest.json OpenGates.' } |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'result.json')
 Write-Host "Evidence $root"
 if ($Smoke) { Write-Host 'SMOKE ONLY. Counts and resolution do not qualify the reference budgets.' }

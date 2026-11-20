@@ -64,7 +64,7 @@ internal sealed class SkyMeasurements
         var assembly = type.Assembly;
         var hooksType = assembly.GetType("Groundwork.Rendering.D3D12.GpuRetirementTestHooks") ?? throw Mismatch();
         var schema = hooksType.GetField("SkyQualificationHookSchemaVersion", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
-        if (schema?.GetRawConstantValue() is not int version || version != 1)
+        if (schema?.GetRawConstantValue() is not int version || version != 2)
             throw Mismatch();
         var gpuType = assembly.GetType("Groundwork.Rendering.D3D12.GpuDevice") ?? throw Mismatch();
         var field = type.GetField("_retirementHooks", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
@@ -81,8 +81,8 @@ internal sealed class SkyMeasurements
         var arguments = new object?[parameters.Length];
         Action<object> initialized = observer.Initialize;
         Bind("AfterDeviceInitialize", Delegate.CreateDelegate(typeof(Action<>).MakeGenericType(gpuType), initialized.Target, initialized.Method));
-        Bind("AfterSkyTimingRetired", (Action<ulong, double, double, bool>)observer.Retired);
-        Bind("AfterSkyRecordMeasured", (Action<ulong, double, long, int>)observer.Recorded);
+        Bind("AfterSkyTimingRetired", (Action<ulong, ulong, double, double, bool>)observer.Retired);
+        Bind("AfterSkyRecordMeasured", (Action<ulong, ulong, double, long, int>)observer.Recorded);
         Bind("AfterSuccessfulPresent", (Action<ulong, long>)observer.Presented);
         field.SetValue(renderer, constructor.Invoke(arguments));
         Owners.Add(renderer, observer);
@@ -108,19 +108,19 @@ internal sealed class SkyMeasurements
         enable.Invoke(device, null);
     }
 
-    private void Retired(ulong sequence, double frameMicroseconds, double skyMicroseconds, bool hasSky)
+    private void Retired(ulong sequence, ulong fence, double frameMicroseconds, double skyMicroseconds, bool hasSky)
     {
         var window = Volatile.Read(ref _window);
         if (window is not null && sequence >= window.First && sequence <= window.Last)
-            Write(new { kind = "gpu", owner = _owner, sequence, phase = window.Phase,
+            Write(new { kind = "gpu", owner = _owner, sequence, fence, phase = window.Phase,
                 frameMicroseconds, skyMicroseconds, hasSky });
     }
 
-    private void Recorded(ulong sequence, double recordMicroseconds, long allocatedBytes, int draws)
+    private void Recorded(ulong sequence, ulong fence, double recordMicroseconds, long allocatedBytes, int draws)
     {
         var window = Volatile.Read(ref _window);
         if (window is not null && sequence >= window.First && sequence <= window.Last)
-            Write(new { kind = "record", owner = _owner, sequence, phase = window.Phase,
+            Write(new { kind = "record", owner = _owner, sequence, fence, phase = window.Phase,
                 recordMicroseconds, allocatedBytes, draws });
     }
 

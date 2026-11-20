@@ -98,6 +98,11 @@ Packages B/E and canonical G cameras stay enabled in both variants. Only the
 submitted sky value is removed in the off variant, after camera and globe
 construction, so the legacy off-camera/FOV cannot distort the comparison.
 The script rejects mismatching phase/route identities and incomplete counts.
+CPU/GPU rows are correlated by renderer owner and native draw fence, because
+appearance updates can redraw an acknowledged logical sequence. Every native
+execution remains recorded. Smoke may contain additional executions; strict
+controlled windows reject them after preserving all raw rows. No first-row
+selection or percentile exclusion hides a redraw.
 Far Horizon retains its original WP15/props-off measurement. Orbit combined
 uses its actual preset sun, PBR maps, boulders, sunlight/shadows and props in
 both variants. Strict held phases reject texture uploads that did not settle

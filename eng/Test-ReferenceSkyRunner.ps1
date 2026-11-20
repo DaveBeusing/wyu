@@ -53,6 +53,7 @@ try {
         $attempts = [Collections.Generic.List[object]]::new()
         $samples = [Collections.Generic.List[object]]::new()
         $handoffs = [Collections.Generic.List[object]]::new()
+        $nativeExtras = [Collections.Generic.List[object]]::new()
         $cleanupFailures = [Collections.Generic.List[string]]::new()
         $process = [Diagnostics.Process]::new()
         $started = $false
@@ -78,6 +79,60 @@ try {
         Write-Host "PASS: Faulted copy and throwing disposal preserved primary and cleanup evidence. Evidence $root"
     }
     Assert-CleanupFailureEvidence
+
+    function Assert-NativeExecutionJoining {
+        $parseErrors = $null
+        $tokens = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1'), [ref]$tokens, [ref]$parseErrors)
+        if ($parseErrors.Count) { throw 'Reference runner has syntax errors.' }
+        foreach ($name in @('Number','Get-SkyNativeExecutions','Assert-SkyControlledWindow')) {
+            $functionAst = $ast.Find({ param($node)
+                $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+            }, $false)
+            if ($null -eq $functionAst) { throw "Missing production parser helper $name." }
+            . ([scriptblock]::Create($functionAst.Extent.Text))
+        }
+        $invariant = [Globalization.CultureInfo]::InvariantCulture
+        $window = [pscustomobject]@{ owner=1; first=80; last=80; phase='surface' }
+        $prepare = [pscustomobject]@{ kind='prepare'; owner=1; sequence=80; phase='surface'; preparationMicroseconds=7; allocatedBytes=50 }
+        $gpuFirst = [pscustomobject]@{ kind='gpu'; owner=1; sequence=80; fence=100; phase='surface'; frameMicroseconds=100; skyMicroseconds=20; hasSky=$true }
+        $gpuSecond = [pscustomobject]@{ kind='gpu'; owner=1; sequence=80; fence=101; phase='surface'; frameMicroseconds=110; skyMicroseconds=21; hasSky=$true }
+        $recordFirst = [pscustomobject]@{ kind='record'; owner=1; sequence=80; fence=100; phase='surface'; recordMicroseconds=10; allocatedBytes=100; draws=1 }
+        $recordSecond = [pscustomobject]@{ kind='record'; owner=1; sequence=80; fence=101; phase='surface'; recordMicroseconds=11; allocatedBytes=101; draws=1 }
+        # Deliberately reverse input order: the first preparation belongs to the
+        # earliest native fence, not to whichever callback line was parsed first.
+        $rows = @($prepare,$gpuSecond,$recordFirst,$gpuFirst,$recordSecond)
+        $joined = Get-SkyNativeExecutions $rows $window 'on'
+        if ($joined.Rows.Count -ne 2 -or $joined.RawNativeExtras -ne 1 -or
+            $joined.Rows[0].Fence -ne 100 -or $joined.Rows[1].Fence -ne 101 -or
+            $joined.Rows[0].ExecutionIndex -ne 0 -or $joined.Rows[1].ExecutionIndex -ne 1 -or
+            $joined.Rows[0].ReusedPreparation -or -not $joined.Rows[1].ReusedPreparation -or
+            $joined.Rows[0].PreparationMs -ne .007 -or $joined.Rows[1].PreparationMs -ne 0 -or
+            $joined.Rows[0].CombinedCpuMs -ne .017 -or $joined.Rows[1].CombinedCpuMs -ne .011 -or
+            $joined.Rows[0].AllocatedBytes -ne 150 -or $joined.Rows[1].AllocatedBytes -ne 101) {
+            throw 'Distinct native fences were lost, mismatched or charged preparation more than once.'
+        }
+        Assert-SkyControlledWindow $joined.RawNativeExtras $true
+        $strictRejected = $false
+        try { Assert-SkyControlledWindow $joined.RawNativeExtras $false } catch { $strictRejected = $_.Exception.Message -like '*exactly one native execution*' }
+        if (-not $strictRejected -or $joined.Rows.Count -ne 2) { throw 'Strict extras rejection did not retain both observations.' }
+        Assert-SkyControlledWindow 0 $false
+        $single = Get-SkyNativeExecutions @($prepare,$gpuFirst,$recordFirst) $window 'on'
+        if ($single.Rows.Count -ne 1 -or $single.RawNativeExtras -ne 0) { throw 'A single native execution changed the strict denominator.' }
+        foreach ($case in @(
+            @{ Rows=@($rows) + @($gpuFirst); Error='Duplicate native gpu fence*' },
+            @{ Rows=@($rows) + @($recordFirst); Error='Duplicate native record fence*' },
+            @{ Rows=@($prepare,$gpuFirst,$recordFirst,$gpuSecond); Error='Missing native GPU/record pair*' }
+        )) {
+            $rejected = $false
+            try { Get-SkyNativeExecutions $case.Rows $window 'on' | Out-Null }
+            catch { $rejected = $_.Exception.Message -like $case.Error }
+            if (-not $rejected) { throw "Native parser did not reject $($case.Error)" }
+        }
+        Write-Host 'PASS: Distinct fences on one logical sequence retained and matched; preparation charged once; strict extras, duplicate fences and missing records rejected.'
+    }
+    Assert-NativeExecutionJoining
 } finally {
     $env:PATH = $priorPath
 }
