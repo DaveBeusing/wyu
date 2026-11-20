@@ -54,6 +54,23 @@ reference-class GPU/CPU/Present timings, full pressure acceptance, or detailed
 night traversal readability in a representative textured scene. Seven
 checkpoints per sequence are not an independent frame-by-frame flicker audit.
 
+## Additional handoff qualification
+
+The final two-seed desktop handoff/Continue qualification is **BLOCKED**, not
+passed. The first full-image comparison found differences only in the rounded
+bottom client corners; the solar centroid itself was unchanged. The same
+failure occurred with the unchanged approved renderer. A bounded raw-BMP
+comparison found 23 differing RGB pixels, all in the bottom six rows at the
+extreme corners, confirming desktop contamination outside the rendered sky.
+
+The disposable capture fixture now requests square Windows 11 client corners
+and restores the prior preference on disposal. A subsequent attempt was
+rejected by its unobstructed-window check because a sampled client point
+belonged to another process. Repeat this qualification on an unobstructed
+desktop. Full-image RGB and one-pixel solar-centroid assertions remain
+unchanged; neither the failed comparison nor the rejected capture counts as
+passing evidence.
+
 The [TW1–TW3 decisions](../package-g-sky.md#owner-decisions-for-the-paired-prs)
 remain pending owner approval. Existing gameplay timing and save payloads are
 unchanged. Existing saves adopt the new look in this candidate; no player save

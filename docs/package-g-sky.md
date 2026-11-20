@@ -62,7 +62,10 @@ receipt-retirement cadence without advancing that environment clock.
 `-SunlightOff` checks the existing tint fallback. Optional `-OutputDirectory`
 writes seven BMP/JSON checkpoints per
 sequence. The capture-only fixture raises its own disposable window without
-activation and restores its normal z-order afterwards; it rejects captures
+activation. It restores its normal z-order and previous corner preference
+afterwards. On Windows 11 it
+requests square corners only for this disposable window so desktop pixels
+cannot show through the captured client corners. It rejects captures
 whose client corners/centre belong to another process or lie outside the
 desktop. Keep the desktop unobstructed throughout the run. Captures use the
 physical client rectangle, including display scaling; the native render extent

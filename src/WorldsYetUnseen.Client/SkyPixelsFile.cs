@@ -9,6 +9,7 @@ internal sealed partial class SkyPixels
     internal sealed class CaptureWindow : IDisposable
     {
         private readonly nint _window;
+        private int? _cornerPreference;
 
         internal CaptureWindow()
         {
@@ -16,6 +17,18 @@ internal sealed partial class SkyPixels
             _window = process.MainWindowHandle;
             if (_window == 0 || !SetCaptureWindowPos(_window, new(-1), 0, 0, 0, 0, 0x13))
                 throw new Win32Exception();
+            // Windows 11 rounds the client corners into the desktop. The test
+            // needs an opaque client rectangle, not pixels from another window.
+            if (DwmGetWindowAttribute(_window, 33, out var previous, sizeof(int)) >= 0)
+            {
+                _cornerPreference = previous;
+                var square = 1;
+                if (DwmSetWindowAttribute(_window, 33, in square, sizeof(int)) < 0)
+                {
+                    Dispose();
+                    throw new InvalidOperationException("Could not make the capture window's client corners opaque.");
+                }
+            }
         }
 
         internal void RequireUnobstructed(int width, int height)
@@ -33,11 +46,19 @@ internal sealed partial class SkyPixels
                 var visible = WindowFromPhysicalPoint(point);
                 _ = GetWindowThreadProcessId(visible, out var owner);
                 if (owner != Environment.ProcessId)
-                    throw new InvalidOperationException("The twilight capture window is obstructed or outside the desktop.");
+                    throw new InvalidOperationException($"The capture window is obstructed or outside the desktop: rectangle={origin.X},{origin.Y},{width},{height}; point={point.X},{point.Y}; owner={owner}; expected={Environment.ProcessId}.");
             }
         }
 
-        public void Dispose() => _ = SetCaptureWindowPos(_window, new(-2), 0, 0, 0, 0, 0x13);
+        public void Dispose()
+        {
+            if (_cornerPreference is { } previous)
+            {
+                _ = DwmSetWindowAttribute(_window, 33, in previous, sizeof(int));
+                _cornerPreference = null;
+            }
+            _ = SetCaptureWindowPos(_window, new(-2), 0, 0, 0, 0, 0x13);
+        }
     }
 
     private static void PhysicalClientBounds(nint window, ref int width, ref int height, out Point origin)
@@ -88,4 +109,10 @@ internal sealed partial class SkyPixels
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool LogicalToPhysicalPointForPerMonitorDPI(nint window, ref Point point);
+
+    [LibraryImport("dwmapi.dll")]
+    private static partial int DwmGetWindowAttribute(nint window, uint attribute, out int value, int size);
+
+    [LibraryImport("dwmapi.dll")]
+    private static partial int DwmSetWindowAttribute(nint window, uint attribute, in int value, int size);
 }
