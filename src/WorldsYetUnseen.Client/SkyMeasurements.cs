@@ -211,16 +211,39 @@ internal sealed partial class VolumeExploration
         var bytes = JsonSerializer.SerializeToUtf8Bytes(canonical, SkyMeasurementJson);
         var identity = Convert.ToHexString(SHA256.HashData(bytes));
         var count = SkyMeasurements.Warmup + SkyMeasurements.Samples;
+        if (SkyMeasurements.OrbitCombined)
+        {
+            // Six maps each need at most coarse/fine copy turns and one final
+            // retry observation. Each submitted frame awaits native presentation;
+            // the measurement device also retires prior work before query reuse.
+            // This is a bounded preparation attempt, not a relaxed sample window.
+            var preparationFirst = _sequence + 1;
+            var preparationFrames = 0;
+            while (true)
+            {
+                var textures = renderer.ReadTextureDiagnostics();
+                if (OrbitMaterialHost?.MaterialsResident(renderer, far ? null : camera.View) == true &&
+                    textures.UploadedBytes > 0 && textures.StagingBytes == 0)
+                    break;
+                if (preparationFrames == OrbitTerrainMaterials.MaximumPreparationFrames)
+                    throw new InvalidOperationException($"Orbit texture preparation did not settle after {preparationFrames} acknowledged frames: " +
+                        $"uploaded={textures.UploadedBytes}, staging={textures.StagingBytes}.");
+                await PresentHeldAsync(PrepareCamera(), measurePreparation: false).ConfigureAwait(false);
+                preparationFrames++;
+            }
+            var settled = renderer.ReadTextureDiagnostics();
+            SkyMeasurements.Write(new { kind = "texture-preparation", phase, composition = SkyMeasurements.Composition,
+                first = preparationFirst, last = _sequence, frames = preparationFrames,
+                maximumFrames = OrbitTerrainMaterials.MaximumPreparationFrames,
+                targetCount = OrbitTerrainMaterials.MapCount, allTargetsResident = true,
+                settled.UploadedBytes, settled.StagingBytes });
+        }
         var first = _sequence + 1;
         SkyMeasurements.BeginPhase(renderer, phase, first + (ulong)SkyMeasurements.Warmup,
             first + (ulong)count - 1, identity);
         var heldTextures = renderer.ReadTextureDiagnostics();
         for (var i = 0; i < count + 1; i++)
         {
-            var begin = await BeginAsync(token).ConfigureAwait(false);
-            terrain.BeginTick(begin);
-            Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
-            var sequence = ++_sequence;
             var allocated = GC.GetAllocatedBytesForCurrentThread();
             var started = Stopwatch.GetTimestamp();
             var prepared = PrepareCamera();
@@ -228,20 +251,10 @@ internal sealed partial class VolumeExploration
             var preparationAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocated;
             if (prepared != camera)
                 throw new InvalidOperationException("The held atmosphere preparation changed its canonical inputs.");
-            SkyMeasurements.Prepared(renderer, sequence, preparationMicroseconds, preparationAllocatedBytes);
-            OrbitMaterialHost?.RetryMaterials(renderer, sequence);
-            if (far)
-                RequireFrame(renderer.TrySubmit(SkyMeasurements.Submit(ProceduralGlobe.Frame(sequence, prepared))));
-            else
-            {
-                Props?.Pump();
-                RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, SkyMeasurements.Submit(prepared)));
-            }
-            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
-            Drain(terrain);
+            await PresentHeldAsync(prepared, measurePreparation: true, preparationMicroseconds, preparationAllocatedBytes).ConfigureAwait(false);
             if (i == SkyMeasurements.Warmup - 1)
                 heldTextures = renderer.ReadTextureDiagnostics();
-            if (!SkyMeasurements.Smoke && SkyMeasurements.OrbitCombined && i >= SkyMeasurements.Warmup)
+            if (SkyMeasurements.OrbitCombined && i >= SkyMeasurements.Warmup)
             {
                 var currentTextures = renderer.ReadTextureDiagnostics();
                 if (heldTextures.UploadedBytes == 0 || currentTextures.UploadedBytes != heldTextures.UploadedBytes || currentTextures.StagingBytes != 0)
@@ -262,6 +275,27 @@ internal sealed partial class VolumeExploration
             SkyMeasurements.Write(new { kind = "resource", phase, resourceOwner = owner.ToString(),
                 balance.Live, balance.LiveBytes, balance.Retained, balance.RetainedBytes,
                 resources.LedgerHasUnknownSizes, resources.LedgerOverflowed });
+        }
+
+        async Task PresentHeldAsync(VolumeCamera prepared, bool measurePreparation, double preparationMicroseconds = 0,
+            long preparationAllocatedBytes = 0)
+        {
+            var begin = await BeginAsync(token).ConfigureAwait(false);
+            terrain.BeginTick(begin);
+            Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
+            var sequence = ++_sequence;
+            if (measurePreparation)
+                SkyMeasurements.Prepared(renderer, sequence, preparationMicroseconds, preparationAllocatedBytes);
+            OrbitMaterialHost?.RetryMaterials(renderer, sequence);
+            if (far)
+                RequireFrame(renderer.TrySubmit(SkyMeasurements.Submit(ProceduralGlobe.Frame(sequence, prepared))));
+            else
+            {
+                Props?.Pump();
+                RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, SkyMeasurements.Submit(prepared)));
+            }
+            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+            Drain(terrain);
         }
 
         VolumeCamera PrepareCamera()

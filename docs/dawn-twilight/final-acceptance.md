@@ -33,7 +33,7 @@ the measurement ZIP identify the delivered and tested source snapshots.
 | Renderer | Admission/waiter cancellation, arbitration, sky/twilight, refinement, WARP/hardware handoff and window lifecycle coverage. |
 | Functional route | Renew Far Horizon and Orbit flight/Continue, rebase, shared sunlight and native shutdown with the paired renderer. |
 | Visual review | Renew sunrise/sunset captures for both profiles. Orbit samples its actual solar plane. Captures alone do not establish detailed night navigation or frame-by-frame animation acceptance. |
-| Reference timing | **BLOCKED** until the owner returns the complete reference-machine ZIP for the final pinned heads. Workstation smoke is diagnostic only. |
+| Reference timing | **CHANGES REQUIRED**: the [20 November reference results](reference-results-2026-11-20.md) pass the synthetic subset, fail 15 Far Horizon per-pair rows and block Orbit on unsettled uploads. Renew both real compositions after correction; workstation smoke is diagnostic only. |
 | Full memory | **BLOCKED** until incremental peak GPU memory includes driver backing and overlapping handoff resources. A resource ledger alone cannot close the 4 MiB gate. |
 | Protected work | **BLOCKED** until movement/edit/recovery and speculative CPU/GPU pressure limits cover the exact installed composition. |
 | Published installation | **BLOCKED** until required approval, engine master CI/archive, coordinated consumer pins/locks/digests and installed-route checks are complete. |

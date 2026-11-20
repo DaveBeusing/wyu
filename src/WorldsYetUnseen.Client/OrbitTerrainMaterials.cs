@@ -14,7 +14,9 @@ internal sealed class OrbitTerrainMaterials
     private const string ResourcePrefix = "WorldsYetUnseen.Client.Assets.OrbitDemo.";
     private const string ManifestName = "manifest.json";
     private const int MapsPerMaterial = 3;
-    private const int MapCount = 2 * MapsPerMaterial;
+    internal const int MapCount = 2 * MapsPerMaterial;
+    internal const int RetryFrameInterval = 16;
+    internal const int MaximumPreparationFrames = (MapCount * 2 + 1) * RetryFrameInterval;
     private const int MaximumCookedBytes = 2 * 1024 * 1024;
     private const int MaximumManifestBytes = 16 * 1024;
     private const int NativeBytesPerMap = 1536 * 1024;
@@ -99,6 +101,17 @@ internal sealed class OrbitTerrainMaterials
     // The decoded maps and target sequences remain fixed for this session.
     // Groundwork carries exact residents on a same-epoch cut and coalesces their requests.
     internal enum Scheduling { Scheduled, Retry, Stopped }
+
+    internal bool IsResident(D3D12TextureHandoff stream, D3D12TextureView view, bool orbital)
+    {
+        var targetMip = orbital ? MipPolicy.CoarseMip : MipPolicy.FineMip;
+        foreach (var target in _targets)
+        {
+            if (!stream.TryReadResidency(view, target, out var residency) || residency.ResidentMip != targetMip)
+                return false;
+        }
+        return true;
+    }
 
     internal Scheduling Publish(D3D12TextureHandoff stream, D3D12TextureView view, bool orbital)
     {

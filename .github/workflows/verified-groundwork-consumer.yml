@@ -118,3 +118,6 @@ jobs:
           }
           & ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $env:GROUNDWORK_ARTIFACT_DIR -ExpectedManifestSha256 $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256 -ExpectedSourceCommit $env:GROUNDWORK_EXPECTED_HEAD_SHA -ExpectedVersion $env:GROUNDWORK_EXPECTED_VERSION -SaveSmoke -PrototypeSaveSmoke
           if ($LASTEXITCODE -ne 0) { throw 'Verified consumer gate failed.' }
+
+      - name: Verify Orbit material readiness without a GPU
+        run: ./eng/Test-OrbitMaterialReadiness.ps1

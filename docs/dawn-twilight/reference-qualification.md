@@ -120,12 +120,20 @@ selection or percentile exclusion hides a redraw.
 Far Horizon retains its original WP15/props-off measurement. Orbit combined
 uses its actual preset sun, PBR maps, boulders, sunlight/shadows and props in
 both variants. Strict held phases reject texture uploads that did not settle
-during warm-up. Canonical identities include sky, sunlight and scene transforms.
+before the held window. Orbit first pumps the normal production material path
+until all six current-cut maps have their requested mip and staging is empty.
+This preparation is bounded to 208 acknowledged frames and the existing process
+deadline; it fails closed if readiness is not established. Its frames and texture
+state are recorded separately before the unchanged 40 warmups and sample window.
+No preparation frame is substituted for a requested sample. The upload/staging
+guard also applies to Orbit smoke runs. Canonical identities include sky,
+sunlight and scene transforms.
 
 The tool checks direct graphics-command-list GPU timestamps, sky cost,
 preparation plus recording CPU/allocation/draw observations and exact successful-native-Present
 handoffs. It retains per-run and pooled results and enforces unchanged total
-GPU p95 ≤+5% / p99 ≤+8%, sky ≤0.8/1.2 ms and handoff p95 ≤+10% limits. The
+GPU p95 ≤+5% / p99 ≤+8%, sky ≤0.8/1.2 ms and handoff p95 ≤+10% limits.
+Every required per-pair row and pooled row must pass. The
 graphics interval excludes separate uploads and native Present; phase geometry
 is held fixed. Native `Present(1, 0)` configuration is not verified compositor
 scanout/presentation-mode evidence.

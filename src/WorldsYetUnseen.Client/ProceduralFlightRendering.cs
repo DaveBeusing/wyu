@@ -33,6 +33,11 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
 
     internal bool BuildsOrbitalMaterials => OrbitMaterials is not null;
 
+    internal bool MaterialsResident(D3D12Renderer renderer, VolumeViewIdentity? nearView) =>
+        ReferenceEquals(renderer, Current) && OrbitMaterials is { } materials &&
+        _materialStream is { } stream && _materialCut is { } cut &&
+        (!nearView.HasValue || nearView.Value == cut.View) && materials.IsResident(stream, cut, _orbitalMaterialCut);
+
     internal void SetBiomes(ReferenceBiomes biomes)
     {
         Biomes = biomes;
@@ -81,7 +86,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     // without gating a protected terrain frame on optional upload admission.
     internal void RetryMaterials(D3D12Renderer renderer, ulong sequence)
     {
-        if (_materialRequestsPending && (sequence & 15) == 0 && ReferenceEquals(renderer, Current) &&
+        if (_materialRequestsPending && sequence % OrbitTerrainMaterials.RetryFrameInterval == 0 && ReferenceEquals(renderer, Current) &&
             OrbitMaterials is { } materials && _materialStream is { } stream && _materialCut is { } cut)
             QueueMaterialCut(materials, stream, cut);
     }
