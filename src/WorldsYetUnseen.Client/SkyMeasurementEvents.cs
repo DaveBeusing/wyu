@@ -45,7 +45,16 @@ internal sealed partial class SkyMeasurements
                 }
     }
 
-    private enum EventKind : byte { Gpu, Record, Prepare, Pipeline, GpuTicks, Calibration }
+    private static void FlushBeforeHandoff()
+    {
+        // Initial metadata is exported outside the next measured interval,
+        // including flights that collect only handoffs, without held phases.
+        lock (OwnersGate)
+            for (var i = 0; i < _evidenceOwnerCount; i++)
+                EvidenceOwners[i]!.FlushEvents();
+    }
+
+    private enum EventKind : byte { Gpu, Record, Prepare, Pipeline, GpuTicks, Calibration, Owner, UnboundPresent }
     private readonly record struct MeasurementEvent(EventKind Kind, string Phase, ulong Sequence, ulong Fence,
         long Qpc, double A = 0, double B = 0, long Allocated = 0, bool Flag = false,
         ulong T0 = 0, ulong T1 = 0, ulong T2 = 0, ulong T3 = 0, ulong Frequency = 0);
@@ -91,6 +100,16 @@ internal sealed partial class SkyMeasurements
                 var e = _events[i];
                 switch (e.Kind)
                 {
+                    case EventKind.Owner:
+                        Write(new { kind = "owner", owner = _owner, mode = Mode, frequency = Stopwatch.Frequency,
+                            smoke = Smoke, engine = typeof(D3D12Renderer).Assembly.GetName().Version?.ToString(), engineHash = EngineHash.Value,
+                            wp15 = ReferenceSunlight.Enabled, composition = Composition,
+                            orbitPbr = OrbitCombined && OrbitDemoPreset.PbrEnabled,
+                            boulder = OrbitCombined && OrbitDemoPreset.BoulderEnabled });
+                        break;
+                    case EventKind.UnboundPresent:
+                        Write(new { kind = "unbound-present", owner = _owner, fence = e.Fence, timestamp = e.Qpc });
+                        break;
                     case EventKind.Gpu:
                         Write(new { kind = "gpu", owner = _owner, sequence = e.Sequence, fence = e.Fence, phase = e.Phase,
                             observedQpc = e.Qpc, frameMicroseconds = e.A, skyMicroseconds = e.B, hasSky = e.Flag });

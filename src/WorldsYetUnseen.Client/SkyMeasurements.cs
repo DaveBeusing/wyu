@@ -93,11 +93,7 @@ internal sealed partial class SkyMeasurements
         field.SetValue(renderer, constructor.Invoke(arguments));
         Owners.Add(renderer, observer);
         RegisterEvidenceOwner(observer);
-        Write(new { kind = "owner", owner = observer._owner, mode = Mode, frequency = Stopwatch.Frequency,
-            smoke = Smoke, engine = assembly.GetName().Version?.ToString(), engineHash = EngineHash.Value,
-            wp15 = ReferenceSunlight.Enabled, composition = Composition,
-            orbitPbr = OrbitCombined && OrbitDemoPreset.PbrEnabled,
-            boulder = OrbitCombined && OrbitDemoPreset.BoulderEnabled });
+        observer.Buffer(new(EventKind.Owner, "startup", 0, 0, Stopwatch.GetTimestamp()));
 
         void Bind(string name, Delegate callback)
         {
@@ -142,7 +138,7 @@ internal sealed partial class SkyMeasurements
         {
             // A startup clear has no submitted view. The first nonzero sequence
             // on this new renderer owner is the requested mask/content view.
-            Write(new { kind = "unbound-present", owner = _owner, fence, timestamp });
+            Buffer(new(EventKind.UnboundPresent, "startup", 0, fence, timestamp));
             return;
         }
         if (Interlocked.CompareExchange(ref _firstPresent, timestamp, 0) != 0)
@@ -159,6 +155,7 @@ internal sealed partial class SkyMeasurements
         if (Enabled)
         {
             SkyHandoffDiagnostics.Prepare();
+            FlushBeforeHandoff();
             var started = Stopwatch.GetTimestamp();
             _pendingHandoff = new(direction, started);
             SkyHandoffDiagnostics.Begin(direction, started);

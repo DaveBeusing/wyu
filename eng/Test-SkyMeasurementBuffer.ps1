@@ -106,6 +106,29 @@ try
     flush();
     Require(output.GetStringBuilder().Length == 0, "An empty drain repeated old events.");
 
+    // Metadata and startup clears must not add console work to owner startup
+    // or the measured handoff. Handoff-only flights have no phase-finally.
+    var eventType = type.GetNestedType("MeasurementEvent", BindingFlags.NonPublic)!;
+    var eventKind = type.GetNestedType("EventKind", BindingFlags.NonPublic)!;
+    var eventConstructor = eventType.GetConstructors(BindingFlags.Public | instance).Single(c => c.GetParameters().Length > 5);
+    var eventParameters = eventConstructor.GetParameters();
+    foreach (var name in new[] { "Owner", "UnboundPresent" })
+    {
+        var values = eventParameters.Select(p => p.HasDefaultValue ? p.DefaultValue : null).ToArray();
+        values[0] = Enum.Parse(eventKind, name); values[1] = "startup";
+        values[2] = 0UL; values[3] = 567UL; values[4] = 123456L;
+        type.GetMethod("Buffer", instance)!.Invoke(observer, [eventConstructor.Invoke(values)]);
+    }
+    Require(output.GetStringBuilder().Length == 0 && Count() == 2, "Startup events performed console I/O.");
+    type.GetMethod("RegisterEvidenceOwner", statics)!.Invoke(null, [observer]);
+    type.GetMethod("FlushBeforeHandoff", statics)!.Invoke(null, null);
+    rows = ReadRows(output);
+    Require(rows.Length == 2 && rows[0].GetProperty("kind").GetString() == "owner" &&
+        rows[1].GetProperty("kind").GetString() == "unbound-present" &&
+        rows[1].GetProperty("fence").GetUInt64() == 567 && rows[1].GetProperty("timestamp").GetInt64() == 123456,
+        "Pre-handoff export lost owner metadata or the unbound native Present.");
+    RequireDrained(); output.GetStringBuilder().Clear();
+
     for (ulong i = 1; i <= 8192; i++) recorded(i, 20000 + i, i * 0.5, (long)i, 1);
     var overflow = false;
     try { recorded(8193, 28193, 999, 999, 1); }
@@ -169,7 +192,7 @@ static JsonElement[] ReadRows(StringWriter writer) => writer.ToString().Split('\
         Require(line.StartsWith(prefix, StringComparison.Ordinal), "Unexpected measurement event prefix.");
         using var json = JsonDocument.Parse(line[prefix.Length..]);
         var kind = json.RootElement.GetProperty("kind").GetString();
-        Require(kind is "record" or "gpu" or "prepare", "Unexpected event kind in the native measurement stream.");
+        Require(kind is "record" or "gpu" or "prepare" or "owner" or "unbound-present", "Unexpected event kind in the native measurement stream.");
         return json.RootElement.Clone();
     }).ToArray();
 static void Require(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
