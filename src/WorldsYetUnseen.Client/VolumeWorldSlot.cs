@@ -5,7 +5,7 @@ using WorldsYetUnseen.Gameplay;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, ReferencePlanet? planet, CavePlanet? cave) : IDisposable
+internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, ReferencePlanet? planet, CavePlanet? cave, bool orbitDemo = false) : IDisposable
 {
     private const int ManifestBytes = 32;
     private VolumeCheckpointWriter? _writer;
@@ -15,15 +15,17 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
     internal CavePlanet? Cave { get; } = cave;
     internal VolumeCheckpointSlot Storage { get; private set; } = new(root, id, lineage, (cave?.Descriptor ?? planet!.Descriptor), Validate);
     internal VolumeCheckpoint? Checkpoint { get; private set; }
+    internal bool OrbitDemo { get; } = orbitDemo;
     internal bool ReadOnly { get; private set; }
     internal bool HasPendingWrite => _retry;
 
     internal static WorldProfile DefaultProfile => WorldProfile.Connected;
 
-    internal enum WorldProfile { Reference, Cave, Connected }
+    internal enum WorldProfile { Reference, Cave, Connected, OrbitDemo }
 
     internal static string ProfileName(WorldProfile profile) => profile switch
     {
+        WorldProfile.OrbitDemo => OrbitDemoPreset.DisplayName,
         WorldProfile.Reference => ReferencePlanet.DisplayName,
         WorldProfile.Cave => CavePlanet.Name,
         WorldProfile.Connected => CavePlanet.ConnectedName,
@@ -31,7 +33,8 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
     };
 
     internal static VolumeWorldSlot Create(string root, ulong seed, WorldProfile profile) =>
-        Create(root, seed, cave: profile == WorldProfile.Cave, connected: profile == WorldProfile.Connected);
+        Create(root, seed, cave: profile == WorldProfile.Cave, connected: profile == WorldProfile.Connected,
+            orbitDemo: profile == WorldProfile.OrbitDemo);
 
     internal static ulong? ReadManifestSeed(string root, Guid id)
     {
@@ -48,20 +51,23 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
         catch (UnauthorizedAccessException) { return null; }
     }
 
-    internal static VolumeWorldSlot Create(string root, ulong seed, bool cave = false, bool connected = false)
+    internal static VolumeWorldSlot Create(string root, ulong seed, bool cave = false, bool connected = false,
+        bool orbitDemo = false)
     {
         Directory.CreateDirectory(root);
         cave |= connected;
+        if (orbitDemo && cave)
+            throw new ArgumentException("The Orbit demo uses the reference planet.", nameof(orbitDemo));
         var id = Guid.NewGuid();
         var lineage = Guid.NewGuid();
         var geology = cave ? new CavePlanet(id, seed, connected) : null;
         var planet = cave ? null : new ReferencePlanet(id, seed);
-        var slot = new VolumeWorldSlot(root, id, lineage, planet, geology)
+        var slot = new VolumeWorldSlot(root, id, lineage, planet, geology, orbitDemo)
         {
             Storage = VolumeCheckpointSlot.Reserve(root, id, lineage, geology?.Descriptor ?? planet!.Descriptor, Validate)
         };
         Span<byte> bytes = stackalloc byte[ManifestBytes];
-        (connected ? "WYUVOL03"u8 : cave ? "WYUVOL02"u8 : "WYUVOL01"u8).CopyTo(bytes);
+        (orbitDemo ? "WYUVOL04"u8 : connected ? "WYUVOL03"u8 : cave ? "WYUVOL02"u8 : "WYUVOL01"u8).CopyTo(bytes);
         BinaryPrimitives.WriteUInt64LittleEndian(bytes[8..], seed);
         lineage.TryWriteBytes(bytes[16..]);
         using var manifest = new FileStream(ManifestPath(root, id), FileMode.CreateNew, FileAccess.Write, FileShare.None);
@@ -84,14 +90,15 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
             manifest.ReadExactly(bytes);
             var connected = bytes[..8].SequenceEqual("WYUVOL03"u8);
             var cave = connected || bytes[..8].SequenceEqual("WYUVOL02"u8);
-            if ((!cave && !bytes[..8].SequenceEqual("WYUVOL01"u8)) || new Guid(bytes[16..]) == Guid.Empty)
+            var orbitDemo = bytes[..8].SequenceEqual("WYUVOL04"u8);
+            if ((!cave && !orbitDemo && !bytes[..8].SequenceEqual("WYUVOL01"u8)) || new Guid(bytes[16..]) == Guid.Empty)
                 return null;
             var seed = BinaryPrimitives.ReadUInt64LittleEndian(bytes[8..]);
             if (cave && !connected && seed != CavePlanet.Seed)
                 return null;
             var geology = cave ? new CavePlanet(id, seed, connected) : null;
             var planet = cave ? null : new ReferencePlanet(id, seed);
-            var slot = new VolumeWorldSlot(root, id, new Guid(bytes[16..]), planet, geology);
+            var slot = new VolumeWorldSlot(root, id, new Guid(bytes[16..]), planet, geology, orbitDemo);
             var loaded = slot.Storage.Load();
             status = loaded.Status;
             if (loaded.Status is not (VolumeSlotStatus.Loaded or VolumeSlotStatus.ReadOnlyRecovery) || loaded.Checkpoint is null)

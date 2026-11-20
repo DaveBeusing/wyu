@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseWPF>true</UseWPF>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Cook-OrbitDemoAssets.cs" />
+    <Reference Include="Groundwork.Rendering" HintPath="$(OrbitCookerRenderingAssembly)" />
+  </ItemGroup>
+</Project>

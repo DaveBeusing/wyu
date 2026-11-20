@@ -72,12 +72,13 @@ internal sealed partial class VolumeExploration
             var buildSample = BiomeMeasurements.StartBuild();
             var globe = cave is { } geology
                 ? ProceduralGlobe.Build(Descriptor, geology.Field.SampleLandform, geology.Field.SampleMaterial, pad, null, token)
-                : ProceduralGlobe.Build(planet, pad, renderHost.Biomes, token);
+                : ProceduralGlobe.Build(planet, pad, renderHost.Biomes, token, renderHost.BuildsOrbitalMaterials);
             BiomeMeasurements.WriteBuild("globe-build", buildSample);
             return globe;
         }, token);
         var far = false;
         var usedFar = false;
+        var texturedOrbit = false;
         var warpReadback = renderHost.WarpReadback;
         var orbitReadback = false;
         var skySmoke = scripted && Environment.GetEnvironmentVariable("WYU_PACKAGE_G_SMOKE") == "1";
@@ -120,7 +121,7 @@ internal sealed partial class VolumeExploration
                         var handoffStarted = MeasureR09 ? Stopwatch.GetTimestamp() : 0;
                         // Freeze flight at the normal return boundary before starting measured Recovery.
                         if (recoveryAtHandoff)
-                            returnTerrain = await PrepareFlightReturnAsync(terrain, player, center, revision,
+                            returnTerrain = await PrepareFlightReturnAsync(terrain, player, center, revision, texturedOrbit,
                                 returnCancellation.Token, handoffStarted).ConfigureAwait(false);
                         if (skySmoke)
                         {
@@ -130,7 +131,7 @@ internal sealed partial class VolumeExploration
                         }
                         if (warpReadback is not null)
                             await CaptureHandoffAsync(warpReadback, "far-before-return", renderHost.Active, terrain, player,
-                                flight, digest, pad, await globeTask.ConfigureAwait(false), token).ConfigureAwait(false);
+                                flight, digest, pad, (await globeTask.ConfigureAwait(false)).Meshes, token).ConfigureAwait(false);
                         var recoveryTiming = returnTerrain?.Timing;
                         var stopStarted = BiomeMeasurements.Start();
                         if (recoveryTiming is not null)
@@ -201,18 +202,19 @@ internal sealed partial class VolumeExploration
                         await renderHost.StopAsync(qualifyHandoff: scripted).ConfigureAwait(false);
                         if (terrain.Statistics is not { MovementHeld: true, Readers: 0 })
                             throw new InvalidOperationException("The near renderer retained collision readers during the far handoff.");
-                        await renderHost.FarAsync(globe, token).ConfigureAwait(false);
+                        await renderHost.FarAsync(globe, terrain.WorldIdentity, _published, token).ConfigureAwait(false);
+                        texturedOrbit = globe.Textured;
                         far = true;
                         usedFar = true;
                         if (warpReadback is { MarkerOnly: true })
                         {
                             await CaptureHandoffAsync(warpReadback, "landing-marker", renderHost.Active, terrain, player,
-                                flight, digest, pad, globe, token).ConfigureAwait(false);
+                                flight, digest, pad, globe.Meshes, token).ConfigureAwait(false);
                             return (player, true);
                         }
                         if (warpReadback is not null)
                             await CaptureHandoffAsync(warpReadback, "far-after-ascent", renderHost.Active, terrain, player,
-                                flight, digest, pad, globe, token).ConfigureAwait(false);
+                                flight, digest, pad, globe.Meshes, token).ConfigureAwait(false);
                         if (beforeSky is not null)
                         {
                             var pixels = await CaptureFlightSkyAsync(renderHost.Active, terrain.View, next.Position,
@@ -236,21 +238,26 @@ internal sealed partial class VolumeExploration
                 var frameStarted = far && flight.Phase == ProceduralFlightPhase.Orbit ? BiomeMeasurements.Start() : 0;
                 var sequence = ++_sequence;
                 var renderer = renderHost.Active;
+                OrbitMaterialHost?.RetryMaterials(renderer, sequence);
                 var tick = checked(_environmentTick + (ulong)flight.Tick);
                 var fraction = acceptedAt == 0 || flight.Phase == ProceduralFlightPhase.Landed ? 1 :
                     Math.Clamp(Stopwatch.GetElapsedTime(acceptedAt).TotalSeconds * 60, 0, 1);
                 var presentationTick = fraction == 1 ? tick : tick - 1;
                 var subTick = fraction == 1 ? 0 : fraction;
                 var camera = FlightCamera(terrain.View, flight.State.Position, player.Heading, presentationTick, subTick);
-                var orbit = GlobeFrame(sequence, camera, flight.State.Position, player.Heading, presentationTick, subTick);
+                var nearCamera = ApplySunlight(camera, presentationTick, subTick);
+                var orbitCamera = texturedOrbit ? nearCamera : orbitDemo && nearCamera.Sunlight is { } sun
+                    ? camera with { Tint = ReferenceSunlight.GlobeTint(camera.Position, sun) } : camera;
+                var orbit = GlobeFrame(sequence, orbitCamera, flight.State.Position, player.Heading, presentationTick, subTick);
                 if (scripted && _weather is not null)
                 {
                     if (camera.Fog is not { } fog || (far && fog.MaxOpacity != 0))
                         throw new InvalidOperationException("Flight weather did not fade at the orbit boundary.");
                     if (transition is not null)
                     {
-                        if (camera.ClearColor != orbit.ClearColor || camera.Tint != orbit.Scene!.Value.Tint ||
-                            camera.Sky != orbit.Sky)
+                        if (nearCamera.ClearColor != orbit.ClearColor || orbitCamera.Tint != orbit.Scene!.Value.Tint ||
+                            nearCamera.Sky != orbit.Sky ||
+                            (orbit.Sky is { } sky && nearCamera.Sunlight is { } light && sky.SunDirection != light.Direction))
                             throw new InvalidOperationException("Daylight changed at the renderer handoff.");
                     }
                     if (flight.Phase == ProceduralFlightPhase.Landed && fog.MaxOpacity <= 0)
@@ -259,21 +266,24 @@ internal sealed partial class VolumeExploration
                 var sampleOrbit = warpReadback is not null && !orbitReadback && far && flight.Phase == ProceduralFlightPhase.Orbit;
                 if (sampleOrbit)
                     warpReadback!.Arm("orbit-globe", sequence);
+                var orbitSubmit = frameStarted != 0 && orbitDemo && OrbitPbrMeasurements.Enabled
+                    ? Stopwatch.GetTimestamp() : 0;
                 if (far)
                     RequireFrame(renderer.TrySubmit(orbit));
                 else
                 {
                     Props?.Pump();
-                    RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, ApplySunlight(camera, presentationTick, subTick)));
+                    RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, nearCamera));
                 }
                 if (scripted || flight.Phase == ProceduralFlightPhase.Landed)
                     await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
                         pauseWhileMinimized: true).ConfigureAwait(false);
+                var orbitReceipt = orbitSubmit != 0 ? Stopwatch.GetTimestamp() : 0;
                 if (sampleOrbit)
                 {
                     await warpReadback!.CompleteAsync(renderer, terrain, _published,
                         new(Descriptor.Seed, flight.Tick, presentationTick, subTick, digest, pad, null, orbit.Scene!.Value, false),
-                        await globeTask.ConfigureAwait(false), token).ConfigureAwait(false);
+                        (await globeTask.ConfigureAwait(false)).Meshes, token).ConfigureAwait(false);
                     orbitReadback = true;
                 }
                 if (warpReadback is not null && flight.Phase == ProceduralFlightPhase.FinalApproach)
@@ -293,10 +303,12 @@ internal sealed partial class VolumeExploration
                         $"PACKAGE G {checkpoint} seed={Descriptor.Seed} flightTick={flight.Tick} present={sequence} radius={sky.EyeMeters.Length():F3}"));
                 }
                 BiomeMeasurements.Write("orbit", frameStarted);
+                if (orbitReceipt != 0)
+                    OrbitPbrMeasurements.WriteFrame("orbit", flight.Tick, sequence, 0, orbitSubmit, orbitReceipt, renderer);
                 if (transition is not null)
                     BiomeMeasurements.Write(transition, transitionStarted);
                 if (far && returnTerrain is null && !recoveryAtHandoff)
-                    returnTerrain = await PrepareFlightReturnAsync(terrain, player, center, revision, returnCancellation.Token).ConfigureAwait(false);
+                    returnTerrain = await PrepareFlightReturnAsync(terrain, player, center, revision, texturedOrbit, returnCancellation.Token).ConfigureAwait(false);
                 if (abortAtFar && far)
                     return (player, true);
                 if (!scripted)
@@ -331,7 +343,7 @@ internal sealed partial class VolumeExploration
         if (scripted)
             FlightTrace("touchdown", flight, revision, digest);
         if (scripted && Connected)
-            await GameHost.VerifyConnectedProfilesAsync(window, slot!, await globeTask.ConfigureAwait(false), token).ConfigureAwait(false);
+            await GameHost.VerifyConnectedProfilesAsync(window, slot!, (await globeTask.ConfigureAwait(false)).Meshes, token).ConfigureAwait(false);
         return (position, false);
     }
 
@@ -341,7 +353,7 @@ internal sealed partial class VolumeExploration
     private sealed record FlightReturnReadback(Wp11WarpReadback Readback, int Tick, string Digest, PlanetVector Pad);
 
     private RenderFrame GlobeFrame(ulong sequence, VolumeCamera camera, PlanetVector craft, PlanetVector heading,
-        ulong tick, double fraction) => camera.Sky is not null ? ProceduralGlobe.Frame(sequence, camera) :
+        ulong tick, double fraction) => camera.Sky is not null || orbitDemo ? ProceduralGlobe.Frame(sequence, camera) :
         ProceduralGlobe.LegacyFrame(sequence, craft, heading, Atmosphere(FlightEye(craft), tick, fraction));
 
     private async Task CaptureHandoffAsync(Wp11WarpReadback readback, string checkpoint, D3D12Renderer renderer,
@@ -414,13 +426,15 @@ internal sealed partial class VolumeExploration
     }
 
     private async Task<FlightReturnTerrain> PrepareFlightReturnAsync(VolumeStreamingCoordinator terrain, PlanetWalkState player,
-        PlanetVector center, ulong revision, CancellationToken token, long? handoffStarted = null)
+        PlanetVector center, ulong revision, bool texturedOrbit, CancellationToken token, long? handoffStarted = null)
     {
         var started = handoffStarted ?? Stopwatch.GetTimestamp();
         var timing = StartR09(VolumeWorkClass.Recovery, started, recoveryAtHandoff: handoffStarted.HasValue);
         var previous = terrain.View;
         var frame = previous.Frame.TryRebase(player.Position, out var rebased) ? rebased : previous.Frame;
-        var view = terrain.ChangeView(frame, checked(previous.RendererEpoch + 1));
+        // The static textured orbit has its own cut in the intervening renderer epoch.
+        var rendererEpoch = checked(previous.RendererEpoch + (texturedOrbit ? 2UL : 1UL));
+        var view = terrain.ChangeView(frame, rendererEpoch);
         if (view.RendererEpoch <= previous.RendererEpoch || !terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Could not reserve the held return view.");
         var selection = SelectTerrain(center, player.Heading, supportCells: FlightSupportCells);

@@ -62,17 +62,18 @@ projection for depth verification.
 Use `eng/Build-Wp11WarpReadbackProvider.ps1` to build the diagnostic provider
 from Groundwork `49497e4`. Supply the Groundwork Git directory, verified
 release package directory, pinned DXC and TerraFX archives, and a fresh
-output directory. The build verifies stock shader provenance. Check out the
-diagnostic changes in a WYU clone that contains the pinned `24c6c14` source
-tree. Run `eng/Test-Wp11WarpPresentReadback.ps1` on an interactive Windows
-desktop with Graphics Tools. Pass the provider output as `-ProviderBuild`
-and a local NuGet cache containing the verified archives as `-PackageCache`.
+output directory. The build verifies stock shader provenance. Use a WYU clone
+that contains the reviewed diagnostic commit `769a202` and its parent `24c6c14`.
+Run `eng/Test-Wp11WarpPresentReadback.ps1` on an interactive Windows desktop
+with Graphics Tools. Pass the provider output as `-ProviderBuild` and a local
+NuGet cache containing the verified archives as `-PackageCache`.
 
-The runner builds in a fresh directory from the pinned source plus the
-diagnostic files. It preserves the original package cache and records both
-the stock and loaded provider hashes. The output contains the raw GPU
-attachments, per-Present JSON, assembly provenance, and a checksummed
-`evidence.json` after all six probes and native shutdown pass.
+The runner builds in a fresh directory from the pinned diagnostic commit.
+It preserves the original package cache and records the source archive and
+SHA-256 hashes for the diagnostic sources and stock and loaded providers.
+The output contains the raw GPU attachments, per-Present JSON, assembly
+provenance, and a checksummed `evidence.json` after all six probes and native
+shutdown pass.
 
 Pass `-LandingMarkerOnly` to take one additional probe on the first Far
 renderer and exit after it retires. The view keeps the ascent eye and aims

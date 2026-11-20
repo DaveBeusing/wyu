@@ -20,14 +20,14 @@ jobs:
       run:
         shell: pwsh
     env:
-      GROUNDWORK_RUN_ID: '44364420373'
+      GROUNDWORK_RUN_ID: '44510519303'
       GROUNDWORK_RUN_ATTEMPT: '1'
-      GROUNDWORK_EXPECTED_HEAD_SHA: '49497e4f033641fa05105d79819a04302c195eed'
-      GROUNDWORK_EXPECTED_MANIFEST_SHA256: 'DBA7D2AADB8A28942B97F845FDF401018AA257DA9F01C152845423B937E674C6'
-      GROUNDWORK_EXPECTED_ARTIFACT_ZIP_SHA256: '1FB8FD538AA9121C55B3FCB1B190B57C521292A571402CDBFE3276CF4B1A97D2'
-      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.44364420373.1'
-      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.44364420373.1-immutable-complete'
-      GROUNDWORK_ARCHIVE_RECORD_SHA256: '1CEC0F5034A9F85D302C2BFF98801E4D464E6DA7EDF00D8D34FF70649BA6CA9B'
+      GROUNDWORK_EXPECTED_HEAD_SHA: '067bb610127b7436431a498fc70d0f12c05f8f7b'
+      GROUNDWORK_EXPECTED_MANIFEST_SHA256: 'BDF297C13C2E719DC7B8919D848E5ABF1C924C349FC5CC3FB5311AEB4307511A'
+      GROUNDWORK_EXPECTED_ARTIFACT_ZIP_SHA256: '468CE26231AEF8BE59B8EC6D2B36F3E7B0AFBBBD2CE9A600CA53F1F6B75509C6'
+      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.44510519303.1'
+      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.44510519303.1-immutable-complete'
+      GROUNDWORK_ARCHIVE_RECORD_SHA256: '1C5296751958869B5E6623DC5F4C20F821084C5E7A6C8EC89595F470AD3E1244'
       GROUNDWORK_LICENSE_SHA256: 'B1D2870F1A00E4D7F56576E5F0870CBA109E041F8AF66866CF5B499478E654E7'
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -46,8 +46,10 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $null -eq $run) { throw 'Groundwork run unavailable.' }
           if ([string]$run.id -ne $env:GROUNDWORK_RUN_ID -or [string]$run.run_attempt -ne $env:GROUNDWORK_RUN_ATTEMPT) { throw 'Run attempt mismatch.' }
           if ($run.status -ne 'completed' -or $run.conclusion -ne 'success') { throw 'Producer CI did not pass.' }
-          if ($run.head_sha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $run.head_branch -ne 'master') { throw 'Producer head is not approved.' }
-          if ($run.name -ne 'Groundwork Windows CI' -or $run.event -ne 'push') { throw 'Unapproved producing workflow.' }
+          if ($run.head_sha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $run.head_branch -cne 'master' -or
+              $run.repository.full_name -cne 'DaveBeusing/Groundwork' -or $run.head_repository.full_name -cne 'DaveBeusing/Groundwork') { throw 'Producer head is not approved.' }
+          if ($run.name -cne 'Groundwork Windows CI' -or $run.event -cne 'push' -or
+              $run.path -cne '.github/workflows/windows-ci.yml') { throw 'Unapproved producing workflow.' }
           Write-Host 'PASS: independently pinned Groundwork CI run identity.'
 
       - name: Verify durable Groundwork release metadata
@@ -74,6 +76,9 @@ jobs:
             if ([string]$asset.digest -ine "sha256:$($pair.hash)") { throw "Unapproved release asset digest: $($pair.name)" }
           }
           if (-not $release.immutable) { throw 'Pinned release must be immutable.' }
+          $ref = gh api "repos/DaveBeusing/Groundwork/git/ref/tags/$env:GROUNDWORK_RELEASE_TAG" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $ref.object.type -cne 'commit' -or
+              $ref.object.sha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA) { throw 'Archive tag does not resolve to the pinned commit.' }
           Write-Host 'PASS: durable release identity and independently pinned archive metadata.'
 
       - name: Download durable Groundwork release archive

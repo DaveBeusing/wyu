@@ -18,6 +18,8 @@ $cache = (Resolve-Path -LiteralPath $PackageCache).Path
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 $wyuCommit = '24c6c14d1642d8191e3cc4256bb493eafb3b7f26'
 $wyuTree = '63dbe0b27366a249e8836d55625c3374adffb027'
+$wyuOverlayCommit = '769a2021ff2a48979cbc98bd60219cb25ab3861e'
+$wyuOverlayTree = '3fb8361050b930245598e124d9611e67b47ebd78'
 $groundworkCommit = '49497e4f033641fa05105d79819a04302c195eed'
 $packageVersion = '0.1.0-dev.44364420373.1'
 $providerName = 'Groundwork.Rendering.D3D12.dll'
@@ -28,9 +30,13 @@ $packageManifest = Join-Path $provider 'provider-stock-package-manifest.json'
 $patch = Join-Path $PSScriptRoot 'patches/wp11-warp-present-readback-groundwork.patch'
 $providerDll = Join-Path $provider $providerName
 $packageManifestHash = Get-Sha256 $packageManifest
-$baseTree = & git -C $repo rev-parse --verify "${wyuTree}^{tree}" 2>$null
+$baseTree = & git -C $repo rev-parse --verify "${wyuCommit}^{tree}" 2>$null
 if ($LASTEXITCODE -ne 0 -or $baseTree -cne $wyuTree) {
     throw "The pinned WYU source tree is unavailable. Fetch WYU commit $wyuCommit before running the diagnostic."
+}
+$overlayIdentity = & git -C $repo show -s --format='%P %T' $wyuOverlayCommit 2>$null
+if ($LASTEXITCODE -ne 0 -or $overlayIdentity -cne "$wyuCommit $wyuOverlayTree") {
+    throw "The pinned WYU diagnostic tree is unavailable or has unexpected provenance. Fetch WYU commit $wyuOverlayCommit and its parent."
 }
 if ($providerInfo.sourceCommit -cne $groundworkCommit -or $providerInfo.packageVersion -cne $packageVersion -or
     $packageManifestHash -cne 'DBA7D2AADB8A28942B97F845FDF401018AA257DA9F01C152845423B937E674C6' -or
@@ -64,15 +70,11 @@ Copy-Item -LiteralPath @($archives.Values) -Destination $feed
 Copy-Item -LiteralPath $terraFx -Destination $feed
 $sourceNames = @('Program.cs', 'ProceduralFlightRendering.cs', 'VolumeExploration.cs', 'VolumeExplorationFlight.cs',
     'VolumeExplorationHost.cs', 'VolumeFlightSmoke.cs', 'Wp11WarpReadback.cs', 'Wp11WarpReadbackSamples.cs')
-$baseArchive = Join-Path $output 'wyu-base.zip'
+$sourceArchive = Join-Path $output 'wyu-diagnostic.zip'
 $sourceRoot = Join-Path $output 'src-overlay'
-& git -C $repo archive --format=zip "--output=$baseArchive" $baseTree -- src Directory.Build.props global.json
-if ($LASTEXITCODE -ne 0) { throw 'Could not archive the pinned WYU tree.' }
-[IO.Compression.ZipFile]::ExtractToDirectory($baseArchive, $sourceRoot)
-foreach ($name in $sourceNames) {
-    $relative = "src/WorldsYetUnseen.Client/$name"
-    Copy-Item -LiteralPath (Join-Path $repo $relative) -Destination (Join-Path $sourceRoot $relative) -Force
-}
+& git -C $repo archive --format=zip "--output=$sourceArchive" $wyuOverlayCommit -- src Directory.Build.props global.json
+if ($LASTEXITCODE -ne 0) { throw 'Could not archive the pinned WYU diagnostic tree.' }
+[IO.Compression.ZipFile]::ExtractToDirectory($sourceArchive, $sourceRoot)
 $buildArtifacts = Join-Path $output 'obj'
 $clientDir = Join-Path $output 'client'
 $buildCache = Join-Path $output 'packages'
@@ -115,7 +117,9 @@ $client = Join-Path $clientDir 'WorldsYetUnseen.Client.dll'
 [ordered]@{
     wyuBaseCommit = $wyuCommit
     wyuBaseTree = $wyuTree
-    wyuBaseArchiveSha256 = Get-Sha256 $baseArchive
+    wyuOverlayCommit = $wyuOverlayCommit
+    wyuOverlayTree = $wyuOverlayTree
+    wyuSourceArchiveSha256 = Get-Sha256 $sourceArchive
     groundworkSourceCommit = $groundworkCommit
     packageVersion = $packageVersion
     qualification = $qualification
