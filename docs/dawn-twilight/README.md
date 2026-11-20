@@ -93,6 +93,16 @@ This closes the local functional handoff/Continue blocker. It does not replace
 the master-produced immutable package pin, installed-archive replay, reference
 hardware performance, or integrated pressure qualification.
 
+## Prepared reference measurement
+
+The owner will execute the [reference runbook](reference-qualification.md) on
+the accepted i9-10850K / RTX 5070 machine. It separates the synthetic renderer
+pass fixture from the real WYU profile and paired native handoffs. The scripts
+retain raw samples, failures and exact denominators; smoke execution does not
+approve a budget. Source/assembly hashes, clean-source checks and fresh output
+directories are required in full mode. The production package guards remain
+unchanged.
+
 The [TW1–TW3 decisions](../package-g-sky.md#owner-decisions-for-the-paired-prs)
 were approved by the owner on 20 November 2026. Existing gameplay timing and save payloads are
 unchanged. Existing saves adopt the new look in this candidate; no player save

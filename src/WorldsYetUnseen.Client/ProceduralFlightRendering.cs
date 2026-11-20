@@ -18,7 +18,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     private readonly ProcessResourceBudget _budget = new(new ProcessResourceLimits(1, quota));
     private RuntimeSafetyAuthority? _runtime;
     private readonly D3D12DeviceSession _device = new(
-        new D3D12DiagnosticsOptions(!measure, true) { EnableResourceSnapshots = qualifyR09 }, warp, reuseDirectQueue: true);
+        new D3D12DiagnosticsOptions(!measure, true) { EnableResourceSnapshots = qualifyR09 || SkyMeasurements.Enabled }, warp, reuseDirectQueue: true);
     internal D3D12Renderer? Current { get; private set; }
     internal Wp11WarpReadback? WarpReadback { get; init; }
     internal R09NativeUploadGate? R09UploadGate { get; private set; }
@@ -64,6 +64,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
         var clock = TimeProvider.System;
         _runtime = RuntimeSafetyAuthority.Create(clock, timing, reservation);
         Current = create(_runtime.RuntimeOwnership);
+        SkyMeasurements.Attach(Current);
         WarpReadback?.Attach(Current);
         var context = new EngineModuleContext(clock, timing, _runtime.Reporter, _runtime.StopControl);
         await Current.InitializeAsync(context, token).ConfigureAwait(false);

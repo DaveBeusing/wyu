@@ -144,7 +144,8 @@ internal static class Program
 
         using var stop = new CancellationTokenSource();
         if (scripted)
-            stop.CancelAfter(TimeSpan.FromMinutes(Environment.GetEnvironmentVariable("WYU_PACKAGE_E_TIMESTAMP_PAIRS") == "1" ? 6 : 3));
+            stop.CancelAfter(TimeSpan.FromMinutes(SkyMeasurements.Enabled ? SkyMeasurements.Smoke ? 3 : 10 :
+                Environment.GetEnvironmentVariable("WYU_PACKAGE_E_TIMESTAMP_PAIRS") == "1" ? 6 : 3));
         var fixture = playtest ? Path.GetFullPath(args[1]) : null;
         if (fixture is not null && !File.Exists(Path.Combine(fixture, "wyu-planet-playtest.fixture")))
             return 2;

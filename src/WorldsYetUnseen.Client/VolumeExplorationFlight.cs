@@ -80,7 +80,7 @@ internal sealed partial class VolumeExploration
         var usedFar = false;
         var warpReadback = renderHost.WarpReadback;
         var orbitReadback = false;
-        var skySmoke = scripted && Environment.GetEnvironmentVariable("WYU_PACKAGE_G_SMOKE") == "1";
+        var skySmoke = scripted && Environment.GetEnvironmentVariable("WYU_PACKAGE_G_SMOKE") == "1" && !SkyMeasurements.Enabled;
         var recoveryAtHandoff = MeasureR09 && scripted &&
             Environment.GetEnvironmentVariable("WYU_R09_RECOVERY_AT_HANDOFF") == "1";
         var orbitSkyChecked = false;
@@ -115,6 +115,7 @@ internal sealed partial class VolumeExploration
                     var next = flight.Propose();
                     if (far && Length(next.Position) <= FlightBoundary)
                     {
+                        SkyMeasurements.BeginHandoff("to-ground");
                         transitionStarted = BiomeMeasurements.Start();
                         transition = "to-ground";
                         var handoffStarted = MeasureR09 ? Stopwatch.GetTimestamp() : 0;
@@ -186,6 +187,14 @@ internal sealed partial class VolumeExploration
 
                     if (!far && !usedFar && Length(next.Position) > FlightBoundary)
                     {
+                        if (SkyMeasurements.Enabled)
+                        {
+                            var measuredTick = checked(_environmentTick + (ulong)flight.Tick);
+                            await MeasureSkyPhaseAsync(terrain, renderHost.Active,
+                                FlightCamera(terrain.View, next.Position, player.Heading, measuredTick),
+                                "ascent", false, measuredTick, token).ConfigureAwait(false);
+                        }
+                        SkyMeasurements.BeginHandoff("to-orbit");
                         transitionStarted = BiomeMeasurements.Start();
                         transition = "to-orbit";
                         if (skySmoke)
@@ -237,7 +246,7 @@ internal sealed partial class VolumeExploration
                 var sequence = ++_sequence;
                 var renderer = renderHost.Active;
                 var tick = checked(_environmentTick + (ulong)flight.Tick);
-                var fraction = acceptedAt == 0 || flight.Phase == ProceduralFlightPhase.Landed ? 1 :
+                var fraction = SkyMeasurements.Enabled || acceptedAt == 0 || flight.Phase == ProceduralFlightPhase.Landed ? 1 :
                     Math.Clamp(Stopwatch.GetElapsedTime(acceptedAt).TotalSeconds * 60, 0, 1);
                 var presentationTick = fraction == 1 ? tick : tick - 1;
                 var subTick = fraction == 1 ? 0 : fraction;
@@ -260,15 +269,20 @@ internal sealed partial class VolumeExploration
                 if (sampleOrbit)
                     warpReadback!.Arm("orbit-globe", sequence);
                 if (far)
-                    RequireFrame(renderer.TrySubmit(orbit));
+                    RequireFrame(renderer.TrySubmit(SkyMeasurements.Submit(orbit)));
                 else
                 {
                     Props?.Pump();
-                    RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, ApplySunlight(camera, presentationTick, subTick)));
+                    RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, SkyMeasurements.Submit(ApplySunlight(camera, presentationTick, subTick))));
                 }
                 if (scripted || flight.Phase == ProceduralFlightPhase.Landed)
                     await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
                         pauseWhileMinimized: true).ConfigureAwait(false);
+                if (SkyMeasurements.Enabled && far && !orbitSkyChecked && flight.Phase == ProceduralFlightPhase.Orbit)
+                {
+                    orbitSkyChecked = true;
+                    await MeasureSkyPhaseAsync(terrain, renderer, camera, "orbit", true, presentationTick, token).ConfigureAwait(false);
+                }
                 if (sampleOrbit)
                 {
                     await warpReadback!.CompleteAsync(renderer, terrain, _published,

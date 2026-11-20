@@ -1,0 +1,116 @@
+# Reference qualification runbook
+
+TW1–TW3 are approved. The local two-seed hardware flight/Continue image
+qualification passed after the DPI capture correction. The owner will run
+the performance evidence on the accepted i9-10850K / RTX 5070 reference system.
+Results from the RTX PRO 5000 workstation are diagnostic evidence only.
+
+## Freeze the inputs
+
+Use clean checkouts of the final reviewed heads of Groundwork PR #193 and
+WYU PR #83. Record both full commit IDs before building. Keep the same OS,
+driver, display topology, power state and presentation settings throughout
+each comparison. Do not run the two measurement programs concurrently.
+
+The tools require Windows x64, PowerShell 7, .NET SDK 10 and the hardware
+D3D12 adapter. The integrated run also needs an interactive desktop on which
+the test window can expose a native 1920 × 1080 drawable client. A smaller or
+software-adapter smoke run cannot qualify these limits. Close other games,
+captures and GPU benchmarks; record any unavoidable concurrent workload.
+
+Use a new output directory for every attempt, including failed attempts.
+Never delete a failed run to improve a percentile or reuse its directory.
+
+## 1. Renderer pass fixture
+
+From the clean Groundwork checkout:
+
+```powershell
+./eng/Measure-SkyQualification.ps1 -OutputDirectory D:\Evidence\sky-pass-reference-01
+```
+
+Do not specify `-LocalProbe`, `-AllowDirty` or `-SkipBuild` for reference
+evidence. Strict mode uses 1920 × 1080, five alternating pairs, 2,000 retained
+samples per variant/pair/phase and 64 warmups. It checks the unchanged sky
+p95 ≤0.8 ms / p99 ≤1.2 ms limits, renderer preparation/recording p99 ≤0.10 ms,
+zero warmed recording allocations and native sky draw counts.
+
+This is a synthetic renderer fixture, not the real WYU profile or installed
+route. Its radius/shell/scale-height inputs and all measurement scope are in
+the output. Its CPU interval excludes application preparation. Tracked
+resource backing excludes unobservable driver PSO/root-signature memory.
+Do not promote this result into an integrated or complete memory result.
+
+Preserve the entire output directory: raw CSV, summary JSON, TRX, console log,
+hardware/source records and hashes, even when the command returns nonzero.
+
+## 2. Real WYU profile and handoffs
+
+Build WYU from its unchanged, approved immutable package pin using
+`eng/Test-VerifiedGroundworkConsumer.ps1` and the exact archive/hash/version
+listed in [build-bootstrap](../build-bootstrap.md). That verification must
+pass before staging a diagnostic renderer. Do not change the NuGet pins,
+lockfiles or master-only producer checks to accept a PR artifact.
+
+For this explicitly identified diagnostic run, replace only the output
+folder's `Groundwork.Rendering.D3D12.dll` with the tested Release DLL from
+the clean Groundwork PR checkout. Record its full source commit and record
+both client and renderer hashes immediately after the controlled build and
+staging step. Retain those values independently of the runner output; compare
+them with the build records before execution. This is not an approved archive
+or a production WYU installation.
+
+From the clean WYU checkout, with those recorded values:
+
+```powershell
+./eng/Measure-ReferenceSky.ps1 `
+  -Assembly $clientAssembly `
+  -OutputDirectory D:\Evidence\sky-integrated-reference-01 `
+  -Adapter hardware `
+  -ExpectedClientSha256 $recordedClientSha256 `
+  -ExpectedRendererSha256 $recordedRendererSha256 `
+  -RendererSourceCommit $recordedRendererCommit
+```
+
+The variables above identify the controlled build; do not substitute values
+from an unverified downloaded binary. The runner rejects mismatches. Do not
+use `-Smoke` for reference qualification.
+
+Full mode runs five alternating off/on pairs with six fresh child flights
+per pair and variant: 60 attempts total, at least 30 handoffs in each
+direction per variant. The first child of each run supplies 400 retained
+samples after 40 warmups in each surface/ascent/orbit phase, giving 2,000
+samples per phase and variant. All required attempts must complete.
+
+Packages B/E and canonical G cameras stay enabled in both variants. Only the
+submitted sky value is removed in the off variant, after camera and globe
+construction, so the legacy off-camera/FOV cannot distort the comparison.
+The script rejects mismatching phase/route identities and incomplete counts.
+
+The tool checks direct graphics-command-list GPU timestamps, sky cost,
+recording CPU/allocation/draw observations and exact successful-native-Present
+handoffs. It retains per-run and pooled results and enforces unchanged total
+GPU p95 ≤+5% / p99 ≤+8%, sky ≤0.8/1.2 ms and handoff p95 ≤+10% limits. The
+graphics interval excludes separate uploads and native Present; phase geometry
+is held fixed. Native `Present(1, 0)` configuration is not verified compositor
+scanout/presentation-mode evidence.
+
+Return the **complete evidence directory**, including failed attempt logs,
+manifest, raw samples/handoffs and summary/result files. `SMOKE ONLY` is a
+plumbing result. `MEASURED GATES PASSED` covers only the explicitly measured
+subset; `FullQualification=false` and the remaining-gate list are deliberate.
+Do not edit those fields into an approval.
+
+## Gates still requiring separate evidence
+
+| Gate | Required disposition |
+| --- | --- |
+| Reference results | Run the fixed protocol on the accepted machine; inspect every required phase/pair and retain failures. |
+| Application CPU and memory | Complete combined atmosphere preparation/recording and allocation evidence, and incremental peak GPU memory including overlapping handoff resources. The renderer-only counters do not prove these by themselves. |
+| Protected workload | Retain WP11 movement/edit/recovery and speculative CPU/GPU pressure limits against the accepted baseline. A static warm phase is not pressure qualification. |
+| Published package | Obtain the required final code approval and authorized engine merge, green master push CI and qualified immutable archive through existing policy. |
+| WYU package integration | Update all ten exact package pins, lockfiles and provenance digests together, then repeat the affected installed flight/Continue routes and CI. |
+
+Neither TW1–TW3 nor a diagnostic hash record authorizes merging, publishing a
+release or weakening these gates. Current PRs remain reviewable candidates
+until their required technical evidence is complete.

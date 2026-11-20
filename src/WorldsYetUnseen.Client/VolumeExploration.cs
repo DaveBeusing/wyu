@@ -316,7 +316,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             Props?.Pump();
             var frame = ++_sequence;
             var presentStarted = scripted ? BiomeMeasurements.Start() : 0;
-            RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, frame, camera));
+            RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, frame, SkyMeasurements.Submit(camera)));
             if (scripted && Props is { } props)
             {
                 await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= frame, token).ConfigureAwait(false);
@@ -400,7 +400,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (overlay is not null)
             overlay.Menu = ActiveCaveClimbHint ?? $"Loading planet terrain\n\n{PlanetName}\nSeed {Descriptor.Seed}\nGenerator {Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
         if (rendererReady is null)
-            RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, camera.Sky));
+            RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, SkyMeasurements.Submit(camera).Sky));
         var selection = returnTerrain?.Selection ?? SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
         if (_selection is null || selection.Minimum != _selection.Minimum)
             _windows++;
@@ -437,7 +437,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 BiomeMeasurements.Write("near-startup-wait", startupStarted);
                 if (timing is not null && handoffStarted != 0)
                     timing.RecoveryMask = (mask, Stopwatch.GetTimestamp());
-                RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, camera.Sky));
+                RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, SkyMeasurements.Submit(camera).Sky));
             }
             catch
             {
@@ -494,7 +494,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var sequence = ++_sequence;
         var submitted = timing is null ? 0 : Stopwatch.GetTimestamp();
         warpReturn?.Readback.Arm("near-after-return", sequence);
-        RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, camera));
+        RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, SkyMeasurements.Submit(camera)));
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
             pauseWhileMinimized: true, r09Presentation: timing is null ? null :
                 new(timing.Path, "content", terrain, view, work.Generation, sequence)).ConfigureAwait(false);
