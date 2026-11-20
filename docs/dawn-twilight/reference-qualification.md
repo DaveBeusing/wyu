@@ -10,6 +10,10 @@ Groundwork #186 follow-up. Earlier evidence applies only to its recorded heads.
 See [combined candidate acceptance](final-acceptance.md) for the integration
 boundary, current package baseline and the required renewed checks.
 
+For the outstanding Far Horizon per-pair failures, use the
+[GPU/handoff investigation and focused diagnostic probe](far-horizon-diagnostics.md).
+Diagnostic telemetry and reduced-flight probes never replace acceptance runs.
+
 ## Freeze the inputs
 
 Use clean checkouts of the final reviewed heads of Groundwork PR #193 and

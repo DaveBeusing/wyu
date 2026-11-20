@@ -63,6 +63,8 @@ try {
         $passed = $false
         $failure = 'original-sentinel'
         $Pair = 1; $Replay = 1; $Mode = 'off'; $seed = 42
+        $Diagnostics = $false; $collector = $null; $collectorReport = $null
+        $replayStartedUtc = 'cleanup-test'; $replayStartedQpc = 0L
         $log = Join-Path $root 'stdout.log'
         $errorLog = Join-Path $root 'stderr.log'
         $outputCopy = [Threading.Tasks.Task]::FromException([IO.IOException]::new('copy-sentinel'))

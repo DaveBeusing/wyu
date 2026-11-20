@@ -121,3 +121,12 @@ jobs:
 
       - name: Verify Orbit material readiness without a GPU
         run: ./eng/Test-OrbitMaterialReadiness.ps1
+
+      - name: Verify buffered sky measurement events without a GPU
+        run: ./eng/Test-SkyMeasurementBuffer.ps1
+
+      - name: Verify Handoff diagnostic endpoints without a GPU
+        run: ./eng/Test-SkyHandoffDiagnostics.ps1
+
+      - name: Verify owned GPU collector failure handling with a stub
+        run: ./eng/Test-ReferenceGpuDiagnostics.ps1

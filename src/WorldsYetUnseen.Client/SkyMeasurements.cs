@@ -12,7 +12,7 @@ namespace WorldsYetUnseen.Client;
 
 // Opt-in qualification instrumentation. Its private engine binding fails closed
 // when a package does not contain the exact owner-thread measurement hooks.
-internal sealed class SkyMeasurements
+internal sealed partial class SkyMeasurements
 {
     private static readonly string? Mode = Environment.GetEnvironmentVariable("WYU_PACKAGE_G_MEASURE");
     private static readonly ConditionalWeakTable<D3D12Renderer, SkyMeasurements> Owners = new();
@@ -84,8 +84,15 @@ internal sealed class SkyMeasurements
         Bind("AfterSkyTimingRetired", (Action<ulong, ulong, double, double, bool>)observer.Retired);
         Bind("AfterSkyRecordMeasured", (Action<ulong, ulong, double, long, int>)observer.Recorded);
         Bind("AfterSuccessfulPresent", (Action<ulong, long>)observer.Presented);
+        if (SkyHandoffDiagnostics.Enabled)
+        {
+            Bind("AfterSkyPipelineReady", (Action<long, long, bool>)observer.PipelineReady);
+            Bind("AfterSkyTimingDetailsRetired", (Action<ulong, ulong, ulong, ulong, ulong, ulong, ulong>)observer.TimingDetails);
+            Bind("AfterSkyClockCalibration", (Action<ulong, ulong, ulong>)observer.ClockCalibration);
+        }
         field.SetValue(renderer, constructor.Invoke(arguments));
         Owners.Add(renderer, observer);
+        RegisterEvidenceOwner(observer);
         Write(new { kind = "owner", owner = observer._owner, mode = Mode, frequency = Stopwatch.Frequency,
             smoke = Smoke, engine = assembly.GetName().Version?.ToString(), engineHash = EngineHash.Value,
             wp15 = ReferenceSunlight.Enabled, composition = Composition,
@@ -112,16 +119,16 @@ internal sealed class SkyMeasurements
     {
         var window = Volatile.Read(ref _window);
         if (window is not null && sequence >= window.First && sequence <= window.Last)
-            Write(new { kind = "gpu", owner = _owner, sequence, fence, phase = window.Phase,
-                frameMicroseconds, skyMicroseconds, hasSky });
+            Buffer(new(EventKind.Gpu, window.Phase, sequence, fence, Stopwatch.GetTimestamp(),
+                frameMicroseconds, skyMicroseconds, 0, hasSky));
     }
 
     private void Recorded(ulong sequence, ulong fence, double recordMicroseconds, long allocatedBytes, int draws)
     {
         var window = Volatile.Read(ref _window);
         if (window is not null && sequence >= window.First && sequence <= window.Last)
-            Write(new { kind = "record", owner = _owner, sequence, fence, phase = window.Phase,
-                recordMicroseconds, allocatedBytes, draws });
+            Buffer(new(EventKind.Record, window.Phase, sequence, fence, Stopwatch.GetTimestamp(),
+                recordMicroseconds, draws, allocatedBytes));
     }
 
     private void Presented(ulong fence, long timestamp)
@@ -140,15 +147,22 @@ internal sealed class SkyMeasurements
         }
         if (Interlocked.CompareExchange(ref _firstPresent, timestamp, 0) != 0)
             return;
+        SkyHandoffDiagnostics.Complete(_owner, snapshot.PresentedSequence, fence, timestamp);
         Write(new { kind = "handoff", owner = _owner, direction = handoff.Direction,
             start = handoff.Start, end = timestamp, fence, sequence = snapshot.PresentedSequence,
             sourceFrameSequence = snapshot.FrameSequence, frequency = Stopwatch.Frequency });
+        FlushEvents();
     }
 
     internal static void BeginHandoff(string direction)
     {
         if (Enabled)
-            _pendingHandoff = new(direction, Stopwatch.GetTimestamp());
+        {
+            SkyHandoffDiagnostics.Prepare();
+            var started = Stopwatch.GetTimestamp();
+            _pendingHandoff = new(direction, started);
+            SkyHandoffDiagnostics.Begin(direction, started);
+        }
     }
 
     internal static void BeginPhase(D3D12Renderer renderer, string phase, ulong first, ulong last, string identity)
@@ -160,6 +174,9 @@ internal sealed class SkyMeasurements
             throw new InvalidOperationException("Full sky measurements require a 1920x1080 render extent.");
         Write(new { kind = "phase", owner = observer._owner, phase, first, last, identity,
             width = size.AppliedWidth, height = size.AppliedHeight, composition = Composition });
+        if (SkyHandoffDiagnostics.Enabled)
+            Write(new { kind = "clock-anchor", owner = observer._owner, phase,
+                qpc = Stopwatch.GetTimestamp(), frequency = Stopwatch.Frequency, utc = DateTime.UtcNow.ToString("O") });
     }
 
     internal static void Prepared(D3D12Renderer renderer, ulong sequence, double microseconds, long allocatedBytes)
@@ -167,8 +184,8 @@ internal sealed class SkyMeasurements
         var observer = Owners.GetValue(renderer, _ => throw Mismatch());
         var window = Volatile.Read(ref observer._window);
         if (window is not null && sequence >= window.First && sequence <= window.Last)
-            Write(new { kind = "prepare", owner = observer._owner, sequence, phase = window.Phase,
-                preparationMicroseconds = microseconds, allocatedBytes });
+            observer.Buffer(new(EventKind.Prepare, window.Phase, sequence, 0, Stopwatch.GetTimestamp(),
+                microseconds, 0, allocatedBytes));
     }
 
     internal static void Write(object value) => Console.WriteLine("PACKAGE G MEASURE " + JsonSerializer.Serialize(value));
@@ -181,6 +198,26 @@ internal sealed partial class VolumeExploration
 {
     private static readonly JsonSerializerOptions SkyMeasurementJson = new() { IncludeFields = true };
     private async Task MeasureSkyPhaseAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
+        VolumeCamera camera, string phase, bool far, ulong tick, CancellationToken token, bool texturedOrbit = false)
+    {
+        Exception? primaryFailure = null;
+        try
+        {
+            await MeasureSkyPhaseCoreAsync(terrain, renderer, camera, phase, far, tick, token, texturedOrbit).ConfigureAwait(false);
+        }
+        catch (Exception error) { primaryFailure = error; throw; }
+        finally
+        {
+            try { SkyMeasurements.Flush(renderer); }
+            catch (Exception error) when (primaryFailure is not null)
+            {
+                try { Console.Error.WriteLine("Sky evidence flush also failed: " + error); }
+                catch { /* Keep the original measurement failure. */ }
+            }
+        }
+    }
+
+    private async Task MeasureSkyPhaseCoreAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
         VolumeCamera camera, string phase, bool far, ulong tick, CancellationToken token, bool texturedOrbit = false)
     {
         if (!SkyMeasurements.CollectPhases)

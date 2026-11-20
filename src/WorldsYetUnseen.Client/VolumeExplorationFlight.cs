@@ -205,6 +205,7 @@ internal sealed partial class VolumeExploration
                                 player.Heading, handoffTick.Value, far: false, token).ConfigureAwait(false);
                         }
                         var globe = await globeTask.ConfigureAwait(false);
+                        SkyHandoffDiagnostics.Mark("globe-ready");
                         if (warpReadback is { MarkerOnly: false })
                             await CaptureHandoffAsync(warpReadback, "near-before-ascent", renderHost.Active, terrain, player,
                                 flight, digest, pad, null, token).ConfigureAwait(false);
@@ -278,10 +279,14 @@ internal sealed partial class VolumeExploration
                 var orbitSubmit = frameStarted != 0 && orbitDemo && OrbitPbrMeasurements.Enabled
                     ? Stopwatch.GetTimestamp() : 0;
                 if (far)
+                {
+                    SkyHandoffDiagnostics.Mark("far-frame-submit", sequence);
                     RequireFrame(renderer.TrySubmit(SkyMeasurements.Submit(orbit)));
+                }
                 else
                 {
                     Props?.Pump();
+                    SkyHandoffDiagnostics.Mark("near-frame-submit", sequence);
                     RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, SkyMeasurements.Submit(nearCamera)));
                 }
                 if (scripted || flight.Phase == ProceduralFlightPhase.Landed)

@@ -7,11 +7,16 @@ param(
     [string]$ExpectedRendererSha256,
     [string]$ExpectedRenderingSha256,
     [string]$RendererSourceCommit,
-    [switch]$Smoke
+    [switch]$Smoke,
+    [switch]$Diagnostics,
+    [switch]$DiagnosticProbe
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($DiagnosticProbe -and $Smoke) { throw 'A diagnostic probe uses full-size native windows, not Smoke.' }
+if ($DiagnosticProbe) { $Diagnostics = $true }
+if ($Diagnostics) { . (Join-Path $PSScriptRoot 'ReferenceGpuDiagnostics.ps1') }
 $Composition = $Composition.ToLowerInvariant()
 $Adapter = $Adapter.ToLowerInvariant()
 if ($env:WYU_R09_LATENCY -eq '1') { throw 'Run R09 pressure qualification separately; this sky runner does not compose native pressure hooks.' }
@@ -37,8 +42,8 @@ if ($ExpectedRendererSha256 -and $ExpectedRendererSha256 -ine $actualRendererHas
 if ($ExpectedRenderingSha256 -and $ExpectedRenderingSha256 -ine $actualRenderingHash) { throw 'Rendering assembly hash mismatch.' }
 $root = (New-Item -ItemType Directory -Path $OutputDirectory).FullName
 $invariant = [Globalization.CultureInfo]::InvariantCulture
-$pairs = if ($Smoke) { 1 } else { 5 }
-$replays = if ($Smoke) { 1 } else { 6 }
+$pairs = if ($Smoke -or $DiagnosticProbe) { 1 } else { 5 }
+$replays = if ($Smoke -or $DiagnosticProbe) { 1 } else { 6 }
 $count = if ($Smoke) { 8 } else { 400 }
 $deadline = if (-not $Smoke) { 660000 } elseif ($Adapter -eq 'warp' -and $Composition -ceq 'orbit-combined') { 390000 } else { 210000 }
 $attempts = [Collections.Generic.List[object]]::new()
@@ -51,7 +56,7 @@ $environmentNames = 'WYU_PACKAGE_G_MEASURE','WYU_SKY_MEASURE_SMOKE','WYU_SKY_MEA
     'WYU_WP15_PROBE','WYU_WP16','WYU_WP16_SMOKE','WYU_R09_LATENCY','WYU_HOST_RETRY_SMOKE',
     'WYU_R09_RECOVERY_AT_HANDOFF','WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
     'WYU_SKY_MEASURE_COMPOSITION','WYU_ORBIT_DEMO_SMOKE','WYU_ORBIT_PBR','WYU_ORBIT_BOULDER',
-    'WYU_ORBIT_PBR_MEASURE','WYU_ORBIT_CAPTURE','WYU_WP15_FLIP'
+    'WYU_ORBIT_PBR_MEASURE','WYU_ORBIT_CAPTURE','WYU_WP15_FLIP','WYU_SKY_DIAGNOSTICS'
 $previous = @{}
 foreach ($name in $environmentNames) { $previous[$name] = [Environment]::GetEnvironmentVariable($name) }
 $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll' |
@@ -59,6 +64,10 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
 [pscustomobject]@{
     Schema=3; HookSchema=2; Smoke=[bool]$Smoke; Qualified=$false; Adapter=$Adapter; Assembly=$client; Composition=$Composition
     ProcessDeadlineMilliseconds=$deadline
+    Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe
+    AcceptanceRequiredPairs=5; AcceptanceRequiredFlights=60; AcceptanceSamplesPerPhasePerVariant=2000
+    EvidenceKind=$(if ($Diagnostics) { 'DIAGNOSTIC ONLY: telemetry and/or reduced flight count; never acceptance evidence.' } else { 'Required measurement subset; all original gates apply.' })
+    EventOutput='Bounded value buffers flushed after each phase/native endpoint; overflow fails, no sample selection.'
     StartedUtc=[DateTime]::UtcNow.ToString('O'); OS=[Environment]::OSVersion.VersionString
     Runtime=(& dotnet --version); Hashes=@($hashes); Pairs=$pairs; FlightsPerPairPerVariant=$replays
     SourceCommit=$sourceCommit; WorkingTreeStatus=$workingTree; RendererSourceCommit=$RendererSourceCommit
@@ -187,6 +196,10 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
     $failure = ''
     $primaryFailure = $null
     $cleanupFailures = [Collections.Generic.List[string]]::new()
+    $collector = $null
+    $collectorReport = $null
+    $replayStartedUtc = [DateTime]::UtcNow.ToString('O')
+    $replayStartedQpc = [Diagnostics.Stopwatch]::GetTimestamp()
     try {
         New-Item -ItemType Directory -Path $world | Out-Null
         New-Item -ItemType File -Path (Join-Path $world 'wyu-volume-smoke.fixture') | Out-Null
@@ -205,6 +218,9 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         }
         $process = [Diagnostics.Process]::new()
         $process.StartInfo = $start
+        if ($Diagnostics) {
+            $collector = Start-ReferenceGpuDiagnostics -OutputDirectory (Join-Path $root "$prefix-gpu") -MaximumDurationMilliseconds ($deadline + 20000)
+        }
         if (-not $process.Start()) { throw 'Could not start the owned sky replay.' }
         $started = $true
         $ownedProcessId = $process.Id
@@ -290,6 +306,10 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         $primaryFailure = $_
         $failure = $_.Exception.Message
     } finally {
+        if ($null -ne $collector) {
+            try { $collectorReport = Stop-ReferenceGpuDiagnostics -Context $collector }
+            catch { $collectorReport = [pscustomobject]@{ Availability='Error'; Failure=$_.Exception.ToString() } }
+        }
         if ($started) {
             try {
                 if (-not $process.HasExited) {
@@ -308,10 +328,24 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             catch { $cleanupFailures.Add("$($stream[0]) dispose: $($_.Exception.Message)") }
         }
         $attempt = [pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Composition=$Composition; Seed=$seed
+            StartedUtc=$replayStartedUtc; StartedQpc=$replayStartedQpc; FinishedUtc=[DateTime]::UtcNow.ToString('O')
+            FinishedQpc=[Diagnostics.Stopwatch]::GetTimestamp(); QpcFrequency=[Diagnostics.Stopwatch]::Frequency
             Started=$started; ProcessId=$ownedProcessId; ExitCode=$exitCode
             Passed=($passed -and $cleanupFailures.Count -eq 0); Failure=$failure
             CleanupFailures=($cleanupFailures -join ' | '); Stdout=$log; Stderr=$errorLog }
         $attempts.Add($attempt)
+        if ($Diagnostics) {
+            try {
+                $timeline = if (Test-Path -LiteralPath $log) {
+                    @(Get-Content -LiteralPath $log | Where-Object { $_.StartsWith('PACKAGE G MEASURE ') } |
+                        ForEach-Object { $_.Substring('PACKAGE G MEASURE '.Length) | ConvertFrom-Json } |
+                        Where-Object { $_.kind -cin @('owner','phase','handoff','handoff-stage','handoff-incomplete','gpu-ticks','sky-pipeline','gpu-clock-calibration','clock-anchor') })
+                } else { @() }
+                [pscustomobject]@{ Schema=1; EvidenceKind='DIAGNOSTIC ONLY'; Pair=$Pair; Replay=$Replay; Mode=$Mode
+                    Attempt=$attempt; Collector=$collectorReport; Events=@($timeline) } |
+                    ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $root "$prefix-diagnostics.json")
+            } catch { $cleanupFailures.Add("diagnostic timeline: $($_.Exception.Message)") }
+        }
         foreach ($export in @(@('attempts', $attempts), @('samples', $samples), @('handoffs', $handoffs), @('native-extras', $nativeExtras))) {
             try { $export[1] | Export-Csv -LiteralPath (Join-Path $root "$($export[0]).csv") -NoTypeInformation }
             catch { $cleanupFailures.Add("$($export[0]) evidence: $($_.Exception.Message)") }
@@ -330,6 +364,7 @@ try {
     $env:WYU_PACKAGE_G, $env:WYU_PACKAGE_G_SMOKE, $env:WYU_PACKAGE_E, $env:WYU_WP13_MEASURE = 'on','1','on','on'
     $env:WYU_WP15, $env:WYU_WP16 = 'off','off'
     $env:WYU_SKY_MEASURE_COMPOSITION = $Composition
+    $env:WYU_SKY_DIAGNOSTICS = if ($Diagnostics) { '1' } else { '0' }
     if ($Composition -ceq 'orbit-combined') {
         $env:WYU_ORBIT_DEMO_SMOKE, $env:WYU_ORBIT_PBR, $env:WYU_ORBIT_BOULDER = '1','on','on'
         $env:WYU_WP15, $env:WYU_WP16, $env:WYU_WP16_SMOKE = 'on','on','1'
@@ -392,7 +427,8 @@ foreach ($direction in 'to-orbit','to-ground') {
 $summary | Export-Csv -LiteralPath (Join-Path $root 'summary.csv') -NoTypeInformation
 $summary | Where-Object Pair -EQ 0 | Format-Table -AutoSize
 $failed = @($summary | Where-Object { -not $_.Passed }).Count
-[pscustomobject]@{ Status=if ($Smoke) { 'SMOKE ONLY' } elseif ($failed) { 'CHANGES REQUIRED' } else { 'MEASURED GATES PASSED' }
+[pscustomobject]@{ Status=if ($Smoke) { 'SMOKE ONLY' } elseif ($failed) { 'CHANGES REQUIRED' } elseif ($Diagnostics) { 'DIAGNOSTIC ONLY' } else { 'MEASURED GATES PASSED' }
+    Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe
     FullQualification=$false; Attempts=$attempts.Count; FailedAttempts=@($attempts | Where-Object { -not $_.Passed }).Count
     RequiredAttempts=2*$pairs*$replays; FailedSummaryRows=$failed
     RawNativeExtras=(Get-SkyNativeExtraCount $nativeExtras)
