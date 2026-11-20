@@ -73,17 +73,28 @@ is recorded separately by the renderer. They are visual
 evidence, not GPU timestamps or display-latency measurements. The test operates
 on a disposable smoke world, never on a player's save.
 
+Capture and ownership checks now run inside synchronous Per-Monitor V2 DPI
+scopes, restoring the previous thread context on return. `ClientToScreen`
+already supplies device coordinates in that scope; applying a second
+logical-to-physical conversion was the source of false obstruction and crop
+results. `GetClientRect` bounds validation rejects requests beyond the current
+surface. No RGB or solar-centroid tolerance was changed.
+
 ## Owner decisions for the paired PRs
 
-| ID | Proposed candidate | Decision needed |
-| --- | --- | --- |
-| TW1 | A balanced warm horizon/direct sun with cooler ambient light; dawn and dusk mirror the same solar-elevation curve. | Approve the captured colour/intensity treatment or request a stronger/more restrained style. |
-| TW2 | Preserve the existing 0.18 night-strength floor, with a cool colour bias rather than global exposure lift. The night stays darker than daytime. | Approve this readability level from the night captures; any later lower floor is a separate tuning change. |
-| TW3 | Existing Far Horizon saves adopt the new appearance on Continue, retaining clock, seed and terrain. | Approve automatic visual adoption instead of maintaining a second legacy appearance profile. |
+The owner approved TW1–TW3 on 20 November 2026. These decisions establish the
+visual treatment and adoption policy; they do not waive technical acceptance
+or authorize merging either PR.
 
-Implementation remains a candidate until these visual choices are reviewed.
+| ID | Approved rule | Status |
+| --- | --- | --- |
+| TW1 | Use the captured balanced warm horizon/direct sun with cooler ambient light; dawn and dusk mirror the same solar-elevation curve. | APPROVED |
+| TW2 | Preserve the existing 0.18 night-strength floor, with a cool colour bias rather than global exposure lift. The night stays darker than daytime. | APPROVED |
+| TW3 | Existing Far Horizon saves adopt the new appearance on Continue, retaining clock, seed and terrain. No second legacy visual profile is required. | APPROVED |
+
+Implementation remains a candidate until its technical gates are satisfied.
 See the [candidate capture set](dawn-twilight/README.md) for the concrete look
-proposed by TW1/TW2 and its exact validation scope.
+approved by TW1/TW2 and its exact validation scope.
 The WYU PR keeps the approved immutable engine pin. Paired validation may use
 an explicitly identified isolated candidate renderer DLL, but that is not a
 released-package result. Before final paired approval, merge/release the

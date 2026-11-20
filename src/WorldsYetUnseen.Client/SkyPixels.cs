@@ -13,6 +13,7 @@ internal sealed partial class SkyPixels(int width, int height, byte[] colors)
 
     internal static SkyPixels Capture(int width, int height, bool clientSurface = false)
     {
+        using var dpi = new CaptureDpiScope();
         using var process = Process.GetCurrentProcess();
         var origin = new Point();
         if (clientSurface)

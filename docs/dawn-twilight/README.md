@@ -5,7 +5,11 @@ fixture. BMP captures were converted losslessly to PNG. Matching JSON files
 record canonical eye/view, solar elevation, clock sample, weather opacity and
 profile identities. The camera stays fixed within each sunrise/sunset sequence.
 
-## Proposed appearance
+## Approved appearance
+
+The owner approved the captured TW1 colour treatment, TW2 night-strength floor
+and TW3 automatic visual adoption on Continue on 20 November 2026. This is
+visual/product approval, not a waiver of package, reference or handoff gates.
 
 Predawn, with a localized warm horizon:
 
@@ -56,22 +60,40 @@ checkpoints per sequence are not an independent frame-by-frame flicker audit.
 
 ## Additional handoff qualification
 
-The final two-seed desktop handoff/Continue qualification is **BLOCKED**, not
-passed. The first full-image comparison found differences only in the rounded
-bottom client corners; the solar centroid itself was unchanged. The same
-failure occurred with the unchanged approved renderer. A bounded raw-BMP
-comparison found 23 differing RGB pixels, all in the bottom six rows at the
-extreme corners, confirming desktop contamination outside the rendered sky.
+**PASSED — local candidate hardware route, 20 November 2026.** The repaired
+capture fixture completed `eng/Test-ReferenceSky.ps1 -Adapter hardware` for
+seeds 42 and 20261111, each with flight and fresh-process Continue. All twelve
+horizon/sun/star comparisons across both ownership transitions reported zero
+differing RGB channels. The full-image RGB tolerance and one-pixel solar
+centroid limit remain unchanged. The landed sky/clock/pose line matched on
+Continue for each seed. Final shutdown reported zero errors, corruption,
+discarded diagnostics and live children. Intermediate handoffs retained only
+their documented shared queue. Warning counts were 11/12 on the flight runs
+and one on each Continue run; individual warning identities were not retained.
 
-The disposable capture fixture now requests square Windows 11 client corners
-and restores the prior preference on disposal. A subsequent attempt was
-rejected by its unobstructed-window check because a sampled client point
-belonged to another process. Repeat this qualification on an unobstructed
-desktop. Full-image RGB and one-pixel solar-centroid assertions remain
-unchanged; neither the failed comparison nor the rejected capture counts as
-passing evidence.
+The earlier failures were genuine fixture problems: rounded client corners
+included desktop pixels, and mixing caller-DPI coordinates with another
+logical-to-physical conversion caused false obstruction/crop results. The
+fixture retains temporary square corners and now scopes capture operations
+to Per-Monitor V2, validates actual client bounds and restores thread context
+afterwards. Neither failure is counted as a pass, and no image threshold was
+relaxed to obtain the successful run.
+
+The retained final [raw log](handoff-20261120.log) has SHA-256
+`0F8324EA436994357699F350C73DD3ADF7818407341C3FE756C4217A81164ED5`.
+Source blobs were `50b2dfa3e528ce9eae01001aee5dcbf38f5face0`
+and `a96665f325bedcc0f9b4c37072735514fedb6ce8` for the two capture files. The
+tested client DLL SHA-256 was
+`5F2CB4515B1B6F48B19939791565D4F576EE8BA7F65D8C38747524D7954B129B`,
+and the isolated candidate renderer was
+`DCB5EC81EB1D4F5775BCD9F497E5CF5C5BD6A45E720504514EC245EB9FA349BA`.
+Independent code review verified the source and all twelve log results.
+
+This closes the local functional handoff/Continue blocker. It does not replace
+the master-produced immutable package pin, installed-archive replay, reference
+hardware performance, or integrated pressure qualification.
 
 The [TW1–TW3 decisions](../package-g-sky.md#owner-decisions-for-the-paired-prs)
-remain pending owner approval. Existing gameplay timing and save payloads are
+were approved by the owner on 20 November 2026. Existing gameplay timing and save payloads are
 unchanged. Existing saves adopt the new look in this candidate; no player save
 was opened or modified to produce these captures.

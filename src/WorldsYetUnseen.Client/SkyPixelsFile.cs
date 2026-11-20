@@ -13,6 +13,7 @@ internal sealed partial class SkyPixels
 
         internal CaptureWindow()
         {
+            using var dpi = new CaptureDpiScope();
             using var process = Process.GetCurrentProcess();
             _window = process.MainWindowHandle;
             if (_window == 0 || !SetCaptureWindowPos(_window, new(-1), 0, 0, 0, 0, 0x13))
@@ -33,6 +34,7 @@ internal sealed partial class SkyPixels
 
         internal void RequireUnobstructed(int width, int height)
         {
+            using var dpi = new CaptureDpiScope();
             PhysicalClientBounds(_window, ref width, ref height, out var origin);
             foreach (var point in new[]
             {
@@ -63,17 +65,38 @@ internal sealed partial class SkyPixels
 
     private static void PhysicalClientBounds(nint window, ref int width, ref int height, out Point origin)
     {
+        using var dpi = new CaptureDpiScope();
         origin = new Point();
         var end = new Point { X = width, Y = height };
-        if (ClientToScreen(window, ref origin) == 0 || ClientToScreen(window, ref end) == 0 ||
-            !LogicalToPhysicalPointForPerMonitorDPI(window, ref origin) ||
-            !LogicalToPhysicalPointForPerMonitorDPI(window, ref end))
+        if (!GetClientRect(window, out var client))
+            throw new Win32Exception();
+        if (width > client.Right - client.Left || height > client.Bottom - client.Top)
+            throw new InvalidOperationException("Requested capture extends beyond the current client surface.");
+        // In a per-monitor-aware thread ClientToScreen already returns device
+        // coordinates. Converting them again scales the screen origin twice.
+        if (ClientToScreen(window, ref origin) == 0 || ClientToScreen(window, ref end) == 0)
             throw new Win32Exception();
         width = end.X - origin.X;
         height = end.Y - origin.Y;
         if (width is < 1 or > 8192 || height is < 1 or > 8192)
             throw new InvalidOperationException("Invalid physical client capture dimensions.");
     }
+
+    private sealed class CaptureDpiScope : IDisposable
+    {
+        private readonly nint _previous = SetThreadDpiAwarenessContext(new(-4));
+
+        internal CaptureDpiScope()
+        {
+            if (_previous == 0)
+                throw new Win32Exception();
+        }
+
+        public void Dispose() => _ = SetThreadDpiAwarenessContext(_previous);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ClientRectangle { internal int Left, Top, Right, Bottom; }
 
     internal void SaveBmp(string path)
     {
@@ -107,8 +130,11 @@ internal sealed partial class SkyPixels
     private static partial uint GetWindowThreadProcessId(nint window, out uint process);
 
     [LibraryImport("user32.dll")]
+    private static partial nint SetThreadDpiAwarenessContext(nint context);
+
+    [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool LogicalToPhysicalPointForPerMonitorDPI(nint window, ref Point point);
+    private static partial bool GetClientRect(nint window, out ClientRectangle rectangle);
 
     [LibraryImport("dwmapi.dll")]
     private static partial int DwmGetWindowAttribute(nint window, uint attribute, out int value, int size);
