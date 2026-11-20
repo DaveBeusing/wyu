@@ -17,7 +17,8 @@ the accepted clock and save payloads are not migrated.
 All ten WYU engine modules retain immutable baseline `0.1.0-dev.44510519303.1`,
 source `067bb610127b7436431a498fc70d0f12c05f8f7b`, manifest SHA-256
 `BDF297C13C2E719DC7B8919D848E5ABF1C924C349FC5CC3FB5311AEB4307511A`.
-The paired PR #193 renderer is staged only in a diagnostic output folder.
+Both `Groundwork.Rendering.dll` and `Groundwork.Rendering.D3D12.dll` from the
+same PR #193 build are staged together only in a diagnostic output folder.
 Existing master-only producer, archive and locked-restore checks remain required.
 
 ## Required evidence

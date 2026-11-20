@@ -57,10 +57,12 @@ listed in [build-bootstrap](../build-bootstrap.md). That verification must
 pass before staging a diagnostic renderer. Do not change the NuGet pins,
 lockfiles or master-only producer checks to accept a PR artifact.
 
-For this explicitly identified diagnostic run, replace only the output
-folder's `Groundwork.Rendering.D3D12.dll` with the tested Release DLL from
-the clean Groundwork PR checkout. Record its full source commit and record
-both client and renderer hashes immediately after the controlled build and
+For this explicitly identified diagnostic run, replace the output folder's
+`Groundwork.Rendering.dll` and `Groundwork.Rendering.D3D12.dll` together with
+their tested Release DLLs from the same clean Groundwork PR checkout. The #186
+presentation-wait API spans both assemblies; a provider-only overlay omits part
+of the integrated candidate. Record the full source commit and the client and
+both rendering hashes immediately after the controlled build and
 staging step. Retain those values independently of the runner output; compare
 them with the build records before execution. This is not an approved archive
 or a production WYU installation.
@@ -76,6 +78,7 @@ foreach ($composition in 'far-horizon', 'orbit-combined') {
     -Composition $composition `
     -ExpectedClientSha256 $recordedClientSha256 `
     -ExpectedRendererSha256 $recordedRendererSha256 `
+    -ExpectedRenderingSha256 $recordedRenderingSha256 `
     -RendererSourceCommit $recordedRendererCommit
 }
 ```

@@ -5,6 +5,7 @@ param(
     [ValidateSet('far-horizon', 'orbit-combined')][string]$Composition = 'far-horizon',
     [string]$ExpectedClientSha256,
     [string]$ExpectedRendererSha256,
+    [string]$ExpectedRenderingSha256,
     [string]$RendererSourceCommit,
     [switch]$Smoke
 )
@@ -23,13 +24,16 @@ $workingTree = @(& git -C $repository status --porcelain)
 if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect the WYU working tree.' }
 $actualClientHash = (Get-FileHash -LiteralPath $client).Hash
 $actualRendererHash = (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $client) 'Groundwork.Rendering.D3D12.dll')).Hash
+$actualRenderingHash = (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $client) 'Groundwork.Rendering.dll')).Hash
 if (-not $Smoke) {
     if ($workingTree.Count) { throw 'Full measurements require a clean WYU working tree.' }
     if ($ExpectedClientSha256 -notmatch '^[a-fA-F0-9]{64}$' -or $ExpectedRendererSha256 -notmatch '^[a-fA-F0-9]{64}$' -or
-        $RendererSourceCommit -notmatch '^[a-fA-F0-9]{40}$') { throw 'Full measurements require independently recorded client/renderer SHA256 and renderer source commit.' }
+        $ExpectedRenderingSha256 -notmatch '^[a-fA-F0-9]{64}$' -or
+        $RendererSourceCommit -notmatch '^[a-fA-F0-9]{40}$') { throw 'Full measurements require independently recorded client, Rendering and D3D12 SHA256 and renderer source commit.' }
 }
 if ($ExpectedClientSha256 -and $ExpectedClientSha256 -ine $actualClientHash) { throw 'Client assembly hash mismatch.' }
 if ($ExpectedRendererSha256 -and $ExpectedRendererSha256 -ine $actualRendererHash) { throw 'Renderer assembly hash mismatch.' }
+if ($ExpectedRenderingSha256 -and $ExpectedRenderingSha256 -ine $actualRenderingHash) { throw 'Rendering assembly hash mismatch.' }
 $root = (New-Item -ItemType Directory -Path $OutputDirectory).FullName
 $invariant = [Globalization.CultureInfo]::InvariantCulture
 $pairs = if ($Smoke) { 1 } else { 5 }
@@ -56,6 +60,7 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
     Runtime=(& dotnet --version); Hashes=@($hashes); Pairs=$pairs; FlightsPerPairPerVariant=$replays
     SourceCommit=$sourceCommit; WorkingTreeStatus=$workingTree; RendererSourceCommit=$RendererSourceCommit
     ExpectedClientSha256=$ExpectedClientSha256; ExpectedRendererSha256=$ExpectedRendererSha256
+    ExpectedRenderingSha256=$ExpectedRenderingSha256
     Provenance='Operator-identified diagnostic assemblies. Hook binding and recorded hashes do not establish immutable archive approval.'
     GpuFrameInterval='Clear through last draw pass in one graphics command list, excluding separate uploads and native Present. Phase geometry is held fixed.'
     PresentationConfiguration='Native DXGI Present syncInterval=1 flags=0. Actual compositor/scanout mode is not captured by this runner.'
@@ -106,7 +111,8 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         New-Item -ItemType Directory -Path $world | Out-Null
         New-Item -ItemType File -Path (Join-Path $world 'wyu-volume-smoke.fixture') | Out-Null
         if ((Get-FileHash -LiteralPath $client).Hash -cne $actualClientHash -or
-            (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $client) 'Groundwork.Rendering.D3D12.dll')).Hash -cne $actualRendererHash) {
+            (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $client) 'Groundwork.Rendering.D3D12.dll')).Hash -cne $actualRendererHash -or
+            (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $client) 'Groundwork.Rendering.dll')).Hash -cne $actualRenderingHash) {
             throw 'Measured assemblies changed during the run.'
         }
         $start = [Diagnostics.ProcessStartInfo]::new('dotnet')
