@@ -111,13 +111,30 @@ internal static partial class GameHost
                 mouse = new PrototypeMouseLook(window, settings);
             var retrySmoke = scripted ? Environment.GetEnvironmentVariable("WYU_HOST_RETRY_SMOKE") : null;
             var orbitDemo = slot?.OrbitDemo ?? orbitSmoke;
+            string? orbitMaterialFallbackNotice = null;
             if (orbitDemo && OrbitDemoPreset.PbrEnabled)
-                renderHost.OrbitMaterials = await Task.Run(OrbitTerrainMaterials.Load, token).ConfigureAwait(false);
+            {
+                try
+                {
+                    renderHost.OrbitMaterials = await Task.Run(OrbitTerrainMaterials.Load, token).ConfigureAwait(false);
+                }
+                catch (InvalidDataException error)
+                {
+                    if (scripted && OrbitPbrMeasurements.Enabled)
+                        throw new InvalidDataException($"Orbit PBR measurement stopped. {error.Message}", error);
+
+                    orbitMaterialFallbackNotice = $"{error.Message}\nUsing base colors for Orbit terrain.";
+                    diagnostics?.Write("orbit-texture-fallback", error.ToString());
+                    if (scripted)
+                        Console.Error.WriteLine(orbitMaterialFallbackNotice);
+                }
+            }
             exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld, orbitDemo)
             {
                 VerifyTerrainRetries = retrySmoke == "1",
                 R09RenderHost = measureR09 ? renderHost : null,
                 OrbitMaterialHost = renderHost.BuildsOrbitalMaterials ? renderHost : null,
+                OrbitMaterialFallbackNotice = orbitMaterialFallbackNotice,
                 ExhaustTerrainRetry = retrySmoke switch
                 {
                     "Movement" => VolumeWorkClass.Movement,

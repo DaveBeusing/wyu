@@ -12,6 +12,7 @@ internal sealed class OrbitTerrainMaterials
     internal const ushort OrbitalMarkerMaterial = 3;
 
     private const string ResourcePrefix = "WorldsYetUnseen.Client.Assets.OrbitDemo.";
+    private const string ManifestName = "manifest.json";
     private const int MapsPerMaterial = 3;
     private const int MapCount = 2 * MapsPerMaterial;
     private const int MaximumCookedBytes = 2 * 1024 * 1024;
@@ -36,11 +37,11 @@ internal sealed class OrbitTerrainMaterials
 
     internal static OrbitTerrainMaterials Load()
     {
-        using var manifestStream = Open("manifest.json");
-        if (manifestStream.Length is <= 0 or > MaximumManifestBytes)
-            throw new InvalidDataException("Orbit terrain texture manifest exceeds its size limit.");
-        using var manifest = JsonDocument.Parse(manifestStream);
-        var entries = manifest.RootElement.GetProperty("assets");
+        using var manifest = ReadManifest();
+        var root = manifest.RootElement;
+        if (!TryReadManifestProperty(root, "assets", out var entries) ||
+            entries.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException($"Invalid Orbit texture manifest {ManifestName}: expected an assets list.");
         var targets = new D3D12TextureTarget[MapCount];
         var maps = new CookedTexture[MapCount];
         var scratch = new byte[MaximumCookedBytes];
@@ -69,14 +70,15 @@ internal sealed class OrbitTerrainMaterials
             var digest = FindDigest(entries, name);
             using var source = Open(name);
             if (source.Length is <= 0 or > MaximumCookedBytes)
-                throw new InvalidDataException($"Orbit terrain map exceeds its size limit: {name}.");
+                throw new InvalidDataException($"Invalid Orbit texture size: {name}.");
             var bytes = scratch.AsSpan(0, (int)source.Length);
             source.ReadExactly(bytes);
             var error = TextureCooker.ReadCooked(bytes, "sha256:" + digest, CookLimits, out var texture);
-            if (error != TextureCookError.None ||
-                texture is not { Format: TextureFormat.Rgba8, Width: 512, Height: 512 } ||
+            if (error != TextureCookError.None)
+                throw new InvalidDataException($"Orbit texture failed validation: {name} ({error}).");
+            if (texture is not { Format: TextureFormat.Rgba8, Width: 512, Height: 512 } ||
                 texture.Semantic != textureSemantic || texture.ColorSpace != colorSpace || texture.Mips.Length != 10)
-                throw new InvalidDataException($"Invalid Orbit terrain map: {name} ({error}).");
+                throw new InvalidDataException($"Orbit texture has unexpected metadata: {name}.");
 
             var reference = new MaterialTextureReference(materialSemantic, texture.AssetId);
             maps[index] = texture;
@@ -133,19 +135,64 @@ internal sealed class OrbitTerrainMaterials
         typeof(OrbitTerrainMaterials).Assembly.GetManifestResourceStream(ResourcePrefix + name)
         ?? throw new InvalidDataException($"Missing Orbit terrain resource: {name}.");
 
+    private static JsonDocument ReadManifest()
+    {
+        using var stream = Open(ManifestName);
+        if (stream.Length is <= 0 or > MaximumManifestBytes)
+            throw new InvalidDataException($"Invalid Orbit texture manifest size: {ManifestName}.");
+
+        try
+        {
+            return JsonDocument.Parse(stream);
+        }
+        catch (JsonException error)
+        {
+            throw new InvalidDataException($"Invalid Orbit texture manifest {ManifestName}: malformed JSON.", error);
+        }
+    }
+
     private static string FindDigest(JsonElement entries, string name)
     {
         string? digest = null;
         foreach (var entry in entries.EnumerateArray())
         {
-            if (!entry.GetProperty("file").ValueEquals(name))
+            if (!TryReadManifestProperty(entry, "file", out var file) ||
+                file.ValueKind != JsonValueKind.String)
+                throw new InvalidDataException($"Invalid Orbit texture manifest {ManifestName}: asset entry has no file name.");
+            if (!string.Equals(ReadManifestText(file, "file"), name, StringComparison.Ordinal))
                 continue;
             if (digest is not null)
                 throw new InvalidDataException($"Duplicate Orbit texture manifest entry: {name}.");
-            digest = entry.GetProperty("cookedSha256").GetString();
-            if (digest is not { Length: 64 })
+            digest = TryReadManifestProperty(entry, "cookedSha256", out var hash) && hash.ValueKind == JsonValueKind.String
+                ? ReadManifestText(hash, $"digest for {name}") : null;
+            if (digest is not { Length: 64 } || !digest.All(char.IsAsciiHexDigit))
                 throw new InvalidDataException($"Invalid Orbit texture manifest digest: {name}.");
         }
         return digest ?? throw new InvalidDataException($"Missing Orbit texture manifest entry: {name}.");
+    }
+
+    private static bool TryReadManifestProperty(JsonElement element, string name, out JsonElement value)
+    {
+        value = default;
+        try
+        {
+            return element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out value);
+        }
+        catch (InvalidOperationException error)
+        {
+            throw new InvalidDataException($"Invalid Orbit texture manifest {ManifestName}: malformed property name.", error);
+        }
+    }
+
+    private static string? ReadManifestText(JsonElement element, string field)
+    {
+        try
+        {
+            return element.GetString();
+        }
+        catch (InvalidOperationException error)
+        {
+            throw new InvalidDataException($"Invalid Orbit texture manifest {ManifestName}: malformed {field} text.", error);
+        }
     }
 }

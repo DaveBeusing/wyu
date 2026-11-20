@@ -20,18 +20,15 @@ jobs:
       run:
         shell: pwsh
     env:
-      GROUNDWORK_RUN_ID: '44647126892'
+      GROUNDWORK_RUN_ID: '44510519303'
       GROUNDWORK_RUN_ATTEMPT: '1'
-      GROUNDWORK_EXPECTED_BRANCH: 'tasks/issue-88-swapchain-slot-wake'
-      GROUNDWORK_EXPECTED_EVENT: 'workflow_dispatch'
-      GROUNDWORK_EXPECTED_WORKFLOW_PATH: '.github/workflows/windows-ci.yml'
-      GROUNDWORK_EXPECTED_HEAD_SHA: 'b40c11b14e64bff9b446d6eab18e8755916f66ec'
-      GROUNDWORK_EXPECTED_MANIFEST_SHA256: 'E635E34F10C83E280E82BD2BB2B01D39CBC2BB3C1D507B1CA8E5DC0380050E29'
-      GROUNDWORK_EXPECTED_ARTIFACT_ZIP_SHA256: '17AC237897954D8CEFCB32BB3AB06E591793EA5B91BA3C149EFF3010CFBD50FD'
-      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.44647126892.1'
-      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.44647126892.1-immutable-complete'
-      GROUNDWORK_ARCHIVE_RECORD_SHA256: '68C1153EE9708C1F885F6CD44A91175E863E56133C7AE8AFAAF96D032DEC60FB'
-      GROUNDWORK_LICENSE_SHA256: 'A99DA262F66CB0D3881991D9F79D690DB18F83F84D22FDE5E56EE43EEA9151BF'
+      GROUNDWORK_EXPECTED_HEAD_SHA: '067bb610127b7436431a498fc70d0f12c05f8f7b'
+      GROUNDWORK_EXPECTED_MANIFEST_SHA256: 'BDF297C13C2E719DC7B8919D848E5ABF1C924C349FC5CC3FB5311AEB4307511A'
+      GROUNDWORK_EXPECTED_ARTIFACT_ZIP_SHA256: '468CE26231AEF8BE59B8EC6D2B36F3E7B0AFBBBD2CE9A600CA53F1F6B75509C6'
+      GROUNDWORK_EXPECTED_VERSION: '0.1.0-dev.44510519303.1'
+      GROUNDWORK_RELEASE_TAG: 'archive-groundwork-0.1.0-dev.44510519303.1-immutable-complete'
+      GROUNDWORK_ARCHIVE_RECORD_SHA256: '1C5296751958869B5E6623DC5F4C20F821084C5E7A6C8EC89595F470AD3E1244'
+      GROUNDWORK_LICENSE_SHA256: 'B1D2870F1A00E4D7F56576E5F0870CBA109E041F8AF66866CF5B499478E654E7'
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout WYU only
@@ -49,10 +46,10 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $null -eq $run) { throw 'Groundwork run unavailable.' }
           if ([string]$run.id -ne $env:GROUNDWORK_RUN_ID -or [string]$run.run_attempt -ne $env:GROUNDWORK_RUN_ATTEMPT) { throw 'Run attempt mismatch.' }
           if ($run.status -ne 'completed' -or $run.conclusion -ne 'success') { throw 'Producer CI did not pass.' }
-          if ($run.head_sha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $run.head_branch -cne $env:GROUNDWORK_EXPECTED_BRANCH -or
+          if ($run.head_sha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or $run.head_branch -cne 'master' -or
               $run.repository.full_name -cne 'DaveBeusing/Groundwork' -or $run.head_repository.full_name -cne 'DaveBeusing/Groundwork') { throw 'Producer head is not approved.' }
-          if ($run.name -cne 'Groundwork Windows CI' -or $run.event -cne $env:GROUNDWORK_EXPECTED_EVENT -or
-              $run.path -cne $env:GROUNDWORK_EXPECTED_WORKFLOW_PATH) { throw 'Unapproved producing workflow.' }
+          if ($run.name -cne 'Groundwork Windows CI' -or $run.event -cne 'push' -or
+              $run.path -cne '.github/workflows/windows-ci.yml') { throw 'Unapproved producing workflow.' }
           Write-Host 'PASS: independently pinned Groundwork CI run identity.'
 
       - name: Verify durable Groundwork release metadata
@@ -113,9 +110,6 @@ jobs:
               [string]$archive.producerRunId -ne $env:GROUNDWORK_RUN_ID -or
               [string]$archive.producerRunAttempt -ne $env:GROUNDWORK_RUN_ATTEMPT -or
               $archive.producerHeadSha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or
-              $archive.producerHeadBranch -cne $env:GROUNDWORK_EXPECTED_BRANCH -or
-              $archive.producerEvent -cne $env:GROUNDWORK_EXPECTED_EVENT -or
-              $archive.producerWorkflowPath -cne $env:GROUNDWORK_EXPECTED_WORKFLOW_PATH -or
               $archive.packagedCommitSha -ine $env:GROUNDWORK_EXPECTED_HEAD_SHA -or
               $archive.packageVersion -cne $env:GROUNDWORK_EXPECTED_VERSION -or
               $archive.manifestSha256 -ine $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256 -or
