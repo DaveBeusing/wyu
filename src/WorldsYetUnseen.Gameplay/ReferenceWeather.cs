@@ -20,13 +20,11 @@ public sealed class ReferenceWeather(ReferencePlanet planet)
         var radius = Math.Sqrt(position.X * position.X + position.Y * position.Y + position.Z * position.Z);
         var sun = SolarComponents(tick, fraction);
         var elevation = (position.Y * sun.Sin + position.Z * sun.Cos) / radius;
-        var daylight = (float)Smooth(-0.15, 0.20, elevation);
-        var ambient = 0.18f + 0.82f * daylight;
-        var sky = Vector4.Lerp(new(0.025f, 0.035f, 0.075f, 1), new(0.18f, 0.27f, 0.41f, 1), daylight);
+        var light = ReferenceDaylight.Evaluate((float)elevation);
         var altitude = radius - planet.Descriptor.RadiusMeters;
         var density = altitude >= 72 ? 0f : (float)Density(position, tick, fraction);
         var opacity = density * (float)(1 - Smooth(32, 72, altitude));
-        return new(new(ambient, ambient, ambient, 1), sky, 128 - 104 * density, 768 - 640 * density, opacity);
+        return new(light.Tint, light.Background, 128 - 104 * density, 768 - 640 * density, opacity);
     }
 
     public static Vector3 SunDirection(ulong tick, double fraction = 0)

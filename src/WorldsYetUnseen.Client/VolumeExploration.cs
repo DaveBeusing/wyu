@@ -142,6 +142,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (placementGate is not null)
             Props!.PlacementGateForSmoke = placementGate.Task;
         var state = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
+        if (scripted && Environment.GetEnvironmentVariable("WYU_DAWN_SMOKE") == "1")
+        {
+            await VerifyTwilightAsync(terrain, renderHost.Active, state, token).ConfigureAwait(false);
+            return;
+        }
         if (scripted && Environment.GetEnvironmentVariable("WYU_WP15_PROBE") is "route" or "measure")
         {
             using var composition = FlipProbeClip.ApplyIfRequested();
@@ -657,17 +662,17 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private VolumeCamera ApplyNearEnvironment(VolumeCamera camera, ulong tick, double fraction)
     {
         var weather = Atmosphere(camera.Position, tick, fraction);
-        return ApplySunlight(ApplySky(ApplyAtmosphere(camera, weather), tick, fraction), tick, fraction);
+        return ApplySunlight(ApplySky(ApplyAtmosphere(camera, weather), tick, fraction, weather), tick, fraction);
     }
 
     private VolumeCamera ApplySunlight(VolumeCamera camera, ulong tick, double fraction) =>
         _weather is not null && ReferenceSunlight.Enabled ? ReferenceSunlight.Apply(camera, tick, fraction) : camera;
 
-    private VolumeCamera ApplySky(VolumeCamera camera, ulong tick, double fraction) =>
+    private VolumeCamera ApplySky(VolumeCamera camera, ulong tick, double fraction, ReferenceAtmosphere? weather) =>
         reference is not null && ReferenceSky.Enabled ? camera with
         {
             Sky = ReferenceSky.Create(camera.Position, camera.Forward, camera.Up, camera.FieldOfView,
-                Descriptor.Seed, tick, fraction),
+                Descriptor.Seed, tick, fraction, weather?.FogOpacity ?? 0),
         } : camera;
 
     private static VolumeCamera ApplyAtmosphere(VolumeCamera camera, ReferenceAtmosphere? weather)

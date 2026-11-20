@@ -11,11 +11,13 @@ internal sealed partial class SkyPixels(int width, int height, byte[] colors)
     private int Height { get; } = height;
     private byte[] Colors { get; } = colors;
 
-    internal static SkyPixels Capture(int width, int height)
+    internal static SkyPixels Capture(int width, int height, bool clientSurface = false)
     {
         using var process = Process.GetCurrentProcess();
         var origin = new Point();
-        if (ClientToScreen(process.MainWindowHandle, ref origin) == 0)
+        if (clientSurface)
+            PhysicalClientBounds(process.MainWindowHandle, ref width, ref height, out origin);
+        else if (ClientToScreen(process.MainWindowHandle, ref origin) == 0)
             throw new Win32Exception();
         var screen = GetDC(0);
         if (screen == 0)

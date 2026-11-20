@@ -359,7 +359,7 @@ internal sealed partial class VolumeExploration
                 var forward = Vector3.Normalize(ProceduralGlobe.MarkerAimPoint(globe) - ProceduralGlobe.Float(camera.Position));
                 var tangent = ProceduralGlobe.Float(player.Heading);
                 var up = Vector3.Normalize(tangent - forward * Vector3.Dot(forward, tangent));
-                camera = ApplySky(camera with { Forward = forward, Up = up }, tick, 0);
+                camera = ApplySky(camera with { Forward = forward, Up = up }, tick, 0, Atmosphere(camera.Position, tick));
             }
             var frame = readback.MarkerOnly ? ProceduralGlobe.Frame(sequence, camera) :
                 GlobeFrame(sequence, camera, flight.State.Position, player.Heading, tick, 0);
@@ -390,7 +390,7 @@ internal sealed partial class VolumeExploration
         {
             Forward = forward,
             Up = up,
-        }, tick, 0), tick, 0);
+        }, tick, 0, Atmosphere(flightCamera.Position, tick)), tick, 0);
         var sequence = ++_sequence;
         readback.Arm("edited-final-approach", sequence);
         RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, camera));
@@ -623,8 +623,9 @@ internal sealed partial class VolumeExploration
         }
         var (forward, up) = ProceduralGlobe.ViewBasis(position, heading);
         var eye = FlightEye(position);
+        var weather = Atmosphere(eye, tick, fraction);
         return ApplySky(ApplyAtmosphere(new(view, eye, forward, up, ProceduralGlobe.FieldOfView,
-            0.08f, 210, Vector4.One, Sky), Atmosphere(eye, tick, fraction)), tick, fraction);
+            0.08f, 210, Vector4.One, Sky), weather), tick, fraction, weather);
     }
 
     private async Task<SkyPixels[]> CaptureFlightSkyAsync(D3D12Renderer renderer, VolumeViewIdentity view,
@@ -632,6 +633,7 @@ internal sealed partial class VolumeExploration
     {
         var camera = FlightCamera(view, position, heading, tick);
         var sky = camera.Sky ?? throw new InvalidOperationException("Missing sky for pixel fixture.");
+        using var captureWindow = new SkyPixels.CaptureWindow();
         var radial = Vector3.Normalize(sky.EyeMeters);
         var tangent = Vector3.Normalize(Vector3.Cross(radial, Vector3.UnitZ));
         // Keep the accepted eye fixed. Controlled lighting separates stars and the solar disk from the horizon.
@@ -654,7 +656,10 @@ internal sealed partial class VolumeExploration
             await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
             await Task.Delay(100, token).ConfigureAwait(false);
             var surface = renderer.Read();
-            captures[index] = SkyPixels.Capture(surface.AppliedWidth, index == 0 ? surface.AppliedHeight * 2 / 3 : surface.AppliedHeight);
+            captureWindow.RequireUnobstructed(surface.AppliedWidth,
+                index == 0 ? surface.AppliedHeight * 2 / 3 : surface.AppliedHeight);
+            captures[index] = SkyPixels.Capture(surface.AppliedWidth,
+                index == 0 ? surface.AppliedHeight * 2 / 3 : surface.AppliedHeight, clientSurface: true);
         }
         return captures;
     }
