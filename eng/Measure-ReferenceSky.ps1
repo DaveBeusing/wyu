@@ -11,14 +11,21 @@ param(
     [switch]$Diagnostics,
     [switch]$DiagnosticProbe,
     [switch]$GpuSchedulingTrace,
-    [switch]$LookupPrototype
+    [switch]$LookupPrototype,
+    [switch]$FullLookupSeries
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($DiagnosticProbe -and $Smoke) { throw 'A diagnostic probe uses full-size native windows, not Smoke.' }
+if ($FullLookupSeries -and ($Smoke -or $DiagnosticProbe -or $GpuSchedulingTrace)) {
+    throw 'FullLookupSeries cannot use Smoke, DiagnosticProbe or GpuSchedulingTrace.'
+}
+if ($FullLookupSeries) { $LookupPrototype = $true }
 if ($GpuSchedulingTrace -and -not $DiagnosticProbe) { throw 'GpuSchedulingTrace requires DiagnosticProbe; it is diagnostic evidence only.' }
-if ($LookupPrototype -and -not ($DiagnosticProbe -or $Smoke)) { throw 'LookupPrototype requires DiagnosticProbe or Smoke; it is never acceptance evidence.' }
+if ($LookupPrototype -and -not ($DiagnosticProbe -or $Smoke -or $FullLookupSeries)) {
+    throw 'LookupPrototype requires DiagnosticProbe or Smoke, or the explicit FullLookupSeries diagnostic mode.'
+}
 if ($DiagnosticProbe -or $LookupPrototype) { $Diagnostics = $true }
 if ($Diagnostics) { . (Join-Path $PSScriptRoot 'ReferenceGpuDiagnostics.ps1') }
 if ($GpuSchedulingTrace) { . (Join-Path $PSScriptRoot 'ReferenceSchedulingTrace.ps1') }
@@ -70,13 +77,15 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
 [pscustomobject]@{
     Schema=3; HookSchema=2; Smoke=[bool]$Smoke; Qualified=$false; Adapter=$Adapter; Assembly=$client; Composition=$Composition
     ProcessDeadlineMilliseconds=$deadline
-    Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe
+    Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe; FullLookupSeries=[bool]$FullLookupSeries
     GpuSchedulingTrace=[bool]$GpuSchedulingTrace
     SchedulingTrace='Opt-in per-replay DxgKrnl circular ETL; capture status and commands are in each scheduling directory. Event loss and full coverage are unverified.'
     LookupPrototype=[bool]$LookupPrototype
     SkyImplementation=$(if ($LookupPrototype) { 'Experimental fixed-size GPU lookup; visual approval pending; all build/update work charged.' } else { 'Direct 8x4 integration' })
     AcceptanceRequiredPairs=5; AcceptanceRequiredFlights=60; AcceptanceSamplesPerPhasePerVariant=2000
-    EvidenceKind=$(if ($Diagnostics) { 'DIAGNOSTIC ONLY: telemetry and/or reduced flight count; never acceptance evidence.' } else { 'Required measurement subset; all original gates apply.' })
+    EvidenceKind=$(if ($FullLookupSeries) { 'DIAGNOSTIC ONLY: experimental lookup with full WYU counts and original measured limits.' }
+        elseif ($Diagnostics) { 'DIAGNOSTIC ONLY: telemetry and/or reduced flight count; never acceptance evidence.' }
+        else { 'Required measurement subset; all original gates apply.' })
     EventOutput='Bounded value buffers flushed after each phase/native endpoint; overflow fails, no sample selection.'
     StartedUtc=[DateTime]::UtcNow.ToString('O'); OS=[Environment]::OSVersion.VersionString
     Runtime=(& dotnet --version); Hashes=@($hashes); Pairs=$pairs; FlightsPerPairPerVariant=$replays
@@ -460,6 +469,7 @@ try {
     }
 } catch {
     [pscustomobject]@{ Status='BLOCKED'; FullQualification=$false; LookupPrototype=[bool]$LookupPrototype; Failure=$_.Exception.Message
+        Composition=$Composition; Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe; FullLookupSeries=[bool]$FullLookupSeries
         GpuSchedulingTrace=[bool]$GpuSchedulingTrace
         SchedulingTraces=@($attempts | Select-Object Pair,Replay,Mode,SchedulingTraceStatus,SchedulingTraceDirectory)
         CleanupFailures=@($attempts | Where-Object { $_.CleanupFailures } | Select-Object Pair,Replay,Mode,CleanupFailures)
@@ -513,7 +523,7 @@ $summary | Export-Csv -LiteralPath (Join-Path $root 'summary.csv') -NoTypeInform
 $summary | Where-Object Pair -EQ 0 | Format-Table -AutoSize
 $failed = @($summary | Where-Object { -not $_.Passed }).Count
 [pscustomobject]@{ Status=if ($Smoke) { 'SMOKE ONLY' } elseif ($failed) { 'CHANGES REQUIRED' } elseif ($Diagnostics) { 'DIAGNOSTIC ONLY' } else { 'MEASURED GATES PASSED' }
-    Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe
+    Composition=$Composition; Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe; FullLookupSeries=[bool]$FullLookupSeries
     GpuSchedulingTrace=[bool]$GpuSchedulingTrace
     SchedulingTraces=@($attempts | Select-Object Pair,Replay,Mode,SchedulingTraceStatus,SchedulingTraceDirectory)
     LookupPrototype=[bool]$LookupPrototype

@@ -56,6 +56,128 @@ try {
     if (-not $rejected -or (Test-Path -LiteralPath $forbiddenOutput)) { throw 'Lookup admitted to full acceptance.' }
     Write-Host 'PASS: Actual Lookup+Smoke enables diagnostics; Lookup without a diagnostic scope is rejected.'
 
+    function Assert-FullLookupSeries {
+        $runner = Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1'
+        foreach ($argument in 'Smoke', 'DiagnosticProbe', 'GpuSchedulingTrace') {
+            $forbidden = @{ FullLookupSeries = $true; OutputDirectory = $forbiddenOutput }
+            $forbidden[$argument] = $true
+            $rejected = $false
+            try { & $runner @forbidden }
+            catch { $rejected = $_.Exception.Message -like 'FullLookupSeries cannot use*' }
+            if (-not $rejected -or (Test-Path -LiteralPath $forbiddenOutput)) {
+                throw "FullLookupSeries admitted incompatible mode $argument."
+            }
+        }
+
+        $client = (Resolve-Path -LiteralPath $Assembly).Path
+        $directory = Split-Path -Parent $client
+        $identity = @{
+            Assembly = $client
+            ExpectedClientSha256 = (Get-FileHash -LiteralPath $client).Hash
+            ExpectedRendererSha256 = (Get-FileHash -LiteralPath (Join-Path $directory 'Groundwork.Rendering.D3D12.dll')).Hash
+            ExpectedRenderingSha256 = (Get-FileHash -LiteralPath (Join-Path $directory 'Groundwork.Rendering.dll')).Hash
+            RendererSourceCommit = '0000000000000000000000000000000000000000'
+        }
+        $blockedOutput = Join-Path $OutputDirectory 'lookup-series-launch-fault'
+        $failure = $null
+        try { & $runner @identity -FullLookupSeries -OutputDirectory $blockedOutput }
+        catch { $failure = $_.Exception.Message }
+        $blockedResult = Get-Content -Raw -LiteralPath (Join-Path $blockedOutput 'result.json') | ConvertFrom-Json
+        if ($failure -notmatch 'start process.*dotnet' -or $blockedResult.Status -cne 'BLOCKED' -or
+            $blockedResult.Failure -cne $failure -or -not $blockedResult.FullLookupSeries -or
+            -not $blockedResult.LookupPrototype -or $blockedResult.FullQualification -or
+            $blockedResult.Composition -cne 'far-horizon' -or $blockedResult.Attempts -ne 1 -or
+            $blockedResult.FailedAttempts -ne 1 -or $blockedResult.RequiredAttempts -ne 60) {
+            throw 'FullLookupSeries lost its mode identity or native launch failure evidence.'
+        }
+
+        # Replace only native replay execution. Exercise the real mode flags,
+        # schedule, pair/pooled denominators, summary gates and terminal result.
+        $tokens = $null; $parseErrors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile($runner, [ref]$tokens, [ref]$parseErrors)
+        if ($parseErrors.Count) { throw 'Reference runner has syntax errors.' }
+        $replay = $ast.Find({ param($node)
+            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-Replay'
+        }, $false)
+        $substitute = @'
+function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
+    $orbit = $Composition -ceq 'orbit-combined'
+    $requiredFlag = if ($orbit) { 'on' } else { 'off' }
+    $requiredOrbit = if ($orbit) { '1' } else { '' }
+    if ($env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE -cne '1' -or $env:WYU_SKY_DIAGNOSTICS -cne '1' -or
+        $env:WYU_SKY_MEASURE_SMOKE -cne '0' -or $env:WYU_PACKAGE_E -cne 'on' -or
+        $env:WYU_WP15 -cne $requiredFlag -or $env:WYU_WP16 -cne $requiredFlag -or
+        [string]$env:WYU_ORBIT_DEMO_SMOKE -cne $requiredOrbit -or $env:WYU_SKY_MEASURE_COMPOSITION -cne $Composition) {
+        throw 'Full series inherited or omitted required environment flags.'
+    }
+    $attempts.Add([pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Passed=$true
+        SchedulingTraceStatus='DISABLED'; SchedulingTraceDirectory=$null })
+    foreach ($direction in 'to-orbit', 'to-ground') {
+        $handoffs.Add([pscustomobject]@{ Direction=$direction; Pair=$Pair; Mode=$Mode; Milliseconds=10.0 })
+    }
+    if ($Replay -ne 1) { return }
+    foreach ($phase in 'surface', 'ascent', 'orbit') {
+        for ($i = 0; $i -lt $count; $i++) {
+            $isOn = $Mode -ceq 'on'
+            $frameMs = if ($orbit -and $isOn -and $phase -ceq 'ascent') { 1.1 } else { 1.0 }
+            $samples.Add([pscustomobject]@{ Phase=$phase; Pair=$Pair; Mode=$Mode; FrameMs=$frameMs
+                SkyMs=0.01; Draws=[int]$isOn; AllocatedBytes=0; RecordAllocatedBytes=0; RecordMs=0.01; CombinedCpuMs=0.02 })
+        }
+    }
+}
+'@
+        $fixture = (New-Item -ItemType Directory -Path (Join-Path $OutputDirectory 'lookup-series-fixture')).FullName
+        $fixtureRunner = Join-Path $fixture 'Measure-ReferenceSky.ps1'
+        $source = $ast.Extent.Text
+        $source.Replace($replay.Extent.Text, $substitute) | Set-Content -LiteralPath $fixtureRunner
+        New-Item -ItemType File -Path (Join-Path $fixture 'ReferenceGpuDiagnostics.ps1') | Out-Null
+        foreach ($configuration in 'far-horizon', 'orbit-combined') {
+            $output = Join-Path $OutputDirectory "lookup-series-$configuration"
+            $failure = $null
+            try { & $fixtureRunner @identity -FullLookupSeries -Composition $configuration -OutputDirectory $output }
+            catch { $failure = $_.Exception.Message }
+            $resultPath = Join-Path $output 'result.json'
+            if (-not (Test-Path -LiteralPath $resultPath)) { throw "Fixture produced no result: $failure" }
+            $result = Get-Content -Raw -LiteralPath $resultPath | ConvertFrom-Json
+            $manifest = Get-Content -Raw -LiteralPath (Join-Path $output 'manifest.json') | ConvertFrom-Json
+            $summaryPath = Join-Path $output 'summary.csv'
+            if (-not (Test-Path -LiteralPath $summaryPath)) { throw "Fixture produced no summary: $failure" }
+            $rows = @(Import-Csv -LiteralPath $summaryPath)
+            if (-not $result.FullLookupSeries -or -not $result.LookupPrototype -or -not $result.Diagnostics -or
+                $result.FullQualification -or $result.DiagnosticProbe -or $result.GpuSchedulingTrace -or
+                $result.Composition -cne $configuration -or $result.Attempts -ne 60 -or
+                $result.RequiredAttempts -ne 60 -or $result.FailedAttempts -ne 0 -or $rows.Count -ne 30 -or
+                -not $manifest.FullLookupSeries -or $manifest.Pairs -ne 5 -or $manifest.FlightsPerPairPerVariant -ne 6 -or
+                $manifest.SamplesPerPhasePerRun -ne 400 -or $manifest.ProcessDeadlineMilliseconds -ne 660000) {
+                throw 'Full lookup series changed its counters, gates or mode identity.'
+            }
+            for ($i = 0; $i -lt 60; $i++) {
+                $trace = $result.SchedulingTraces[$i]
+                $pair = 1 + [int][Math]::Floor($i / 12)
+                $offFirst = $pair % 2 -eq 1
+                $expectedMode = if (($i % 12 -lt 6) -eq $offFirst) { 'off' } else { 'on' }
+                if ($trace.Pair -ne $pair -or $trace.Replay -ne (1 + $i % 6) -or $trace.Mode -cne $expectedMode) {
+                    throw "Unexpected replay order at index $i."
+                }
+            }
+            $pooled = @($rows | Where-Object Pair -EQ '0')
+            if ($pooled.Count -ne 5 -or @($pooled | Where-Object {
+                $expected = if ($_.Kind -ceq 'GPU') { '2000' } else { '30' }
+                $_.OffCount -ne $expected -or $_.OnCount -ne $expected
+            }).Count) { throw 'Full series pooled denominators changed.' }
+            if ($configuration -ceq 'far-horizon') {
+                if ($failure -or $result.Status -cne 'DIAGNOSTIC ONLY' -or $result.FailedSummaryRows -ne 0) {
+                    throw 'Full-count passing fixture was promoted or rejected.'
+                }
+            } elseif ($failure -notlike 'A required measured sky/frame/handoff budget failed*' -or
+                $result.Status -cne 'CHANGES REQUIRED' -or $result.FailedSummaryRows -ne 6) {
+                throw 'An Ascent overrun did not fail every applicable pair and pooled row.'
+            }
+        }
+        Write-Host 'PASS: FullLookupSeries keeps native launch faults, strict flags and both 60-flight schedules diagnostic; phase overrun fails.'
+    }
+    Assert-FullLookupSeries
+
     # Exercise the implementation's actual cleanup block with a faulted copy
     # task and a throwing disposable. This test never starts a native process.
     function Assert-CleanupFailureEvidence {

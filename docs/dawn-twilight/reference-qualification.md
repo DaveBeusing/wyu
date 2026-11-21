@@ -14,6 +14,36 @@ For the outstanding Far Horizon per-pair failures, use the
 [GPU/handoff investigation and focused diagnostic probe](far-horizon-diagnostics.md).
 Diagnostic telemetry and reduced-flight probes never replace acceptance runs.
 
+## Full Lookup measurement series
+
+On the reference computer, open PowerShell 7.4 or newer on the interactive
+desktop and run the shared standalone kit:
+
+```powershell
+pwsh -NoProfile -File "\\X11D\Share\Invoke-GroundworkReferenceMeasurements.ps1" -FullLookupSeries
+```
+
+The kit builds the pinned renderer and runs Far Horizon first and Orbit
+Combined second. Each configuration uses five alternating pairs and six
+flights per variant per pair (60 flights per configuration, 120 total).
+Each pair collects 400 retained frames per phase and variant after the
+original 40 warmups. This totals 2,000 frames per phase and variant and
+30 handoffs per direction and variant in each configuration. The existing
+preparation, separate per-pair and pooled limits, and exact native evidence
+checks apply. A failed comparison is archived. The other configuration still
+runs when its prerequisites are available.
+
+The full series uses the prototype and its existing timing diagnostics.
+The short-probe and ETW switches are separate modes. The full Lookup series
+requires no ETW elevation. Allow several hours on the reference machine.
+The existing supervisor limit is 12 hours per configuration. The archive and adjacent
+SHA256 are written beside the PS1, with raw CSV, per-flight logs, source and
+binary identities, and both composition results. Exit 0 requires complete
+numeric passes in both configurations. Status stays `DIAGNOSTIC ONLY` for
+a successful series. The separate Groundwork synthetic fixture, full peak
+memory and protected pressure, owner visual approval and the approved installed
+route remain governed by the same acceptance criteria.
+
 ## Freeze the inputs
 
 Use clean checkouts of the final reviewed heads of Groundwork PR #193 and
