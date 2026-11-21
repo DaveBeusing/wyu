@@ -93,6 +93,11 @@ internal sealed partial class SkyMeasurements
             Bind("AfterSkyPipelineReady", (Action<long, long, bool>)observer.PipelineReady);
             Bind("AfterSkyTimingDetailsRetired", (Action<ulong, ulong, ulong, ulong, ulong, ulong, ulong>)observer.TimingDetails);
             Bind("AfterSkyClockCalibration", (Action<ulong, ulong, ulong>)observer.ClockCalibration);
+            if (Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE") == "1")
+            {
+                Bind("AfterSkyLookupGpuTimingRetired", (Action<ulong, ulong, double, double>)observer.LookupGpuTiming);
+                Bind("AfterSkyLookupRecordMeasured", (Action<ulong, ulong, double, double>)observer.LookupRecordTiming);
+            }
         }
         field.SetValue(renderer, constructor.Invoke(arguments));
         Owners.Add(renderer, observer);

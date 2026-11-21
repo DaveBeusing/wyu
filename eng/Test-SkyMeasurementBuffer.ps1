@@ -71,6 +71,8 @@ var retired = type.GetMethod("Retired", instance)!.CreateDelegate<Action<ulong, 
 var recorded = type.GetMethod("Recorded", instance)!.CreateDelegate<Action<ulong, ulong, double, long, int>>(observer);
 var prepared = type.GetMethod("Prepared", statics)!.CreateDelegate<Action<D3D12Renderer, ulong, double, long>>();
 var flush = type.GetMethod("FlushEvents", instance)!.CreateDelegate<Action>(observer);
+var lookupGpu = type.GetMethod("LookupGpuTiming", instance)!.CreateDelegate<Action<ulong, ulong, double, double>>(observer);
+var lookupRecord = type.GetMethod("LookupRecordTiming", instance)!.CreateDelegate<Action<ulong, ulong, double, double>>(observer);
 var outputConsole = Console.Out;
 using var output = new StringWriter();
 Console.SetOut(output);
@@ -89,6 +91,38 @@ try
     Require(output.GetStringBuilder().Length == 0 && Count() == 3000, "Appends wrote output or lost events.");
     flush();
     Require(ReadRows(output).Length == 3000, "Warmed appends were lost during drain.");
+    RequireDrained();
+    output.GetStringBuilder().Clear();
+
+    for (var i = 0; i < 64; i++)
+    {
+        lookupGpu(42, 1234, 7.125, 11.25);
+        lookupRecord(42, 1234, 1.75, 2.125);
+    }
+    flush();
+    output.GetStringBuilder().Clear();
+    allocated = GC.GetAllocatedBytesForCurrentThread();
+    for (var i = 0; i < 1000; i++)
+    {
+        lookupGpu((ulong)i + 1, (ulong)i + 100, 7.125, 11.25);
+        lookupRecord((ulong)i + 1, (ulong)i + 100, 1.75, 2.125);
+    }
+    Require(GC.GetAllocatedBytesForCurrentThread() == allocated && Count() == 2000 && output.GetStringBuilder().Length == 0,
+        "Lookup timing callbacks allocated, wrote output or lost samples.");
+    flush();
+    var lookupRows = ReadRows(output);
+    Require(lookupRows.Length == 2000, "Lookup split events were lost.");
+    for (var i = 0; i < lookupRows.Length; i++)
+    {
+        var row = lookupRows[i];
+        var gpu = i % 2 == 0;
+        Require(row.GetProperty("kind").GetString() == (gpu ? "lookup-gpu-split" : "lookup-record-split") &&
+            row.GetProperty("owner").GetInt32() == owner && row.GetProperty("sequence").GetUInt64() == (ulong)(i / 2 + 1) &&
+            row.GetProperty("fence").GetUInt64() == (ulong)(i / 2 + 100) &&
+            row.GetProperty("computeMicroseconds").GetDouble() == (gpu ? 7.125 : 1.75) &&
+            row.GetProperty("drawBarrierMicroseconds").GetDouble() == (gpu ? 11.25 : 2.125),
+            "Lookup split values or native identity changed.");
+    }
     RequireDrained();
     output.GetStringBuilder().Clear();
 
@@ -211,7 +245,7 @@ static JsonElement[] ReadRows(StringWriter writer) => writer.ToString().Split('\
         Require(line.StartsWith(prefix, StringComparison.Ordinal), "Unexpected measurement event prefix.");
         using var json = JsonDocument.Parse(line[prefix.Length..]);
         var kind = json.RootElement.GetProperty("kind").GetString();
-        Require(kind is "record" or "gpu" or "prepare" or "owner" or "unbound-present", "Unexpected event kind in the native measurement stream.");
+        Require(kind is "record" or "gpu" or "prepare" or "owner" or "unbound-present" or "lookup-gpu-split" or "lookup-record-split", "Unexpected event kind in the native measurement stream.");
         return json.RootElement.Clone();
     }).ToArray();
 static void Require(bool value, string message) { if (!value) throw new InvalidOperationException(message); }

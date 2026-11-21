@@ -17,7 +17,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($DiagnosticProbe -and $Smoke) { throw 'A diagnostic probe uses full-size native windows, not Smoke.' }
 if ($LookupPrototype -and -not ($DiagnosticProbe -or $Smoke)) { throw 'LookupPrototype requires DiagnosticProbe or Smoke; it is never acceptance evidence.' }
-if ($DiagnosticProbe) { $Diagnostics = $true }
+if ($DiagnosticProbe -or $LookupPrototype) { $Diagnostics = $true }
 if ($Diagnostics) { . (Join-Path $PSScriptRoot 'ReferenceGpuDiagnostics.ps1') }
 $Composition = $Composition.ToLowerInvariant()
 $Adapter = $Adapter.ToLowerInvariant()
@@ -108,6 +108,36 @@ function Assert-SkyLookupOwners($Owners, [bool]$Requested) {
             throw 'Lookup mode was not positively verified for every native owner.'
         }
     }
+}
+
+function Get-SkyLookupSplits($Rows) {
+    $gpu=@{}; $record=@{}
+    foreach ($row in $Rows) {
+        if ($row.kind -notin @('lookup-gpu-split','lookup-record-split')) { continue }
+        if ($row.owner -le 0 -or $row.fence -le 0 -or $row.sequence -le 0) { throw 'Invalid lookup timing identity.' }
+        $entry=[pscustomobject]@{ Sequence=$row.sequence; Phase=$row.phase
+            ComputeMs=(Number $row.computeMicroseconds)/1000; DrawMs=(Number $row.drawBarrierMicroseconds)/1000 }
+        $target=if ($row.kind -ceq 'lookup-gpu-split') { $gpu } else { $record }
+        $key="$($row.owner)-$($row.fence)"
+        if ($target.ContainsKey($key)) { throw 'Duplicate lookup timing fence.' }
+        $target[$key]=$entry
+    }
+    [pscustomobject]@{ Gpu=$gpu; Record=$record }
+}
+
+function Get-SkyLookupExecutionTiming($Splits, $Execution, [string]$Phase) {
+    $key="$($Execution.Owner)-$($Execution.Fence)"
+    if (-not $Splits.Gpu.ContainsKey($key) -or -not $Splits.Record.ContainsKey($key)) {
+        throw 'Missing compute/draw timing evidence for a measured lookup execution.'
+    }
+    $gpu=$Splits.Gpu[$key]; $cpu=$Splits.Record[$key]
+    if ($gpu.Sequence -ne $Execution.Sequence -or $cpu.Sequence -ne $Execution.Sequence -or
+        $gpu.Phase -cne $Phase -or $cpu.Phase -cne $Phase -or
+        [Math]::Abs($gpu.ComputeMs+$gpu.DrawMs-$Execution.SkyMs) -gt 0.000001 -or
+        [Math]::Abs($cpu.ComputeMs+$cpu.DrawMs-$Execution.RecordMs) -gt 0.000001) {
+        throw 'Lookup timing components do not match their original complete native interval.'
+    }
+    [pscustomobject]@{Gpu=$gpu;Cpu=$cpu}
 }
 
 function Percentile($values, [double]$percentile) {
@@ -267,6 +297,10 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             throw 'Missing or inconsistent near/far/near owner records.'
         }
         Assert-SkyLookupOwners $owners ([bool]$LookupPrototype)
+        $lookupSplits=if ($LookupPrototype) { Get-SkyLookupSplits $rows } else { $null }
+        if ($LookupPrototype -and $Mode -ceq 'off' -and ($lookupSplits.Gpu.Count -or $lookupSplits.Record.Count)) {
+            throw 'Lookup work was reported for the disabled-sky baseline.'
+        }
         foreach ($direction in 'to-orbit','to-ground') {
             $handoff = @($rows | Where-Object { $_.kind -ceq 'handoff' -and $_.direction -ceq $direction })
             if ($handoff.Count -ne 1 -or $handoff[0].end -le $handoff[0].start -or $handoff[0].fence -le 0 -or
@@ -306,11 +340,20 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 $nativeExtras.Add([pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Composition=$Composition; Phase=$phase
                     RequestedSequences=$count; NativeExecutions=$joined.Rows.Count; RawNativeExtras=$joined.RawNativeExtras })
                 foreach ($execution in $joined.Rows) {
+                    $lookupGpu=$null; $lookupCpu=$null
+                    if ($LookupPrototype -and $Mode -ceq 'on') {
+                        $timing=Get-SkyLookupExecutionTiming $lookupSplits $execution $phase
+                        $lookupGpu=$timing.Gpu; $lookupCpu=$timing.Cpu
+                    }
                     $samples.Add([pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Composition=$Composition; Phase=$phase; Seed=$seed
                         Owner=$execution.Owner; Sequence=$execution.Sequence; Fence=$execution.Fence
                         ExecutionIndex=$execution.ExecutionIndex; ReusedPreparation=$execution.ReusedPreparation
                         Identity=$w.identity; Width=$w.width; Height=$w.height
                         FrameMs=$execution.FrameMs; SkyMs=$execution.SkyMs
+                        LookupComputeMs=$(if ($null -ne $lookupGpu) { $lookupGpu.ComputeMs } else { $null })
+                        LookupDrawBarrierMs=$(if ($null -ne $lookupGpu) { $lookupGpu.DrawMs } else { $null })
+                        LookupComputeRecordMs=$(if ($null -ne $lookupCpu) { $lookupCpu.ComputeMs } else { $null })
+                        LookupDrawRecordMs=$(if ($null -ne $lookupCpu) { $lookupCpu.DrawMs } else { $null })
                         RecordMs=$execution.RecordMs; PreparationMs=$execution.PreparationMs; CombinedCpuMs=$execution.CombinedCpuMs
                         RecordAllocatedBytes=$execution.RecordAllocatedBytes; PreparationAllocatedBytes=$execution.PreparationAllocatedBytes
                         AllocatedBytes=$execution.AllocatedBytes; Draws=$execution.Draws })
@@ -356,7 +399,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 $timeline = if (Test-Path -LiteralPath $log) {
                     @(Get-Content -LiteralPath $log | Where-Object { $_.StartsWith('PACKAGE G MEASURE ') } |
                         ForEach-Object { $_.Substring('PACKAGE G MEASURE '.Length) | ConvertFrom-Json } |
-                        Where-Object { $_.kind -cin @('owner','phase','handoff','handoff-stage','handoff-incomplete','gpu-ticks','sky-pipeline','gpu-clock-calibration','clock-anchor') })
+                        Where-Object { $_.kind -cin @('owner','phase','handoff','handoff-stage','handoff-incomplete','gpu-ticks','sky-pipeline','gpu-clock-calibration','clock-anchor','lookup-gpu-split','lookup-record-split') })
                 } else { @() }
                 [pscustomobject]@{ Schema=1; EvidenceKind='DIAGNOSTIC ONLY'; Pair=$Pair; Replay=$Replay; Mode=$Mode
                     Attempt=$attempt; Collector=$collectorReport; Events=@($timeline) } |

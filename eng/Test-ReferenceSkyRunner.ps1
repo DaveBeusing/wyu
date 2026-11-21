@@ -36,6 +36,26 @@ try {
     }
     Write-Host "PASS: Native launch failure preserved PID=0, attempts.csv and BLOCKED result. Evidence $OutputDirectory"
 
+    $lookupOutput=Join-Path $OutputDirectory 'lookup-smoke'
+    $lookupFailure=$null
+    try {
+        & (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1') -Smoke -LookupPrototype -Composition $Composition -Adapter $Adapter -Assembly $Assembly -OutputDirectory $lookupOutput
+    } catch { $lookupFailure=$_.Exception.Message }
+    $lookupManifest=Get-Content -Raw (Join-Path $lookupOutput 'manifest.json') | ConvertFrom-Json
+    $lookupResult=Get-Content -Raw (Join-Path $lookupOutput 'result.json') | ConvertFrom-Json
+    if ($lookupFailure -notmatch 'start process.*dotnet' -or -not $lookupManifest.Diagnostics -or
+        -not $lookupManifest.LookupPrototype -or $lookupManifest.DiagnosticProbe -or
+        $lookupResult.Status -cne 'BLOCKED' -or $lookupResult.FullQualification) {
+        throw 'Lookup Smoke did not enable its required diagnostics or lost original failure evidence.'
+    }
+    $forbiddenOutput=Join-Path $OutputDirectory 'lookup-full-forbidden'
+    $rejected=$false
+    try {
+        & (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1') -LookupPrototype -Assembly $Assembly -OutputDirectory $forbiddenOutput
+    } catch { $rejected=$_.Exception.Message -like '*requires DiagnosticProbe or Smoke*' }
+    if (-not $rejected -or (Test-Path -LiteralPath $forbiddenOutput)) { throw 'Lookup admitted to full acceptance.' }
+    Write-Host 'PASS: Actual Lookup+Smoke enables diagnostics; Lookup without a diagnostic scope is rejected.'
+
     # Exercise the implementation's actual cleanup block with a faulted copy
     # task and a throwing disposable. This test never starts a native process.
     function Assert-CleanupFailureEvidence {
@@ -89,7 +109,7 @@ try {
         $ast = [Management.Automation.Language.Parser]::ParseFile(
             (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1'), [ref]$tokens, [ref]$parseErrors)
         if ($parseErrors.Count) { throw 'Reference runner has syntax errors.' }
-        foreach ($name in @('Number','Get-SkyNativeExecutions','Assert-SkyControlledWindow','Assert-SkyLookupOwners')) {
+        foreach ($name in @('Number','Get-SkyNativeExecutions','Assert-SkyControlledWindow','Assert-SkyLookupOwners','Get-SkyLookupSplits','Get-SkyLookupExecutionTiming')) {
             $functionAst = $ast.Find({ param($node)
                 $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
             }, $false)
@@ -112,6 +132,34 @@ try {
             }
         }
         Write-Host 'PASS: Direct and lookup mode identities fail closed for every native owner.'
+        $split=[pscustomobject]@{kind='lookup-gpu-split';owner=1;sequence=80;fence=100;phase='surface';computeMicroseconds=5.25;drawBarrierMicroseconds=14.75}
+        $recordSplit=[pscustomobject]@{kind='lookup-record-split';owner=1;sequence=80;fence=100;phase='surface';computeMicroseconds=4.125;drawBarrierMicroseconds=5.875}
+        $indexed=Get-SkyLookupSplits @($split,$recordSplit)
+        if ($indexed.Gpu.Count -ne 1 -or $indexed.Record.Count -ne 1 -or $indexed.Gpu['1-100'].ComputeMs -ne .00525 -or
+            $indexed.Record['1-100'].DrawMs -ne .005875) { throw 'Lookup timing identity or units changed.' }
+        $execution=[pscustomobject]@{Owner=1;Fence=100;Sequence=80;SkyMs=.020;RecordMs=.010}
+        Get-SkyLookupExecutionTiming $indexed $execution 'surface' | Out-Null
+        foreach($property in 'Sequence','SkyMs','RecordMs','Fence') {
+            $copy=[pscustomobject]@{Owner=1;Fence=100;Sequence=80;SkyMs=.020;RecordMs=.010}; $copy.$property++
+            $rejected=$false
+            try { Get-SkyLookupExecutionTiming $indexed $copy 'surface' | Out-Null } catch { $rejected=$true }
+            if(-not $rejected) {throw "Mismatched lookup $property accepted."}
+        }
+        $rejected=$false
+        try { Get-SkyLookupExecutionTiming $indexed $execution 'orbit' | Out-Null } catch { $rejected=$true }
+        if(-not $rejected) {throw 'Mismatched lookup phase accepted.'}
+        $indexed.Record.Clear()
+        $rejected=$false
+        try { Get-SkyLookupExecutionTiming $indexed $execution 'surface' | Out-Null } catch { $rejected=$true }
+        if(-not $rejected) {throw 'Missing lookup CPU evidence accepted.'}
+        $rejected=$false
+        try { Get-SkyLookupSplits @($split,$split) | Out-Null } catch { $rejected=$true }
+        if (-not $rejected) { throw 'Duplicate lookup timing fence accepted.' }
+        $split.computeMicroseconds=[double]::NaN
+        $rejected=$false
+        try { Get-SkyLookupSplits @($split) | Out-Null } catch { $rejected=$true }
+        if (-not $rejected) { throw 'Invalid lookup timing accepted.' }
+        Write-Host 'PASS: Lookup timing components preserve units/fences and reject duplicates/non-finite values.'
         $window = [pscustomobject]@{ owner=1; first=80; last=80; phase='surface' }
         $prepare = [pscustomobject]@{ kind='prepare'; owner=1; sequence=80; phase='surface'; preparationMicroseconds=7; allocatedBytes=50 }
         $gpuFirst = [pscustomobject]@{ kind='gpu'; owner=1; sequence=80; fence=100; phase='surface'; frameMicroseconds=100; skyMicroseconds=20; hasSky=$true }
