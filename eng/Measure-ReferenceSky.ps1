@@ -12,7 +12,8 @@ param(
     [switch]$DiagnosticProbe,
     [switch]$GpuSchedulingTrace,
     [switch]$LookupPrototype,
-    [switch]$FullLookupSeries
+    [switch]$FullLookupSeries,
+    [switch]$ReuseLookupResources
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,6 +27,7 @@ if ($GpuSchedulingTrace -and -not $DiagnosticProbe) { throw 'GpuSchedulingTrace 
 if ($LookupPrototype -and -not ($DiagnosticProbe -or $Smoke -or $FullLookupSeries)) {
     throw 'LookupPrototype requires DiagnosticProbe or Smoke, or the explicit FullLookupSeries diagnostic mode.'
 }
+if ($ReuseLookupResources -and -not $LookupPrototype) { throw 'ReuseLookupResources requires the diagnostic Lookup prototype.' }
 if ($DiagnosticProbe -or $LookupPrototype) { $Diagnostics = $true }
 if ($Diagnostics) { . (Join-Path $PSScriptRoot 'ReferenceGpuDiagnostics.ps1') }
 if ($GpuSchedulingTrace) { . (Join-Path $PSScriptRoot 'ReferenceSchedulingTrace.ps1') }
@@ -69,7 +71,7 @@ $environmentNames = 'WYU_PACKAGE_G_MEASURE','WYU_SKY_MEASURE_SMOKE','WYU_SKY_MEA
     'WYU_R09_RECOVERY_AT_HANDOFF','WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
     'WYU_SKY_MEASURE_COMPOSITION','WYU_ORBIT_DEMO_SMOKE','WYU_ORBIT_PBR','WYU_ORBIT_BOULDER',
     'WYU_ORBIT_PBR_MEASURE','WYU_ORBIT_CAPTURE','WYU_WP15_FLIP','WYU_SKY_DIAGNOSTICS',
-    'GROUNDWORK_SKY_LOOKUP_PROTOTYPE'
+    'GROUNDWORK_SKY_LOOKUP_PROTOTYPE','GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES'
 $previous = @{}
 foreach ($name in $environmentNames) { $previous[$name] = [Environment]::GetEnvironmentVariable($name) }
 $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll' |
@@ -80,7 +82,7 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
     Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe; FullLookupSeries=[bool]$FullLookupSeries
     GpuSchedulingTrace=[bool]$GpuSchedulingTrace
     SchedulingTrace='Opt-in per-replay DxgKrnl circular ETL; capture status and commands are in each scheduling directory. Event loss and full coverage are unverified.'
-    LookupPrototype=[bool]$LookupPrototype
+    LookupPrototype=[bool]$LookupPrototype; ReuseLookupResources=[bool]$ReuseLookupResources
     SkyImplementation=$(if ($LookupPrototype) { 'Experimental fixed-size GPU lookup; visual approval pending; all build/update work charged.' } else { 'Direct 8x4 integration' })
     AcceptanceRequiredPairs=5; AcceptanceRequiredFlights=60; AcceptanceSamplesPerPhasePerVariant=2000
     EvidenceKind=$(if ($FullLookupSeries) { 'DIAGNOSTIC ONLY: experimental lookup with full WYU counts and original measured limits.' }
@@ -114,12 +116,17 @@ function Number($value) {
     $number
 }
 
-function Assert-SkyLookupOwners($Owners, [bool]$Requested) {
+function Assert-SkyLookupOwners($Owners, [bool]$Requested, [bool]$ReuseRequested = $false) {
     if (@($Owners).Count -ne 3) { throw 'Missing lookup mode owner evidence.' }
     foreach ($owner in $Owners) {
         $mode = $owner.PSObject.Properties['lookupPrototype']
         if ($null -eq $mode -or $mode.Value -isnot [bool] -or $mode.Value -ne $Requested) {
             throw 'Lookup mode was not positively verified for every native owner.'
+        }
+        $reuse = $owner.PSObject.Properties['lookupResourceReuse']
+        if (($null -eq $reuse -and $ReuseRequested) -or
+            ($null -ne $reuse -and ($reuse.Value -isnot [bool] -or $reuse.Value -ne $ReuseRequested))) {
+            throw 'Lookup resource reuse was not positively verified for every native owner.'
         }
     }
 }
@@ -321,7 +328,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 [bool]$_.orbitPbr -ne ($Composition -ceq 'orbit-combined') -or [bool]$_.boulder -ne ($Composition -ceq 'orbit-combined') }).Count) {
             throw 'Missing or inconsistent near/far/near owner records.'
         }
-        Assert-SkyLookupOwners $owners ([bool]$LookupPrototype)
+        Assert-SkyLookupOwners $owners ([bool]$LookupPrototype) ([bool]$ReuseLookupResources)
         $lookupSplits=if ($LookupPrototype) { Get-SkyLookupSplits $rows } else { $null }
         if ($LookupPrototype -and $Mode -ceq 'off' -and ($lookupSplits.Gpu.Count -or $lookupSplits.Record.Count)) {
             throw 'Lookup work was reported for the disabled-sky baseline.'
@@ -457,6 +464,7 @@ try {
     $env:WYU_SKY_MEASURE_COMPOSITION = $Composition
     $env:WYU_SKY_DIAGNOSTICS = if ($Diagnostics) { '1' } else { '0' }
     $env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE = if ($LookupPrototype) { '1' } else { $null }
+    $env:GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES = if ($ReuseLookupResources) { '1' } else { $null }
     if ($Composition -ceq 'orbit-combined') {
         $env:WYU_ORBIT_DEMO_SMOKE, $env:WYU_ORBIT_PBR, $env:WYU_ORBIT_BOULDER = '1','on','on'
         $env:WYU_WP15, $env:WYU_WP16, $env:WYU_WP16_SMOKE = 'on','on','1'
@@ -470,6 +478,7 @@ try {
 } catch {
     [pscustomobject]@{ Status='BLOCKED'; FullQualification=$false; LookupPrototype=[bool]$LookupPrototype; Failure=$_.Exception.Message
         Composition=$Composition; Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe; FullLookupSeries=[bool]$FullLookupSeries
+        ReuseLookupResources=[bool]$ReuseLookupResources
         GpuSchedulingTrace=[bool]$GpuSchedulingTrace
         SchedulingTraces=@($attempts | Select-Object Pair,Replay,Mode,SchedulingTraceStatus,SchedulingTraceDirectory)
         CleanupFailures=@($attempts | Where-Object { $_.CleanupFailures } | Select-Object Pair,Replay,Mode,CleanupFailures)
@@ -526,7 +535,7 @@ $failed = @($summary | Where-Object { -not $_.Passed }).Count
     Composition=$Composition; Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe; FullLookupSeries=[bool]$FullLookupSeries
     GpuSchedulingTrace=[bool]$GpuSchedulingTrace
     SchedulingTraces=@($attempts | Select-Object Pair,Replay,Mode,SchedulingTraceStatus,SchedulingTraceDirectory)
-    LookupPrototype=[bool]$LookupPrototype
+    LookupPrototype=[bool]$LookupPrototype; ReuseLookupResources=[bool]$ReuseLookupResources
     FullQualification=$false; Attempts=$attempts.Count; FailedAttempts=@($attempts | Where-Object { -not $_.Passed }).Count
     RequiredAttempts=2*$pairs*$replays; FailedSummaryRows=$failed
     RawNativeExtras=(Get-SkyNativeExtraCount $nativeExtras)

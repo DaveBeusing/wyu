@@ -27,6 +27,7 @@ internal sealed partial class SkyMeasurements
     private MeasurementWindow? _window;
     private long _firstPresent;
     private bool _lookupPrototype;
+    private bool _lookupResourceReuse;
 
     private SkyMeasurements(D3D12Renderer renderer) => _renderer = renderer;
 
@@ -127,6 +128,18 @@ internal sealed partial class SkyMeasurements
         else if (enabled.PropertyType != typeof(bool) || enabled.GetValue(device) is not bool actual || actual != requested)
             throw Mismatch();
         _lookupPrototype = requested;
+        var reuseRequested = Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES") == "1";
+        var reuseEnabled = device.GetType().GetProperty("SkyLookupResourceReuseEnabledForTests",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        if (reuseEnabled is null)
+        {
+            if (reuseRequested)
+                throw Mismatch();
+        }
+        else if (reuseEnabled.PropertyType != typeof(bool) || reuseEnabled.GetValue(device) is not bool actualReuse ||
+            actualReuse != reuseRequested)
+            throw Mismatch();
+        _lookupResourceReuse = reuseRequested;
         var enable = device.GetType().GetMethod("EnableSkyTimingForTests", BindingFlags.NonPublic | BindingFlags.Instance,
             Type.EmptyTypes) ?? throw Mismatch();
         enable.Invoke(device, null);

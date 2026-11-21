@@ -41,8 +41,10 @@ GC.SuppressFinalize(renderer);
 var observer = type.GetConstructor(instance, null, [typeof(D3D12Renderer)], null)!.Invoke([renderer]);
 var initialize = type.GetMethod("Initialize", instance)!;
 var priorLookup = Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE");
+var priorReuse = Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES");
 try
 {
+    Environment.SetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES", null);
     foreach (var requested in new[] { false, true })
     foreach (var device in new object[] { new DirectOnlyDevice(), new LookupDevice(false), new LookupDevice(true) })
     {
@@ -57,7 +59,11 @@ try
             "Prototype owner evidence did not reflect verified initialization.");
     }
 }
-finally { Environment.SetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE", priorLookup); }
+finally
+{
+    Environment.SetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE", priorLookup);
+    Environment.SetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES", priorReuse);
+}
 var owners = type.GetField("Owners", statics)!.GetValue(null)!;
 owners.GetType().GetMethod("Add")!.Invoke(owners, [renderer, observer]);
 var windowType = type.GetNestedType("MeasurementWindow", BindingFlags.NonPublic)!;
@@ -154,13 +160,37 @@ try
         startupRows[5].GetProperty("inclusiveOwnerPreparation").GetBoolean() &&
         startupRows[5].GetProperty("frequency").GetInt64() == Stopwatch.Frequency,
         "First-execution identity or inclusive startup interval was corrupted.");
-    foreach (var invalidStage in new[] { "unknown", "textures", "descriptors" })
+    foreach (var invalidStage in new[] { "unknown", "textures", "descriptors", "resources-reused" })
     {
         var rejected = false;
         try { startupStage(invalidStage, 10, 20, true); }
         catch (InvalidOperationException) { rejected = true; }
         Require(rejected, "Invalid stage or mutable-resource reuse was accepted.");
     }
+    try
+    {
+        Environment.SetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE", "1");
+        Environment.SetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES", "1");
+        foreach (var device in new object[] { new LookupDevice(true), new ReuseDevice(false) })
+        {
+            var rejected = false;
+            try { initialize.Invoke(startupObserver, [device]); }
+            catch (TargetInvocationException error) when (error.InnerException is InvalidOperationException) { rejected = true; }
+            Require(rejected, "A missing or disabled reuse capability was accepted.");
+        }
+        initialize.Invoke(startupObserver, [new ReuseDevice(true)]);
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE", priorLookup);
+        Environment.SetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES", priorReuse);
+    }
+    output.GetStringBuilder().Clear();
+    startupStage("resources-reused", 40, 41, true);
+    startupFlush();
+    var reuseRow = ReadRows(output).Single();
+    Require(reuseRow.GetProperty("stage").GetString() == "resources-reused" &&
+        reuseRow.GetProperty("reused").GetBoolean(), "Actual resource reuse was not retained in diagnostics.");
     type.GetField("_window", instance)!.SetValue(startupObserver, window);
     output.GetStringBuilder().Clear();
     startupGpu(42, 43, 5, 6);
@@ -299,6 +329,12 @@ sealed class DirectOnlyDevice
 sealed class LookupDevice(bool enabled)
 {
     internal bool SkyLookupPrototypeEnabledForTests => enabled;
+    internal void EnableSkyTimingForTests() { }
+}
+sealed class ReuseDevice(bool enabled)
+{
+    internal bool SkyLookupPrototypeEnabledForTests => true;
+    internal bool SkyLookupResourceReuseEnabledForTests => enabled;
     internal void EnableSkyTimingForTests() { }
 }
 sealed class PartialFailWriter(StringWriter prefix) : TextWriter

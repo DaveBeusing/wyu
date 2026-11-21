@@ -94,8 +94,9 @@ internal sealed partial class SkyMeasurements
 
     private void LookupPreparationStage(string stage, long started, long ended, bool reused)
     {
-        if (stage is not ("textures" or "descriptors" or "compute-pipeline" or "ready") ||
-            started < 0 || ended < started || reused && stage is ("textures" or "descriptors"))
+        if (stage is not ("textures" or "descriptors" or "compute-pipeline" or "ready" or "resources-reused") ||
+            started < 0 || ended < started || reused && stage is ("textures" or "descriptors") ||
+            stage == "resources-reused" && (!reused || !_lookupResourceReuse))
             throw new InvalidOperationException("Invalid lookup startup diagnostic evidence.");
         Buffer(new(EventKind.LookupStartup, stage, 0, 0, ended, Allocated: started, Flag: reused));
     }
@@ -132,7 +133,7 @@ internal sealed partial class SkyMeasurements
                 {
                     case EventKind.Owner:
                         Write(new { kind = "owner", owner = _owner, mode = Mode, frequency = Stopwatch.Frequency,
-                            smoke = Smoke, lookupPrototype = _lookupPrototype,
+                            smoke = Smoke, lookupPrototype = _lookupPrototype, lookupResourceReuse = _lookupResourceReuse,
                             engine = typeof(D3D12Renderer).Assembly.GetName().Version?.ToString(), engineHash = EngineHash.Value,
                             wp15 = ReferenceSunlight.Enabled, composition = Composition,
                             orbitPbr = OrbitCombined && OrbitDemoPreset.PbrEnabled,

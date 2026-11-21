@@ -254,6 +254,16 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 if (-not $rejected) { throw 'Missing, mistyped or inconsistent prototype owner identity was accepted.' }
             }
         }
+        $reuseOwners = @(1..3 | ForEach-Object { [pscustomobject]@{lookupPrototype=$true; lookupResourceReuse=$true} })
+        Assert-SkyLookupOwners $reuseOwners $true $true
+        foreach ($reuseMode in $false, 'true', $null) {
+            $invalidOwner = [pscustomobject]@{ lookupPrototype=$true }
+            if ($null -ne $reuseMode) { $invalidOwner | Add-Member -NotePropertyName lookupResourceReuse -NotePropertyValue $reuseMode }
+            $rejected = $false
+            try { Assert-SkyLookupOwners @($reuseOwners[0], $reuseOwners[1], $invalidOwner) $true $true }
+            catch { $rejected = $true }
+            if (-not $rejected) { throw 'Missing, mistyped or disabled resource reuse was accepted.' }
+        }
         Write-Host 'PASS: Direct and lookup mode identities fail closed for every native owner.'
         $split=[pscustomobject]@{kind='lookup-gpu-split';owner=1;sequence=80;fence=100;phase='surface';computeMicroseconds=5.25;drawBarrierMicroseconds=14.75}
         $recordSplit=[pscustomobject]@{kind='lookup-record-split';owner=1;sequence=80;fence=100;phase='surface';computeMicroseconds=4.125;drawBarrierMicroseconds=5.875}

@@ -44,6 +44,23 @@ a successful series. The separate Groundwork synthetic fixture, full peak
 memory and protected pressure, owner visual approval and the approved installed
 route remain governed by the same acceptance criteria.
 
+The optional handoff candidate can be tested with
+`-FullLookupSeries -ReuseLookupResources`. This enables one retired Lookup
+texture and its views to move between consecutive owners of the same session.
+Compare this result against the recorded full series without the flag. The
+same retirement, measurement endpoints, draws and regeneration apply.
+
+For an additional short scheduling capture of Orbit Combined, run PowerShell
+7 as Administrator and select the composition explicitly:
+
+```powershell
+pwsh -NoProfile -File "\\X11D\Share\Invoke-GroundworkReferenceMeasurements.ps1" -DiagnosticProbe -DiagnosticComposition orbit-combined -LookupPrototype -GpuSchedulingTrace
+```
+
+This collects the two-flight diagnostic only. A trace file can lack hardware
+scheduling payload coverage for the measured interval even with zero
+reported event loss.
+
 ## Freeze the inputs
 
 Use clean checkouts of the final reviewed heads of Groundwork PR #193 and
