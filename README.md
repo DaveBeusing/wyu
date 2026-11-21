@@ -50,7 +50,10 @@ biomes, vegetation, sky, and terrain shadows.
 In the world console, type a command and press **Enter**. **Tab** completes
 commands and supported values, **Up/Down** recalls earlier input, and **Esc**
 returns control to the game. Type **help** for the commands available in the
-current world. Use **fov** to adjust the vertical field of view, **stats** to
+current world. **help <command>** shows usage, an example and the current value
+where available. **status** shows the world, seed, generator, position and
+presentation settings. **reset** restores the default field of view, live time
+and automatic fog where available. Use **fov** to adjust the vertical field of view, **stats** to
 toggle F1 diagnostics, and **time** and **fog** where the world supports weather.
 Use **time live** to return to the world clock. Console overrides apply during
 the current exploration session and are left out of the save.
