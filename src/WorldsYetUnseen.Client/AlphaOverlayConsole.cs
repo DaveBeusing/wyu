@@ -78,7 +78,7 @@ internal sealed partial class AlphaOverlay
                 var caret = view.Prompt.IndexOf('▏');
                 var start = Math.Max(0, caret - available + 1);
                 DrawLine("> " + view.Prompt[start..], Padding, promptY + 5, Accent);
-                DrawLine(view.Suggestions ?? "Type help to list commands.", Padding, promptY + 35, Muted);
+                DrawLine(view.Suggestions ?? "help [cmd] · clear", Padding, promptY + 35, Muted);
                 return true;
             }
             finally

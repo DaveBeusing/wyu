@@ -10,7 +10,7 @@ internal sealed partial class VolumeExploration
     private float _fieldOfView = DefaultFieldOfView;
     private ulong? _previewTime;
 
-    private WorldConsole CreateConsole(Func<PlanetVector> position)
+    private WorldConsole CreateConsole(Func<PlanetVector> position, ConsoleFrameProfile profile)
     {
         var commands = new List<ConsoleCommand>
         {
@@ -29,6 +29,8 @@ internal sealed partial class VolumeExploration
         commands.Add(new("status", "status", "World and settings",
             value => value.Length == 0 ? ReadConsoleStatus(position()) : "Usage: status") { Example = "status" });
         commands.Add(new("reset", "reset", "Reset FOV, time and fog", ResetPresentation) { Example = "reset" });
+        commands.Add(new("profile", "profile [n|cancel]", "Sample 1–30 seconds", profile.Handle, "5", "10", "30", "cancel")
+            { CurrentValue = profile.State, Example = "profile 10" });
         return new(commands.ToArray());
     }
 

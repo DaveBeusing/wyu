@@ -199,7 +199,16 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var exercisedWindow = false;
         var previousFrame = Stopwatch.GetTimestamp();
         using var cadence = new PeriodicTimer(TimeSpan.FromSeconds(1d / 60));
-        var terminal = !scripted && overlay is not null ? CreateConsole(() => state.Position) : null;
+        var profile = !scripted && overlay is not null ? new ConsoleFrameProfile(TimeProvider.System) : null;
+        var terminal = profile is null ? null : CreateConsole(() => state.Position, profile);
+        void ReportProfile(string? result)
+        {
+            if (result is null || terminal is null)
+                return;
+            terminal.Report("profile", result);
+            overlay!.Console = terminal.View;
+        }
+
         while (await cadence.WaitForNextTickAsync(token).ConfigureAwait(false))
         {
             var input = window.Capture();
@@ -230,6 +239,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 (token.IsCancellationRequested || window.Read().Phase is HostWindowPhase.Closing or HostWindowPhase.Closed))
                 return;
             var drawable = RequireHealthyRenderer(rendered).Surface == RenderSurfaceState.Drawable;
+            ReportProfile(profile?.Observe(renderer, rendered, drawable && focused && !_testMenu && !_inventoryOpen));
             mouse?.Update(drawable && focused && !_testMenu && !_inventoryOpen && !consoleInput, ref _yaw, ref _pitch);
             if (!drawable || (!scripted && !focused))
                 continue;
@@ -276,6 +286,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                     continue;
                 }
                 mouse?.Update(false, ref _yaw, ref _pitch);
+                ReportProfile(profile?.Interrupt("Profile stopped for flight."));
                 var result = await FlyAsync(terrain, renderHost, state, null, false, token).ConfigureAwait(false);
                 if (result.Quit)
                     return;

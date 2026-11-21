@@ -155,9 +155,22 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
             "clear" => "Usage: clear",
             _ => command?.Execute(value) ?? $"Unknown command: {name}. Type help.",
         };
+        AppendOutput(line, result);
+    }
+
+    internal void Report(string command, string result)
+    {
+        _showHelp = false;
+        AppendOutput(command, result);
+        if (IsOpen)
+            View = CreateView();
+    }
+
+    private void AppendOutput(string command, string result)
+    {
         if (_output.Count == 8)
             _output.Dequeue();
-        _output.Enqueue((line, result));
+        _output.Enqueue((command, result));
     }
 
     private string Describe(string name)
@@ -221,7 +234,7 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
             : string.Join("  ·  ", matches.Select(match => match.TrimEnd()));
         var lines = _showHelp
             ? commands.Select(command => $"{command.Usage,-20} {command.Description}")
-                .Append("help [cmd] / clear   Help / clear output").ToArray()
+                .ToArray()
             : _output.SelectMany(entry => entry.Result.Split('\n').Prepend($"> {entry.Command}")).ToArray();
         return new(_line.Insert(_cursor, "▏"), suggestions, lines, _showHelp);
     }
