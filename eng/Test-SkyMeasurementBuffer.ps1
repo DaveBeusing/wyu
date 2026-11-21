@@ -126,6 +126,49 @@ try
     RequireDrained();
     output.GetStringBuilder().Clear();
 
+    // A new renderer's first lookup execution must survive without a phase,
+    // as occurs at both handoffs. Do not collect unbounded outside-window rows.
+    var startupObserver = type.GetConstructor(instance, null, [typeof(D3D12Renderer)], null)!.Invoke([renderer]);
+    var startupGpu = type.GetMethod("LookupGpuTiming", instance)!.CreateDelegate<Action<ulong, ulong, double, double>>(startupObserver);
+    var startupRecord = type.GetMethod("LookupRecordTiming", instance)!.CreateDelegate<Action<ulong, ulong, double, double>>(startupObserver);
+    var startupStage = type.GetMethod("LookupPreparationStage", instance)!.CreateDelegate<Action<string, long, long, bool>>(startupObserver);
+    var startupFlush = type.GetMethod("FlushEvents", instance)!.CreateDelegate<Action>(startupObserver);
+    for (ulong i = 1; i <= 20; i++)
+    {
+        startupGpu(900 + i, i, 1, 2);
+        startupRecord(900 + i, i, 3, 4);
+    }
+    startupStage("textures", 10, 20, false);
+    startupStage("descriptors", 20, 30, false);
+    startupStage("compute-pipeline", 30, 40, true);
+    startupStage("ready", 10, 40, true);
+    Require(output.GetStringBuilder().Length == 0 && (int)countField.GetValue(startupObserver)! == 6,
+        "Startup diagnostics printed or collected repeated outside-window work.");
+    startupFlush();
+    var startupRows = ReadRows(output);
+    Require(startupRows.Length == 6 && startupRows[0].GetProperty("sequence").GetUInt64() == 901 &&
+        startupRows[1].GetProperty("fence").GetUInt64() == 1 &&
+        startupRows[0].GetProperty("phase").GetString() == "startup" &&
+        startupRows[5].GetProperty("stage").GetString() == "ready" &&
+        startupRows[5].GetProperty("start").GetInt64() == 10 &&
+        startupRows[5].GetProperty("inclusiveOwnerPreparation").GetBoolean() &&
+        startupRows[5].GetProperty("frequency").GetInt64() == Stopwatch.Frequency,
+        "First-execution identity or inclusive startup interval was corrupted.");
+    foreach (var invalidStage in new[] { "unknown", "textures", "descriptors" })
+    {
+        var rejected = false;
+        try { startupStage(invalidStage, 10, 20, true); }
+        catch (InvalidOperationException) { rejected = true; }
+        Require(rejected, "Invalid stage or mutable-resource reuse was accepted.");
+    }
+    type.GetField("_window", instance)!.SetValue(startupObserver, window);
+    output.GetStringBuilder().Clear();
+    startupGpu(42, 43, 5, 6);
+    startupRecord(42, 43, 7, 8);
+    startupFlush();
+    Require(ReadRows(output).Length == 2, "Startup collection suppressed later measured samples.");
+    output.GetStringBuilder().Clear();
+
     var firstQpc = Stopwatch.GetTimestamp();
     AppendThree(42, 1234);
     var lastQpc = Stopwatch.GetTimestamp();
@@ -245,7 +288,7 @@ static JsonElement[] ReadRows(StringWriter writer) => writer.ToString().Split('\
         Require(line.StartsWith(prefix, StringComparison.Ordinal), "Unexpected measurement event prefix.");
         using var json = JsonDocument.Parse(line[prefix.Length..]);
         var kind = json.RootElement.GetProperty("kind").GetString();
-        Require(kind is "record" or "gpu" or "prepare" or "owner" or "unbound-present" or "lookup-gpu-split" or "lookup-record-split", "Unexpected event kind in the native measurement stream.");
+        Require(kind is "record" or "gpu" or "prepare" or "owner" or "unbound-present" or "lookup-gpu-split" or "lookup-record-split" or "lookup-startup", "Unexpected event kind in the native measurement stream.");
         return json.RootElement.Clone();
     }).ToArray();
 static void Require(bool value, string message) { if (!value) throw new InvalidOperationException(message); }

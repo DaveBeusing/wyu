@@ -15,6 +15,8 @@ internal sealed partial class SkyMeasurements
     private readonly Lock _eventGate = new();
     private readonly MeasurementEvent[] _events = new MeasurementEvent[EventCapacity];
     private int _eventCount;
+    private int _firstLookupGpu;
+    private int _firstLookupRecord;
 
     private static void RegisterEvidenceOwner(SkyMeasurements observer)
     {
@@ -54,7 +56,7 @@ internal sealed partial class SkyMeasurements
                 EvidenceOwners[i]!.FlushEvents();
     }
 
-    private enum EventKind : byte { Gpu, Record, Prepare, Pipeline, GpuTicks, Calibration, Owner, UnboundPresent, LookupGpu, LookupRecord }
+    private enum EventKind : byte { Gpu, Record, Prepare, Pipeline, GpuTicks, Calibration, Owner, UnboundPresent, LookupGpu, LookupRecord, LookupStartup }
     private readonly record struct MeasurementEvent(EventKind Kind, string Phase, ulong Sequence, ulong Fence,
         long Qpc, double A = 0, double B = 0, long Allocated = 0, bool Flag = false,
         ulong T0 = 0, ulong T1 = 0, ulong T2 = 0, ulong T3 = 0, ulong Frequency = 0);
@@ -90,11 +92,26 @@ internal sealed partial class SkyMeasurements
     private void LookupRecordTiming(ulong sequence, ulong fence, double compute, double draw) =>
         BufferLookupTiming(EventKind.LookupRecord, sequence, fence, compute, draw);
 
+    private void LookupPreparationStage(string stage, long started, long ended, bool reused)
+    {
+        if (stage is not ("textures" or "descriptors" or "compute-pipeline" or "ready") ||
+            started < 0 || ended < started || reused && stage is ("textures" or "descriptors"))
+            throw new InvalidOperationException("Invalid lookup startup diagnostic evidence.");
+        Buffer(new(EventKind.LookupStartup, stage, 0, 0, ended, Allocated: started, Flag: reused));
+    }
+
     private void BufferLookupTiming(EventKind kind, ulong sequence, ulong fence, double compute, double draw)
     {
+        // Preserve each owner's first actual sky execution, including handoff
+        // owners without a held phase. Subsequent outside-window work stays bounded.
+        var first = kind == EventKind.LookupGpu
+            ? Interlocked.Exchange(ref _firstLookupGpu, 1) == 0
+            : Interlocked.Exchange(ref _firstLookupRecord, 1) == 0;
         var window = Volatile.Read(ref _window);
         if (window is not null && sequence >= window.First && sequence <= window.Last)
             Buffer(new(kind, window.Phase, sequence, fence, Stopwatch.GetTimestamp(), compute, draw));
+        else if (first)
+            Buffer(new(kind, "startup", sequence, fence, Stopwatch.GetTimestamp(), compute, draw));
     }
 
     internal static void Flush(D3D12Renderer renderer)
@@ -139,6 +156,11 @@ internal sealed partial class SkyMeasurements
                     case EventKind.Pipeline:
                         Write(new { kind = "sky-pipeline", owner = _owner, start = e.Allocated, end = e.Qpc,
                             frequency = Stopwatch.Frequency, reused = e.Flag });
+                        break;
+                    case EventKind.LookupStartup:
+                        Write(new { kind = "lookup-startup", owner = _owner, stage = e.Phase,
+                            start = e.Allocated, end = e.Qpc, frequency = Stopwatch.Frequency, reused = e.Flag,
+                            inclusiveOwnerPreparation = e.Phase == "ready" });
                         break;
                     case EventKind.GpuTicks:
                         Write(new { kind = "gpu-ticks", owner = _owner, sequence = e.Sequence, fence = e.Fence, phase = e.Phase,

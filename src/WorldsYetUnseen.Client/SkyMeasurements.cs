@@ -97,6 +97,7 @@ internal sealed partial class SkyMeasurements
             {
                 Bind("AfterSkyLookupGpuTimingRetired", (Action<ulong, ulong, double, double>)observer.LookupGpuTiming);
                 Bind("AfterSkyLookupRecordMeasured", (Action<ulong, ulong, double, double>)observer.LookupRecordTiming);
+                Bind("AfterSkyLookupPreparationStage", (Action<string, long, long, bool>)observer.LookupPreparationStage);
             }
         }
         field.SetValue(renderer, constructor.Invoke(arguments));

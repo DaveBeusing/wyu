@@ -10,15 +10,18 @@ param(
     [switch]$Smoke,
     [switch]$Diagnostics,
     [switch]$DiagnosticProbe,
+    [switch]$GpuSchedulingTrace,
     [switch]$LookupPrototype
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($DiagnosticProbe -and $Smoke) { throw 'A diagnostic probe uses full-size native windows, not Smoke.' }
+if ($GpuSchedulingTrace -and -not $DiagnosticProbe) { throw 'GpuSchedulingTrace requires DiagnosticProbe; it is diagnostic evidence only.' }
 if ($LookupPrototype -and -not ($DiagnosticProbe -or $Smoke)) { throw 'LookupPrototype requires DiagnosticProbe or Smoke; it is never acceptance evidence.' }
 if ($DiagnosticProbe -or $LookupPrototype) { $Diagnostics = $true }
 if ($Diagnostics) { . (Join-Path $PSScriptRoot 'ReferenceGpuDiagnostics.ps1') }
+if ($GpuSchedulingTrace) { . (Join-Path $PSScriptRoot 'ReferenceSchedulingTrace.ps1') }
 $Composition = $Composition.ToLowerInvariant()
 $Adapter = $Adapter.ToLowerInvariant()
 if ($env:WYU_R09_LATENCY -eq '1') { throw 'Run R09 pressure qualification separately; this sky runner does not compose native pressure hooks.' }
@@ -68,6 +71,8 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
     Schema=3; HookSchema=2; Smoke=[bool]$Smoke; Qualified=$false; Adapter=$Adapter; Assembly=$client; Composition=$Composition
     ProcessDeadlineMilliseconds=$deadline
     Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe
+    GpuSchedulingTrace=[bool]$GpuSchedulingTrace
+    SchedulingTrace='Opt-in per-replay DxgKrnl circular ETL; capture status and commands are in each scheduling directory. Event loss and full coverage are unverified.'
     LookupPrototype=[bool]$LookupPrototype
     SkyImplementation=$(if ($LookupPrototype) { 'Experimental fixed-size GPU lookup; visual approval pending; all build/update work charged.' } else { 'Direct 8x4 integration' })
     AcceptanceRequiredPairs=5; AcceptanceRequiredFlights=60; AcceptanceSamplesPerPhasePerVariant=2000
@@ -244,6 +249,8 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
     $cleanupFailures = [Collections.Generic.List[string]]::new()
     $collector = $null
     $collectorReport = $null
+    $schedulingCollector = $null
+    $schedulingReport = $null
     $replayStartedUtc = [DateTime]::UtcNow.ToString('O')
     $replayStartedQpc = [Diagnostics.Stopwatch]::GetTimestamp()
     try {
@@ -266,6 +273,15 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         $process.StartInfo = $start
         if ($Diagnostics) {
             $collector = Start-ReferenceGpuDiagnostics -OutputDirectory (Join-Path $root "$prefix-gpu") -MaximumDurationMilliseconds ($deadline + 20000)
+        }
+        if ($GpuSchedulingTrace) {
+            $traceDirectory = Join-Path $root "$prefix-scheduling"
+            try {
+                $schedulingCollector = Start-ReferenceSchedulingTrace -OutputDirectory $traceDirectory -RuntimeSeconds ([Math]::Min(720, [Math]::Ceiling($deadline / 1000.0) + 30))
+                $schedulingReport = $schedulingCollector
+            } catch {
+                $schedulingReport = [pscustomobject]@{ Status='UNAVAILABLE'; FullQualification=$false; OutputDirectory=$traceDirectory; Errors=@($_.Exception.ToString()) }
+            }
         }
         if (-not $process.Start()) { throw 'Could not start the owned sky replay.' }
         $started = $true
@@ -366,6 +382,10 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         $primaryFailure = $_
         $failure = $_.Exception.Message
     } finally {
+        if ($null -ne $schedulingCollector) {
+            try { $schedulingReport = Stop-ReferenceSchedulingTrace -Context $schedulingCollector }
+            catch { $schedulingReport = [pscustomobject]@{ Status='PARTIAL'; FullQualification=$false; OutputDirectory=$schedulingCollector.OutputDirectory; Errors=@($_.Exception.ToString()) } }
+        }
         if ($null -ne $collector) {
             try { $collectorReport = Stop-ReferenceGpuDiagnostics -Context $collector }
             catch { $collectorReport = [pscustomobject]@{ Availability='Error'; Failure=$_.Exception.ToString() } }
@@ -391,6 +411,8 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             StartedUtc=$replayStartedUtc; StartedQpc=$replayStartedQpc; FinishedUtc=[DateTime]::UtcNow.ToString('O')
             FinishedQpc=[Diagnostics.Stopwatch]::GetTimestamp(); QpcFrequency=[Diagnostics.Stopwatch]::Frequency
             Started=$started; ProcessId=$ownedProcessId; ExitCode=$exitCode
+            SchedulingTraceStatus=$(if ($schedulingReport) { $schedulingReport.Status } else { 'DISABLED' })
+            SchedulingTraceDirectory=$(if ($schedulingReport) { $schedulingReport.OutputDirectory } else { $null })
             Passed=($passed -and $cleanupFailures.Count -eq 0); Failure=$failure
             CleanupFailures=($cleanupFailures -join ' | '); Stdout=$log; Stderr=$errorLog }
         $attempts.Add($attempt)
@@ -399,10 +421,10 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 $timeline = if (Test-Path -LiteralPath $log) {
                     @(Get-Content -LiteralPath $log | Where-Object { $_.StartsWith('PACKAGE G MEASURE ') } |
                         ForEach-Object { $_.Substring('PACKAGE G MEASURE '.Length) | ConvertFrom-Json } |
-                        Where-Object { $_.kind -cin @('owner','phase','handoff','handoff-stage','handoff-incomplete','gpu-ticks','sky-pipeline','gpu-clock-calibration','clock-anchor','lookup-gpu-split','lookup-record-split') })
+                        Where-Object { $_.kind -cin @('owner','phase','handoff','handoff-stage','handoff-incomplete','gpu-ticks','sky-pipeline','gpu-clock-calibration','clock-anchor','lookup-gpu-split','lookup-record-split','lookup-startup') })
                 } else { @() }
                 [pscustomobject]@{ Schema=1; EvidenceKind='DIAGNOSTIC ONLY'; Pair=$Pair; Replay=$Replay; Mode=$Mode
-                    Attempt=$attempt; Collector=$collectorReport; Events=@($timeline) } |
+                    Attempt=$attempt; Collector=$collectorReport; SchedulingTrace=$schedulingReport; Events=@($timeline) } |
                     ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $root "$prefix-diagnostics.json")
             } catch { $cleanupFailures.Add("diagnostic timeline: $($_.Exception.Message)") }
         }
@@ -438,11 +460,13 @@ try {
     }
 } catch {
     [pscustomobject]@{ Status='BLOCKED'; FullQualification=$false; LookupPrototype=[bool]$LookupPrototype; Failure=$_.Exception.Message
+        GpuSchedulingTrace=[bool]$GpuSchedulingTrace
+        SchedulingTraces=@($attempts | Select-Object Pair,Replay,Mode,SchedulingTraceStatus,SchedulingTraceDirectory)
         CleanupFailures=@($attempts | Where-Object { $_.CleanupFailures } | Select-Object Pair,Replay,Mode,CleanupFailures)
         Attempts=$attempts.Count; FailedAttempts=@($attempts | Where-Object { -not $_.Passed }).Count
         RequiredAttempts=2*$pairs*$replays; RawNativeExtras=(Get-SkyNativeExtraCount $nativeExtras)
         RemainingGates='See manifest.json OpenGates.' } |
-        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'result.json')
+        ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $root 'result.json')
     throw
 } finally {
     foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, $previous[$name]) }
@@ -490,12 +514,14 @@ $summary | Where-Object Pair -EQ 0 | Format-Table -AutoSize
 $failed = @($summary | Where-Object { -not $_.Passed }).Count
 [pscustomobject]@{ Status=if ($Smoke) { 'SMOKE ONLY' } elseif ($failed) { 'CHANGES REQUIRED' } elseif ($Diagnostics) { 'DIAGNOSTIC ONLY' } else { 'MEASURED GATES PASSED' }
     Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe
+    GpuSchedulingTrace=[bool]$GpuSchedulingTrace
+    SchedulingTraces=@($attempts | Select-Object Pair,Replay,Mode,SchedulingTraceStatus,SchedulingTraceDirectory)
     LookupPrototype=[bool]$LookupPrototype
     FullQualification=$false; Attempts=$attempts.Count; FailedAttempts=@($attempts | Where-Object { -not $_.Passed }).Count
     RequiredAttempts=2*$pairs*$replays; FailedSummaryRows=$failed
     RawNativeExtras=(Get-SkyNativeExtraCount $nativeExtras)
     RemainingGates='See manifest.json OpenGates.' } |
-    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'result.json')
+    ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $root 'result.json')
 Write-Host "Evidence $root"
 if ($Smoke) { Write-Host 'SMOKE ONLY. Counts and resolution do not qualify the reference budgets.' }
 elseif ($failed) { throw 'A required measured sky/frame/handoff budget failed.' }

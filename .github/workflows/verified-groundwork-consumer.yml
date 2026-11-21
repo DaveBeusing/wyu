@@ -136,3 +136,8 @@ jobs:
 
       - name: Verify owned GPU collector failure handling with a stub
         run: ./eng/Test-ReferenceGpuDiagnostics.ps1
+
+      - name: Verify bounded scheduling trace ownership and runner integration without ETW
+        run: |
+          ./eng/Test-ReferenceSchedulingTrace.ps1
+          ./eng/Test-ReferenceSchedulingRunner.ps1

@@ -100,7 +100,17 @@ This machine has an RTX PRO 5000 Blackwell laptop GPU, not the designated RTX 50
 
 The draw/barrier segment remains dominant. Its endpoints do not distinguish individual barrier, ALU, sampling and output costs. Reducing the approximately 5–7 microsecond generation segment would not resolve the demonstrated gap and is not used to justify fewer integration samples.
 
-## Next required evidence
+## Reference-machine lookup result: CHANGES REQUIRED
+
+The [15:09 reference probe](reference-probe-2026-11-21-150957.md) verifies the
+archive and all 81 inventory entries. Surface frame limits now pass; ascent and
+orbit frame limits and the single to-orbit handoff fail. Typical ascent draw work
+and periodic tails remain distinct blockers. That report records the raw-tick
+reconstruction, source/binary hashes, unchanged thresholds, bounded corrections
+and scheduling evidence still required. The earlier workstation result above
+remains historical evidence, not a reference-machine acceptance result.
+
+## Previous frozen kit
 
 Run the frozen diagnostic kit on the designated i9-10850K/RTX 5070:
 

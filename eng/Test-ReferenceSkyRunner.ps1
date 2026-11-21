@@ -84,6 +84,7 @@ try {
         $failure = 'original-sentinel'
         $Pair = 1; $Replay = 1; $Mode = 'off'; $seed = 42
         $Diagnostics = $false; $collector = $null; $collectorReport = $null
+        $schedulingCollector = $null; $schedulingReport = $null
         $replayStartedUtc = 'cleanup-test'; $replayStartedQpc = 0L
         $log = Join-Path $root 'stdout.log'
         $errorLog = Join-Path $root 'stderr.log'
