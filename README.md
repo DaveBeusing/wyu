@@ -39,12 +39,21 @@ without arguments. The sidebar includes these session entry points.
 | **Esc**, **arrow keys**, **Enter** | Toggle the sidebar and navigate its options in the rescue mission |
 | **F1** | Toggle diagnostics. In Free Test World, this includes build, profile, seed, generator version, and position. |
 | **F2** | Open setup actions in Free Test World |
+| **F3** | Open or close the console while exploring a planet on foot |
 | **F5**, **F10** | Save or save and exit in Free Test World |
 | **F6** | Request flight on supported worlds, subject to the launch-site check |
 
 In Free Test World, Ember Ridges and Ember Caves can grant ore through the
 setup menu. **New Far Horizon World** exposes time and fog controls and includes
 biomes, vegetation, sky, and terrain shadows.
+
+In the world console, type a command and press **Enter**. **Tab** completes
+commands and supported values, **Up/Down** recalls earlier input, and **Esc**
+returns control to the game. Type **help** for the commands available in the
+current world. Use **fov** to adjust the vertical field of view, **stats** to
+toggle F1 diagnostics, and **time** and **fog** where the world supports weather.
+Use **time live** to return to the world clock. Console overrides apply during
+the current exploration session and are left out of the save.
 
 ## Build and verification
 
