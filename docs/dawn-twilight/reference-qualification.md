@@ -73,6 +73,18 @@ ETW or administrator elevation and is confined to the short probe.
 pwsh -NoProfile -File "\\X11D\Share\Invoke-GroundworkReferenceMeasurements.ps1" -DiagnosticProbe -DiagnosticComposition orbit-combined -LookupPrototype -ReuseLookupResources -GpuPassBreakdown
 ```
 
+For the [Orbit terrain tail investigation](reference-probe-2026-11-21-230047.md),
+collect the pass rows and scheduling trace in the same short run. Use
+PowerShell 7.4 or later as Administrator for the scheduling collector:
+
+```powershell
+pwsh -NoProfile -File "\\X11D\Share\Invoke-GroundworkReferenceMeasurements.ps1" -DiagnosticProbe -DiagnosticComposition orbit-combined -LookupPrototype -ReuseLookupResources -GpuPassBreakdown -GpuSchedulingTrace
+```
+
+Check ETL coverage for the measured Orbit window before interpreting a
+missing scheduling event. Review the original frame results separately from
+pass attribution. Combined collection remains diagnostic evidence.
+
 ## Freeze the inputs
 
 Use clean checkouts of the final reviewed heads of Groundwork PR #193 and
