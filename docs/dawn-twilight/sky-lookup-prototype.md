@@ -72,6 +72,18 @@ The benchmark kit freezes Groundwork `985eaa25c3be0b682fd4c04df664146f46d4c62a` 
 
 ## Final workstation probe: CHANGES REQUIRED
 
+The frozen engine source passes [Windows CI](https://github.com/DaveBeusing/Groundwork/actions/runs/44908176936):
+793 solution tests, zero failures/skips, including 105 renderer tests, plus package,
+tamper and isolated-consumer gates. Tested merge:
+`15c476f926ea80d475866132e06ccb1441e31271`, into master
+`8317a841f6b24bfd1c2ca84d1893a750add9e4b2`.
+The frozen WYU runtime passes [verified-consumer CI](https://github.com/DaveBeusing/wyu/actions/runs/44903776555),
+including the new mode/split/failure regressions. Tested merge:
+`a5f37948ea8ed6940997c35e1987ac3c5ac276c7`, into master
+`29a42542e2ab5ac7b4d62fde07fd56e2044aea4e`. These CI results do not replace
+reference performance or owner approval. Report-only WYU changes are checked
+again in their own CI run.
+
 The clean runtime commits above complete two native 1080p flights, 400 samples per phase and variant: 2,400 samples, zero failed attempts, zero native extras and zero component-sum mismatches. Evidence is in WYU `artifacts/sky-lookup-final-probe/` and `artifacts/lookup-final-integrated-build-inputs.json`.
 
 | Phase | Frame p95 / p99 increase | Sky p99 | Compute segment median | Draw/barrier segment median |
@@ -101,5 +113,3 @@ The script stores results, all errors, ZIP and adjacent SHA256 beside itself. It
 Kit SHA256: `F90FCD710C378F00F5B8CF3BE052FDBB5CD1F5BDA9F9D00E7BD01D4059B277B5`. The matching offline record passes 12 real-process/function cases and 13 orchestration flows, including interrupted compositions, explicit prototype scope, missing/wrong mode, rejection of promoted acceptance, ZIP hashing and publication failure.
 
 No further safe correction that closes the original GPU limits is established by the current evidence. New target-hardware split data or dedicated profiling is needed before selecting another optimization. Owner visual approval, full driver-backed memory, protected pressure, original complete-pair qualification and the approved published-package/installed route remain open. The PRs stay draft and unmerged.
-
-
