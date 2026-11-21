@@ -58,6 +58,14 @@ toggle F1 diagnostics, and **time** and **fog** where the world supports weather
 Use **time live** to return to the world clock. Console overrides apply during
 the current exploration session and are left out of the save.
 
+**profile 10** targets a ten-second sample of the on-foot view. The report gives
+the actual sampled span. If the final poll is more than 250 ms late, the run
+exits without a report. Close the console to
+move during the measurement, then reopen it for the report. Use **profile** to
+show the last completed result or **profile cancel** to stop a run. Observed
+FPS counts at most one acknowledged sequence advance per poll. The report also
+shows poll gaps and renderer replacement and skip counter deltas.
+
 ## Build and verification
 
 Use Windows, the .NET 10 SDK, PowerShell 7, and GitHub CLI. The
