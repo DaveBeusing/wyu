@@ -97,7 +97,10 @@ internal sealed partial class SkyMeasurements
             Bind("AfterSkyTimingDetailsRetired", (Action<ulong, ulong, ulong, ulong, ulong, ulong, ulong>)observer.TimingDetails);
             Bind("AfterSkyClockCalibration", (Action<ulong, ulong, ulong>)observer.ClockCalibration);
             if (GpuPassBreakdownEnabled)
+            {
                 Bind("AfterSkyPrepassTimingRetired", (Action<ulong, ulong, double, double, double>)observer.PrepassTiming);
+                Bind("AfterSkyGpuPassDetailsRetired", (Action<ulong, ulong, ulong, ulong, ulong, ulong>)observer.GpuPassDetails);
+            }
             if (Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE") == "1")
             {
                 Bind("AfterSkyLookupGpuTimingRetired", (Action<ulong, ulong, double, double>)observer.LookupGpuTiming);

@@ -56,7 +56,7 @@ internal sealed partial class SkyMeasurements
                 EvidenceOwners[i]!.FlushEvents();
     }
 
-    private enum EventKind : byte { Gpu, Record, Prepare, Pipeline, GpuTicks, Calibration, Owner, UnboundPresent, LookupGpu, LookupRecord, LookupStartup, GpuPrepass }
+    private enum EventKind : byte { Gpu, Record, Prepare, Pipeline, GpuTicks, Calibration, Owner, UnboundPresent, LookupGpu, LookupRecord, LookupStartup, GpuPrepass, GpuPassTicks }
     private readonly record struct MeasurementEvent(EventKind Kind, string Phase, ulong Sequence, ulong Fence,
         long Qpc, double A = 0, double B = 0, long Allocated = 0, bool Flag = false,
         ulong T0 = 0, ulong T1 = 0, ulong T2 = 0, ulong T3 = 0, ulong Frequency = 0);
@@ -98,6 +98,14 @@ internal sealed partial class SkyMeasurements
             Buffer(new(EventKind.GpuPrepass, window.Phase, sequence, fence, Stopwatch.GetTimestamp(),
                 terrain, nearShadow, T0: BitConverter.DoubleToUInt64Bits(farShadow)));
         }
+    }
+
+    private void GpuPassDetails(ulong sequence, ulong fence, ulong terrainStart, ulong terrainEnd, ulong drawStart, ulong drawEnd)
+    {
+        var window = Volatile.Read(ref _window);
+        if (window is not null && sequence >= window.First && sequence <= window.Last)
+            Buffer(new(EventKind.GpuPassTicks, window.Phase, sequence, fence, Stopwatch.GetTimestamp(),
+                T0: terrainStart, T1: terrainEnd, T2: drawStart, T3: drawEnd));
     }
 
     private void LookupRecordTiming(ulong sequence, ulong fence, double compute, double draw) =>
@@ -189,6 +197,10 @@ internal sealed partial class SkyMeasurements
                         Write(new { kind = "gpu-prepass", owner = _owner, sequence = e.Sequence, fence = e.Fence, phase = e.Phase,
                             observedQpc = e.Qpc, terrainMicroseconds = e.A, nearShadowMicroseconds = e.B,
                             farShadowMicroseconds = BitConverter.UInt64BitsToDouble(e.T0) });
+                        break;
+                    case EventKind.GpuPassTicks:
+                        Write(new { kind = "gpu-pass-ticks", owner = _owner, sequence = e.Sequence, fence = e.Fence, phase = e.Phase,
+                            observedQpc = e.Qpc, terrainStart = e.T0, terrainEnd = e.T1, drawStart = e.T2, drawEnd = e.T3 });
                         break;
                     case EventKind.Calibration:
                         Write(new { kind = "gpu-clock-calibration", owner = _owner, gpu = e.T0, cpu = e.T1,

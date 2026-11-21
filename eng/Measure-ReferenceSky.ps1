@@ -134,32 +134,88 @@ function Assert-SkyLookupOwners($Owners, [bool]$Requested, [bool]$ReuseRequested
     }
 }
 
-function Get-SkyPrepassIndex($Rows) {
+function Get-SkyGpuInteger($Row, [string]$Field) {
+    $property = $Row.PSObject.Properties[$Field]
+    if ($null -eq $property) { throw "Missing GPU timing integer $Field." }
+    $value = $property.Value
+    if (($value -isnot [int] -and $value -isnot [long] -and $value -isnot [ulong] -and $value -isnot [bigint]) -or
+        $value -lt 0 -or ($value -is [bigint] -and $value -gt [bigint][ulong]::MaxValue)) {
+        throw "Invalid GPU timing integer $Field."
+    }
+    [ulong]$value
+}
+
+function Get-SkyPrepassIndex($Rows, [string]$Kind) {
     $index = @{}
     foreach ($row in $Rows) {
-        if ($row.kind -cne 'gpu-prepass') { continue }
-        if ($row.owner -le 0 -or $row.fence -le 0 -or $row.sequence -le 0) { throw 'Invalid GPU pass timing identity.' }
-        $key = "$($row.owner)-$($row.fence)"
-        if ($index.ContainsKey($key)) { throw 'Duplicate GPU pass timing fence.' }
+        if ($row.kind -cne $Kind) { continue }
+        $owner = Get-SkyGpuInteger $row 'owner'
+        $fence = Get-SkyGpuInteger $row 'fence'
+        $sequence = Get-SkyGpuInteger $row 'sequence'
+        if ($owner -eq 0 -or $fence -eq 0 -or $sequence -eq 0) { throw "Invalid $Kind timing identity." }
+        $key = "$owner-$fence"
+        if ($index.ContainsKey($key)) { throw "Duplicate $Kind timing fence." }
         $index.Add($key, $row)
     }
     return $index
 }
 
-function Assert-SkyPrepassTiming($Index, $Execution, [string]$Phase) {
+function Assert-SkyPrepassTiming($Prepass, $FrameTicks, $PassTicks, $Execution, [string]$Phase, [string]$Mode) {
     $key = "$($Execution.Owner)-$($Execution.Fence)"
-    $row = $Index[$key]
-    if ($null -eq $row -or $row.sequence -ne $Execution.Sequence -or $row.phase -cne $Phase) {
-        throw 'GPU pass timings do not match the measured execution.'
+    $coarse = $Prepass[$key]
+    $frame = $FrameTicks[$key]
+    $pass = $PassTicks[$key]
+    foreach ($row in $coarse, $frame, $pass) {
+        if ($null -eq $row -or $row.sequence -ne $Execution.Sequence -or $row.phase -cne $Phase) {
+            throw 'GPU pass timing evidence is missing or does not match the measured execution.'
+        }
     }
     foreach ($field in 'terrainMicroseconds','nearShadowMicroseconds','farShadowMicroseconds') {
-        $property = $row.PSObject.Properties[$field]
+        $property = $coarse.PSObject.Properties[$field]
         if ($null -eq $property -or $property.Value -isnot [ValueType] -or $property.Value -is [bool]) {
             throw 'Missing numeric GPU pass interval.'
         }
         $null = Number $property.Value
     }
-    $Index.Remove($key)
+    $frameStart = Get-SkyGpuInteger $frame 'frameStart'
+    $frameEnd = Get-SkyGpuInteger $frame 'frameEnd'
+    $skyStart = Get-SkyGpuInteger $frame 'skyStart'
+    $skyEnd = Get-SkyGpuInteger $frame 'skyEnd'
+    $frequency = Get-SkyGpuInteger $frame 'frequency'
+    $terrainStart = Get-SkyGpuInteger $pass 'terrainStart'
+    $terrainEnd = Get-SkyGpuInteger $pass 'terrainEnd'
+    $drawStart = Get-SkyGpuInteger $pass 'drawStart'
+    $drawEnd = Get-SkyGpuInteger $pass 'drawEnd'
+    if ($frequency -eq 0 -or $frameStart -eq 0 -or $frameStart -ge $frameEnd) {
+        throw 'Invalid measured GPU frame timestamp interval.'
+    }
+    if ($Mode -ceq 'on') {
+        if ($skyStart -lt $frameStart -or $skyEnd -gt $frameEnd -or $skyStart -gt $drawStart -or
+            $drawStart -gt $drawEnd -or $drawEnd -gt $skyEnd) {
+            throw 'GPU draw timestamps are missing or outside the measured sky interval.'
+        }
+    } elseif ($skyStart -ne 0 -or $skyEnd -ne 0 -or $drawStart -ne 0 -or $drawEnd -ne 0) {
+        throw 'Unexpected GPU sky or draw timestamps in the disabled baseline.'
+    }
+    if (($terrainStart -ne 0 -or $terrainEnd -ne 0) -and
+        ($terrainStart -lt $frameStart -or $terrainStart -gt $terrainEnd -or $terrainEnd -gt $frameEnd -or
+            ($Mode -ceq 'on' -and $terrainEnd -gt $skyStart))) {
+        throw 'Invalid GPU terrain timestamp interval.'
+    }
+    # Subtract the integer stamps before converting to double; GPU counters can exceed 2^53.
+    $frameMs = 1000.0 * [double]([decimal]$frameEnd - [decimal]$frameStart) / $frequency
+    $skyMs = 1000.0 * [double]([decimal]$skyEnd - [decimal]$skyStart) / $frequency
+    if ([Math]::Abs($frameMs - $Execution.FrameMs) -gt 0.000000001 -or
+        [Math]::Abs($skyMs - $Execution.SkyMs) -gt 0.000000001) {
+        throw 'GPU timestamp intervals do not match the measured frame and sky durations.'
+    }
+    $terrainMicroseconds = 1000000.0 * [double]([decimal]$terrainEnd - [decimal]$terrainStart) / $frequency
+    if ([Math]::Abs($terrainMicroseconds - $coarse.terrainMicroseconds) -gt 0.000001) {
+        throw 'GPU terrain timestamps do not match the reported terrain duration.'
+    }
+    $Prepass.Remove($key)
+    $FrameTicks.Remove($key)
+    $PassTicks.Remove($key)
 }
 
 function Get-SkyLookupSplits($Rows) {
@@ -360,7 +416,11 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             throw 'Missing or inconsistent near/far/near owner records.'
         }
         Assert-SkyLookupOwners $owners ([bool]$LookupPrototype) ([bool]$ReuseLookupResources)
-        $prepass = if ($GpuPassBreakdown) { Get-SkyPrepassIndex $rows } else { $null }
+        if ($GpuPassBreakdown) {
+            $prepass = Get-SkyPrepassIndex $rows 'gpu-prepass'
+            $frameTicks = Get-SkyPrepassIndex $rows 'gpu-ticks'
+            $passTicks = Get-SkyPrepassIndex $rows 'gpu-pass-ticks'
+        }
         $lookupSplits=if ($LookupPrototype) { Get-SkyLookupSplits $rows } else { $null }
         if ($LookupPrototype -and $Mode -ceq 'off' -and ($lookupSplits.Gpu.Count -or $lookupSplits.Record.Count)) {
             throw 'Lookup work was reported for the disabled-sky baseline.'
@@ -404,7 +464,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 $nativeExtras.Add([pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Composition=$Composition; Phase=$phase
                     RequestedSequences=$count; NativeExecutions=$joined.Rows.Count; RawNativeExtras=$joined.RawNativeExtras })
                 foreach ($execution in $joined.Rows) {
-                    if ($GpuPassBreakdown) { Assert-SkyPrepassTiming $prepass $execution $phase }
+                    if ($GpuPassBreakdown) { Assert-SkyPrepassTiming $prepass $frameTicks $passTicks $execution $phase $Mode }
                     $lookupGpu=$null; $lookupCpu=$null
                     if ($LookupPrototype -and $Mode -ceq 'on') {
                         $timing=Get-SkyLookupExecutionTiming $lookupSplits $execution $phase
@@ -426,7 +486,9 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             }
             Assert-SkyControlledWindow $replayNativeExtras ([bool]$Smoke)
         }
-        if ($GpuPassBreakdown -and $prepass.Count -ne 0) { throw 'Unexpected GPU pass timing outside the measured executions.' }
+        if ($GpuPassBreakdown -and ($prepass.Count -ne 0 -or $frameTicks.Count -ne 0 -or $passTicks.Count -ne 0)) {
+            throw 'Unexpected GPU pass timing outside the measured executions.'
+        }
         $passed = $true
     } catch {
         $primaryFailure = $_
@@ -471,7 +533,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 $timeline = if (Test-Path -LiteralPath $log) {
                     @(Get-Content -LiteralPath $log | Where-Object { $_.StartsWith('PACKAGE G MEASURE ') } |
                         ForEach-Object { $_.Substring('PACKAGE G MEASURE '.Length) | ConvertFrom-Json } |
-                        Where-Object { $_.kind -cin @('owner','phase','handoff','handoff-stage','handoff-incomplete','gpu-ticks','gpu-prepass','sky-pipeline','gpu-clock-calibration','clock-anchor','lookup-gpu-split','lookup-record-split','lookup-startup') })
+                        Where-Object { $_.kind -cin @('owner','phase','handoff','handoff-stage','handoff-incomplete','gpu-ticks','gpu-prepass','gpu-pass-ticks','sky-pipeline','gpu-clock-calibration','clock-anchor','lookup-gpu-split','lookup-record-split','lookup-startup') })
                 } else { @() }
                 [pscustomobject]@{ Schema=1; EvidenceKind='DIAGNOSTIC ONLY'; Pair=$Pair; Replay=$Replay; Mode=$Mode
                     Attempt=$attempt; Collector=$collectorReport; SchedulingTrace=$schedulingReport; Events=@($timeline) } |

@@ -232,7 +232,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         $ast = [Management.Automation.Language.Parser]::ParseFile(
             (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1'), [ref]$tokens, [ref]$parseErrors)
         if ($parseErrors.Count) { throw 'Reference runner has syntax errors.' }
-        foreach ($name in @('Number','Get-SkyNativeExecutions','Assert-SkyControlledWindow','Assert-SkyLookupOwners','Get-SkyLookupSplits','Get-SkyLookupExecutionTiming','Get-SkyPrepassIndex','Assert-SkyPrepassTiming')) {
+        foreach ($name in @('Number','Get-SkyNativeExecutions','Assert-SkyControlledWindow','Assert-SkyLookupOwners','Get-SkyLookupSplits','Get-SkyLookupExecutionTiming','Get-SkyGpuInteger','Get-SkyPrepassIndex','Assert-SkyPrepassTiming')) {
             $functionAst = $ast.Find({ param($node)
                 $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
             }, $false)
@@ -242,24 +242,80 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         $invariant = [Globalization.CultureInfo]::InvariantCulture
         $passRow = [pscustomobject]@{kind='gpu-prepass';owner=2;sequence=80;fence=100;phase='ascent'
             terrainMicroseconds=31.5;nearShadowMicroseconds=0;farShadowMicroseconds=2.25}
-        $passExecution = [pscustomobject]@{Owner=2;Sequence=80;Fence=100}
-        $passIndex = Get-SkyPrepassIndex @($passRow)
-        Assert-SkyPrepassTiming $passIndex $passExecution 'ascent'
-        if ($passIndex.Count) { throw 'GPU pass evidence was not joined exactly once.' }
-        foreach ($fault in 'missing','duplicate','phase','negative','boolean') {
-            $rejected = $false
-            $row = $passRow.PSObject.Copy()
-            if ($fault -eq 'negative') { $row.terrainMicroseconds = -1 }
-            if ($fault -eq 'boolean') { $row.terrainMicroseconds = $true }
+        $start = 1795298507913167488L
+        $frameTickRow = [pscustomobject]@{kind='gpu-ticks';owner=2;sequence=80;fence=100;phase='ascent'
+            frameStart=$start;frameEnd=$start+90000;skyStart=$start+40000;skyEnd=$start+60000;frequency=1000000000}
+        $passTickRow = [pscustomobject]@{kind='gpu-pass-ticks';owner=2;sequence=80;fence=100;phase='ascent'
+            terrainStart=$start+1;terrainEnd=$start+31501;drawStart=$start+45001;drawEnd=$start+55001}
+        function Assert-PassFixture($Rows, [string]$Mode, [string]$ErrorPattern) {
+            $failure = $null
             try {
-                $inputRows = switch ($fault) { 'missing' { }; 'duplicate' { $row; $row }; default { $row } }
-                $index = Get-SkyPrepassIndex @($inputRows | Where-Object { $null -ne $_ })
-                $phase = if ($fault -eq 'phase') { 'surface' } else { 'ascent' }
-                Assert-SkyPrepassTiming $index $passExecution $phase
-            } catch { $rejected = $true }
-            if (-not $rejected) { throw "Faulty GPU pass timing accepted: $fault" }
+                $passExecution = [pscustomobject]@{Owner=2;Sequence=80;Fence=100;FrameMs=0.09
+                    SkyMs=$(if ($Mode -ceq 'on') { 0.02 } else { 0.0 })}
+                $passIndex = Get-SkyPrepassIndex $Rows 'gpu-prepass'
+                $frameTickIndex = Get-SkyPrepassIndex $Rows 'gpu-ticks'
+                $passTickIndex = Get-SkyPrepassIndex $Rows 'gpu-pass-ticks'
+                Assert-SkyPrepassTiming $passIndex $frameTickIndex $passTickIndex $passExecution 'ascent' $Mode
+                if ($passIndex.Count -or $frameTickIndex.Count -or $passTickIndex.Count) {
+                    throw 'GPU pass evidence was not joined exactly once.'
+                }
+            } catch { $failure = $_.Exception.Message }
+            if (($ErrorPattern -and $failure -notlike $ErrorPattern) -or (-not $ErrorPattern -and $failure)) {
+                throw "GPU pass fixture expected [$ErrorPattern] but received [$failure]."
+            }
         }
-        Write-Host 'PASS: GPU pass intervals join by owner, fence, sequence and phase and reject missing or invalid evidence.'
+        $passRows = @($passRow, $frameTickRow, $passTickRow)
+        Assert-PassFixture $passRows 'on' ''
+        Assert-PassFixture $passRows 'off' 'Unexpected GPU sky or draw timestamps*'
+        $maximumTick = '{"tick":18446744073709551615}' | ConvertFrom-Json
+        if ((Get-SkyGpuInteger $maximumTick 'tick') -ne [ulong]::MaxValue) { throw 'Unsigned GPU tick was rounded.' }
+        foreach ($row in $passRows) {
+            Assert-PassFixture @($passRows | Where-Object kind -CNE $row.kind) 'on' 'GPU pass timing evidence is missing*'
+            Assert-PassFixture ($passRows + $row) 'on' "Duplicate $($row.kind) timing fence."
+        }
+        foreach ($case in @(
+            @{Index=0; Field='terrainMicroseconds'; Value=-1; Error='Invalid timing value.'},
+            @{Index=0; Field='terrainMicroseconds'; Value=$true; Error='Missing numeric GPU pass interval.'},
+            @{Index=0; Field='terrainMicroseconds'; Value=31.0; Error='GPU terrain timestamps do not match*'},
+            @{Index=1; Field='phase'; Value='surface'; Error='GPU pass timing evidence is missing*'},
+            @{Index=1; Field='frequency'; Value=0; Error='Invalid measured GPU frame timestamp interval.'},
+            @{Index=1; Field='frameEnd'; Value=$start-1; Error='Invalid measured GPU frame timestamp interval.'},
+            @{Index=1; Field='frameEnd'; Value=$start+90001; Error='GPU timestamp intervals do not match*'},
+            @{Index=1; Field='skyEnd'; Value=$start+60001; Error='GPU timestamp intervals do not match*'},
+            @{Index=2; Field='sequence'; Value=81; Error='GPU pass timing evidence is missing*'},
+            @{Index=2; Field='owner'; Value='2'; Error='Invalid GPU timing integer owner.'},
+            @{Index=2; Field='terrainStart'; Value=-1; Error='Invalid GPU timing integer terrainStart.'},
+            @{Index=2; Field='terrainStart'; Value=1.5; Error='Invalid GPU timing integer terrainStart.'},
+            @{Index=2; Field='terrainStart'; Value=([bigint][ulong]::MaxValue + 1); Error='Invalid GPU timing integer terrainStart.'},
+            @{Index=2; Field='terrainStart'; Value=0; Error='Invalid GPU terrain timestamp interval.'},
+            @{Index=2; Field='terrainStart'; Value=$start+50000; Error='Invalid GPU terrain timestamp interval.'},
+            @{Index=2; Field='terrainEnd'; Value=$start+40001; Error='Invalid GPU terrain timestamp interval.'},
+            @{Index=2; Field='terrainEnd'; Value=$start+90001; Error='Invalid GPU terrain timestamp interval.'},
+            @{Index=2; Field='drawStart'; Value=0; Error='GPU draw timestamps are missing*'},
+            @{Index=2; Field='drawStart'; Value=$start+55002; Error='GPU draw timestamps are missing*'},
+            @{Index=2; Field='drawEnd'; Value=$start+60001; Error='GPU draw timestamps are missing*'}
+        )) {
+            $copy = @($passRows | ForEach-Object { $_.PSObject.Copy() })
+            $copy[$case.Index].PSObject.Properties[$case.Field].Value = $case.Value
+            Assert-PassFixture $copy 'on' $case.Error
+        }
+        $copy = @($passRows | ForEach-Object { $_.PSObject.Copy() })
+        $copy[2].PSObject.Properties.Remove('drawEnd')
+        Assert-PassFixture $copy 'on' 'Missing GPU timing integer drawEnd.'
+        $copy = @($passRows | ForEach-Object { $_.PSObject.Copy() })
+        $copy[2].drawStart = $copy[2].drawEnd
+        Assert-PassFixture $copy 'on' ''
+        $copy[1].skyStart = $copy[1].skyEnd = 0
+        Assert-PassFixture $copy 'off' 'Unexpected GPU sky or draw timestamps*'
+        $copy[2].drawStart = $copy[2].drawEnd = 0
+        Assert-PassFixture $copy 'off' ''
+        Assert-PassFixture $copy 'on' 'GPU draw timestamps are missing*'
+        $copy[0].terrainMicroseconds = 0
+        $copy[2].terrainEnd = $copy[2].terrainStart
+        Assert-PassFixture $copy 'off' ''
+        $copy[2].terrainStart = $copy[2].terrainEnd = 0
+        Assert-PassFixture $copy 'off' ''
+        Write-Host 'PASS: GPU pass timestamps reconcile exact large counters, disabled or empty intervals and reported durations.'
         foreach ($requested in $false, $true) {
             $valid = @(1..3 | ForEach-Object { [pscustomobject]@{lookupPrototype=$requested} })
             Assert-SkyLookupOwners $valid $requested

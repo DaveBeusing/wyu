@@ -51,7 +51,7 @@ Compare this result against the recorded full series without the flag. The
 same retirement, measurement endpoints, draws and regeneration apply.
 
 For an additional short scheduling capture of Orbit Combined, run PowerShell
-7 as Administrator and select the composition explicitly:
+7.4 or later as Administrator and select the composition explicitly:
 
 ```powershell
 pwsh -NoProfile -File "\\X11D\Share\Invoke-GroundworkReferenceMeasurements.ps1" -DiagnosticProbe -DiagnosticComposition orbit-combined -LookupPrototype -GpuSchedulingTrace
@@ -61,19 +61,24 @@ This collects the two-flight diagnostic only. A trace file can lack hardware
 scheduling payload coverage for the measured interval even with zero
 reported event loss.
 
-Add `-GpuPassBreakdown` to the short probe to retain the existing native
-terrain and near/far shadow GPU intervals for every measured execution.
-The kit joins these rows to both variants by owner, sequence, fence and
-phase. It also marks the completion of device initialization inside the
-existing handoff startup interval. The whole-frame and handoff endpoints
-and all acceptance limits remain the same. The option also works without
-ETW or administrator elevation and is confined to the short probe.
+Add `-GpuPassBreakdown` to the short probe to retain the native terrain and
+near/far shadow durations for every measured execution. The kit also retains
+the existing terrain timestamp boundaries and adds two GPU timestamps around
+the Sky draw in the enabled variant. The raw pass events join to frame events
+by owner, sequence, fence and phase. Compare timestamps in a verified common
+clock domain. Check for drift against nearby ETW calibration points before
+using a startup calibration to decide fine-grained overlap. The draw interval
+can include scheduling interruptions between the GPU markers. The collector
+also marks device initialization
+inside the existing handoff startup interval. The option works without ETW
+or administrator elevation and is confined to the short probe. Whole-frame,
+sky and handoff endpoints and all acceptance limits remain the same.
 
 ```powershell
 pwsh -NoProfile -File "\\X11D\Share\Invoke-GroundworkReferenceMeasurements.ps1" -DiagnosticProbe -DiagnosticComposition orbit-combined -LookupPrototype -ReuseLookupResources -GpuPassBreakdown
 ```
 
-For the [Orbit terrain tail investigation](reference-probe-2026-11-21-230047.md),
+For the [Orbit terrain tail investigation](reference-probe-2026-11-21-233205.md),
 collect the pass rows and scheduling trace in the same short run. Use
 PowerShell 7.4 or later as Administrator for the scheduling collector:
 
