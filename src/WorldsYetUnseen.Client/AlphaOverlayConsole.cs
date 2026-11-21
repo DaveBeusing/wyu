@@ -4,7 +4,7 @@ namespace WorldsYetUnseen.Client;
 
 internal sealed partial class AlphaOverlay
 {
-    private const int ConsoleRowHeight = 20;
+    private const int ConsoleRowSpace = 124;
     private const string ConsoleTitle = "WYU world console";
     private volatile ConsoleView? _console;
 
@@ -38,9 +38,11 @@ internal sealed partial class AlphaOverlay
         }
     }
 
+    private static int ConsoleRowHeight(int height) => height < ConsoleRowSpace + 7 * 20 ? 18 : 20;
+
     private static ArraySegment<string> VisibleConsoleRows(ConsoleView view, int height)
     {
-        var count = Math.Min(view.Lines.Length, Math.Max(0, (height - 126) / ConsoleRowHeight));
+        var count = Math.Min(view.Lines.Length, Math.Max(0, (height - ConsoleRowSpace) / ConsoleRowHeight(height)));
         var first = view.ShowingHelp ? 0 : view.Lines.Length - count;
         return new(view.Lines, first, count);
     }
@@ -70,7 +72,7 @@ internal sealed partial class AlphaOverlay
                 var promptY = size.Height - 63;
                 _ = PaintRect(dc, 8, promptY, size.Width - 8, promptY + 28, Input);
                 for (var i = 0; i < rows.Count; i++)
-                    DrawLine(rows[i], Padding, 59 + i * ConsoleRowHeight, Text);
+                    DrawLine(rows[i], Padding, 59 + i * ConsoleRowHeight(size.Height), Text);
 
                 var available = Math.Max(1, (size.Width - 2 * Padding - 20) / 9);
                 var caret = view.Prompt.IndexOf('▏');

@@ -3,7 +3,11 @@ using Groundwork.Core;
 namespace WorldsYetUnseen.Client;
 
 internal sealed record ConsoleCommand(string Name, string Usage, string Description,
-    Func<string, string> Execute, params string[] Values);
+    Func<string, string> Execute, params string[] Values)
+{
+    internal string? Example { get; init; }
+    internal Func<string>? CurrentValue { get; init; }
+}
 
 internal sealed record ConsoleView(string Prompt, string? Suggestions, string[] Lines, bool ShowingHelp);
 
@@ -145,12 +149,35 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
 
         var (name, value) = Split(line);
         var command = Find(name);
-        var result = command is not null ? command.Execute(value)
-            : name is "help" or "clear" ? $"Usage: {name}" : $"Unknown command: {name}. Type help.";
+        var result = name switch
+        {
+            "help" => Describe(value),
+            "clear" => "Usage: clear",
+            _ => command?.Execute(value) ?? $"Unknown command: {name}. Type help.",
+        };
         if (_output.Count == 8)
             _output.Dequeue();
         _output.Enqueue((line, result));
     }
+
+    private string Describe(string name)
+    {
+        if (name == "help")
+            return "Usage: help [command]\nList commands or show details.\nExample: help fov";
+        if (name == "clear")
+            return "Usage: clear\nClear console output.";
+        if (Find(name) is not { } command)
+            return $"Unknown command: {name}. Type help.";
+
+        var lines = new List<string> { $"Usage: {command.Usage}", command.Description };
+        if (command.CurrentValue is { } read)
+            lines.Add(read());
+        if (command.Example is { } example)
+            lines.Add($"Example: {example}");
+        return string.Join('\n', lines);
+    }
+
+    private IEnumerable<string> CommandNames() => BuiltIns.Concat(commands.Select(command => command.Name));
 
     private void Recall(int direction)
     {
@@ -177,13 +204,14 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
 
     private string[] Matches()
     {
-        var (name, value) = Split(_line.TrimStart());
-        if (!_line.TrimStart().Contains(' '))
-            return BuiltIns.Concat(commands.Select(command => command.Name))
-                .Where(candidate => candidate.StartsWith(name, StringComparison.Ordinal))
-                .Select(candidate => candidate + (Find(candidate)?.Values.Length > 0 ? " " : "")).ToArray();
-        return Find(name)?.Values.Where(candidate => candidate.StartsWith(value, StringComparison.Ordinal))
-            .Select(candidate => $"{name} {candidate}").ToArray() ?? [];
+        var line = _line.TrimStart();
+        var (name, value) = Split(line);
+        if (!line.Contains(' '))
+            return CommandNames().Where(candidate => candidate.StartsWith(name, StringComparison.Ordinal))
+                .Select(candidate => candidate + (candidate == "help" || Find(candidate)?.Values.Length > 0 ? " " : "")).ToArray();
+        var values = name == "help" ? CommandNames() : Find(name)?.Values ?? [];
+        return values.Where(candidate => candidate.StartsWith(value, StringComparison.Ordinal))
+            .Select(candidate => $"{name} {candidate}").ToArray();
     }
 
     private ConsoleView CreateView()
@@ -193,8 +221,8 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
             : string.Join("  ·  ", matches.Select(match => match.TrimEnd()));
         var lines = _showHelp
             ? commands.Select(command => $"{command.Usage,-20} {command.Description}")
-                .Append($"{"help / clear",-20} Show commands / clear output").ToArray()
-            : _output.SelectMany(entry => new[] { $"> {entry.Command}", entry.Result }).ToArray();
+                .Append("help [cmd] / clear   Help / clear output").ToArray()
+            : _output.SelectMany(entry => entry.Result.Split('\n').Prepend($"> {entry.Command}")).ToArray();
         return new(_line.Insert(_cursor, "▏"), suggestions, lines, _showHelp);
     }
 

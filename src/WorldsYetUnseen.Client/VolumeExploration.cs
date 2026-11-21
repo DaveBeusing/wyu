@@ -199,7 +199,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var exercisedWindow = false;
         var previousFrame = Stopwatch.GetTimestamp();
         using var cadence = new PeriodicTimer(TimeSpan.FromSeconds(1d / 60));
-        var terminal = !scripted && overlay is not null ? CreateConsole() : null;
+        var terminal = !scripted && overlay is not null ? CreateConsole(() => state.Position) : null;
         while (await cadence.WaitForNextTickAsync(token).ConfigureAwait(false))
         {
             var input = window.Capture();
