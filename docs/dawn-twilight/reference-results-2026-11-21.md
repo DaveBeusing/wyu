@@ -1,5 +1,10 @@
 # Reference follow-up — 21 November 2026
 
+The later [12:15 reference probe comparison](reference-probe-2026-11-21-121552.md)
+records the corrected candidate: handoffs pass in the short probe, while all
+three relative GPU frame comparisons still fail. The analysis below describes
+the preceding evidence and corrections.
+
 **CHANGES REQUIRED / BLOCKED.** The new data does not close the original fifteen
 Far Horizon failures. It identifies real GPU-state differences, sparse submission
 cadence and remaining shutdown polling. The corrections below retain every original
