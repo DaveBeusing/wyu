@@ -13,7 +13,8 @@ param(
     [switch]$GpuSchedulingTrace,
     [switch]$LookupPrototype,
     [switch]$FullLookupSeries,
-    [switch]$ReuseLookupResources
+    [switch]$ReuseLookupResources,
+    [switch]$GpuPassBreakdown
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +25,7 @@ if ($FullLookupSeries -and ($Smoke -or $DiagnosticProbe -or $GpuSchedulingTrace)
 }
 if ($FullLookupSeries) { $LookupPrototype = $true }
 if ($GpuSchedulingTrace -and -not $DiagnosticProbe) { throw 'GpuSchedulingTrace requires DiagnosticProbe; it is diagnostic evidence only.' }
+if ($GpuPassBreakdown -and -not $DiagnosticProbe) { throw 'GpuPassBreakdown requires DiagnosticProbe.' }
 if ($LookupPrototype -and -not ($DiagnosticProbe -or $Smoke -or $FullLookupSeries)) {
     throw 'LookupPrototype requires DiagnosticProbe or Smoke, or the explicit FullLookupSeries diagnostic mode.'
 }
@@ -71,7 +73,7 @@ $environmentNames = 'WYU_PACKAGE_G_MEASURE','WYU_SKY_MEASURE_SMOKE','WYU_SKY_MEA
     'WYU_R09_RECOVERY_AT_HANDOFF','WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
     'WYU_SKY_MEASURE_COMPOSITION','WYU_ORBIT_DEMO_SMOKE','WYU_ORBIT_PBR','WYU_ORBIT_BOULDER',
     'WYU_ORBIT_PBR_MEASURE','WYU_ORBIT_CAPTURE','WYU_WP15_FLIP','WYU_SKY_DIAGNOSTICS',
-    'GROUNDWORK_SKY_LOOKUP_PROTOTYPE','GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES'
+    'GROUNDWORK_SKY_LOOKUP_PROTOTYPE','GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES','WYU_SKY_GPU_PASS_BREAKDOWN'
 $previous = @{}
 foreach ($name in $environmentNames) { $previous[$name] = [Environment]::GetEnvironmentVariable($name) }
 $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll' |
@@ -81,6 +83,7 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
     ProcessDeadlineMilliseconds=$deadline
     Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe; FullLookupSeries=[bool]$FullLookupSeries
     GpuSchedulingTrace=[bool]$GpuSchedulingTrace
+    GpuPassBreakdown=[bool]$GpuPassBreakdown
     SchedulingTrace='Opt-in per-replay DxgKrnl circular ETL; capture status and commands are in each scheduling directory. Event loss and full coverage are unverified.'
     LookupPrototype=[bool]$LookupPrototype; ReuseLookupResources=[bool]$ReuseLookupResources
     SkyImplementation=$(if ($LookupPrototype) { 'Experimental fixed-size GPU lookup; visual approval pending; all build/update work charged.' } else { 'Direct 8x4 integration' })
@@ -129,6 +132,34 @@ function Assert-SkyLookupOwners($Owners, [bool]$Requested, [bool]$ReuseRequested
             throw 'Lookup resource reuse was not positively verified for every native owner.'
         }
     }
+}
+
+function Get-SkyPrepassIndex($Rows) {
+    $index = @{}
+    foreach ($row in $Rows) {
+        if ($row.kind -cne 'gpu-prepass') { continue }
+        if ($row.owner -le 0 -or $row.fence -le 0 -or $row.sequence -le 0) { throw 'Invalid GPU pass timing identity.' }
+        $key = "$($row.owner)-$($row.fence)"
+        if ($index.ContainsKey($key)) { throw 'Duplicate GPU pass timing fence.' }
+        $index.Add($key, $row)
+    }
+    return $index
+}
+
+function Assert-SkyPrepassTiming($Index, $Execution, [string]$Phase) {
+    $key = "$($Execution.Owner)-$($Execution.Fence)"
+    $row = $Index[$key]
+    if ($null -eq $row -or $row.sequence -ne $Execution.Sequence -or $row.phase -cne $Phase) {
+        throw 'GPU pass timings do not match the measured execution.'
+    }
+    foreach ($field in 'terrainMicroseconds','nearShadowMicroseconds','farShadowMicroseconds') {
+        $property = $row.PSObject.Properties[$field]
+        if ($null -eq $property -or $property.Value -isnot [ValueType] -or $property.Value -is [bool]) {
+            throw 'Missing numeric GPU pass interval.'
+        }
+        $null = Number $property.Value
+    }
+    $Index.Remove($key)
 }
 
 function Get-SkyLookupSplits($Rows) {
@@ -329,6 +360,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             throw 'Missing or inconsistent near/far/near owner records.'
         }
         Assert-SkyLookupOwners $owners ([bool]$LookupPrototype) ([bool]$ReuseLookupResources)
+        $prepass = if ($GpuPassBreakdown) { Get-SkyPrepassIndex $rows } else { $null }
         $lookupSplits=if ($LookupPrototype) { Get-SkyLookupSplits $rows } else { $null }
         if ($LookupPrototype -and $Mode -ceq 'off' -and ($lookupSplits.Gpu.Count -or $lookupSplits.Record.Count)) {
             throw 'Lookup work was reported for the disabled-sky baseline.'
@@ -372,6 +404,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 $nativeExtras.Add([pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Composition=$Composition; Phase=$phase
                     RequestedSequences=$count; NativeExecutions=$joined.Rows.Count; RawNativeExtras=$joined.RawNativeExtras })
                 foreach ($execution in $joined.Rows) {
+                    if ($GpuPassBreakdown) { Assert-SkyPrepassTiming $prepass $execution $phase }
                     $lookupGpu=$null; $lookupCpu=$null
                     if ($LookupPrototype -and $Mode -ceq 'on') {
                         $timing=Get-SkyLookupExecutionTiming $lookupSplits $execution $phase
@@ -393,6 +426,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             }
             Assert-SkyControlledWindow $replayNativeExtras ([bool]$Smoke)
         }
+        if ($GpuPassBreakdown -and $prepass.Count -ne 0) { throw 'Unexpected GPU pass timing outside the measured executions.' }
         $passed = $true
     } catch {
         $primaryFailure = $_
@@ -437,7 +471,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 $timeline = if (Test-Path -LiteralPath $log) {
                     @(Get-Content -LiteralPath $log | Where-Object { $_.StartsWith('PACKAGE G MEASURE ') } |
                         ForEach-Object { $_.Substring('PACKAGE G MEASURE '.Length) | ConvertFrom-Json } |
-                        Where-Object { $_.kind -cin @('owner','phase','handoff','handoff-stage','handoff-incomplete','gpu-ticks','sky-pipeline','gpu-clock-calibration','clock-anchor','lookup-gpu-split','lookup-record-split','lookup-startup') })
+                        Where-Object { $_.kind -cin @('owner','phase','handoff','handoff-stage','handoff-incomplete','gpu-ticks','gpu-prepass','sky-pipeline','gpu-clock-calibration','clock-anchor','lookup-gpu-split','lookup-record-split','lookup-startup') })
                 } else { @() }
                 [pscustomobject]@{ Schema=1; EvidenceKind='DIAGNOSTIC ONLY'; Pair=$Pair; Replay=$Replay; Mode=$Mode
                     Attempt=$attempt; Collector=$collectorReport; SchedulingTrace=$schedulingReport; Events=@($timeline) } |
@@ -465,6 +499,7 @@ try {
     $env:WYU_SKY_DIAGNOSTICS = if ($Diagnostics) { '1' } else { '0' }
     $env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE = if ($LookupPrototype) { '1' } else { $null }
     $env:GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES = if ($ReuseLookupResources) { '1' } else { $null }
+    $env:WYU_SKY_GPU_PASS_BREAKDOWN = if ($GpuPassBreakdown) { '1' } else { $null }
     if ($Composition -ceq 'orbit-combined') {
         $env:WYU_ORBIT_DEMO_SMOKE, $env:WYU_ORBIT_PBR, $env:WYU_ORBIT_BOULDER = '1','on','on'
         $env:WYU_WP15, $env:WYU_WP16, $env:WYU_WP16_SMOKE = 'on','on','1'
@@ -479,7 +514,7 @@ try {
     [pscustomobject]@{ Status='BLOCKED'; FullQualification=$false; LookupPrototype=[bool]$LookupPrototype; Failure=$_.Exception.Message
         Composition=$Composition; Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe; FullLookupSeries=[bool]$FullLookupSeries
         ReuseLookupResources=[bool]$ReuseLookupResources
-        GpuSchedulingTrace=[bool]$GpuSchedulingTrace
+        GpuSchedulingTrace=[bool]$GpuSchedulingTrace; GpuPassBreakdown=[bool]$GpuPassBreakdown
         SchedulingTraces=@($attempts | Select-Object Pair,Replay,Mode,SchedulingTraceStatus,SchedulingTraceDirectory)
         CleanupFailures=@($attempts | Where-Object { $_.CleanupFailures } | Select-Object Pair,Replay,Mode,CleanupFailures)
         Attempts=$attempts.Count; FailedAttempts=@($attempts | Where-Object { -not $_.Passed }).Count
@@ -533,7 +568,7 @@ $summary | Where-Object Pair -EQ 0 | Format-Table -AutoSize
 $failed = @($summary | Where-Object { -not $_.Passed }).Count
 [pscustomobject]@{ Status=if ($Smoke) { 'SMOKE ONLY' } elseif ($failed) { 'CHANGES REQUIRED' } elseif ($Diagnostics) { 'DIAGNOSTIC ONLY' } else { 'MEASURED GATES PASSED' }
     Composition=$Composition; Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe; FullLookupSeries=[bool]$FullLookupSeries
-    GpuSchedulingTrace=[bool]$GpuSchedulingTrace
+    GpuSchedulingTrace=[bool]$GpuSchedulingTrace; GpuPassBreakdown=[bool]$GpuPassBreakdown
     SchedulingTraces=@($attempts | Select-Object Pair,Replay,Mode,SchedulingTraceStatus,SchedulingTraceDirectory)
     LookupPrototype=[bool]$LookupPrototype; ReuseLookupResources=[bool]$ReuseLookupResources
     FullQualification=$false; Attempts=$attempts.Count; FailedAttempts=@($attempts | Where-Object { -not $_.Passed }).Count

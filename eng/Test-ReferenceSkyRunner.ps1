@@ -232,7 +232,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         $ast = [Management.Automation.Language.Parser]::ParseFile(
             (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1'), [ref]$tokens, [ref]$parseErrors)
         if ($parseErrors.Count) { throw 'Reference runner has syntax errors.' }
-        foreach ($name in @('Number','Get-SkyNativeExecutions','Assert-SkyControlledWindow','Assert-SkyLookupOwners','Get-SkyLookupSplits','Get-SkyLookupExecutionTiming')) {
+        foreach ($name in @('Number','Get-SkyNativeExecutions','Assert-SkyControlledWindow','Assert-SkyLookupOwners','Get-SkyLookupSplits','Get-SkyLookupExecutionTiming','Get-SkyPrepassIndex','Assert-SkyPrepassTiming')) {
             $functionAst = $ast.Find({ param($node)
                 $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
             }, $false)
@@ -240,6 +240,26 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             . ([scriptblock]::Create($functionAst.Extent.Text))
         }
         $invariant = [Globalization.CultureInfo]::InvariantCulture
+        $passRow = [pscustomobject]@{kind='gpu-prepass';owner=2;sequence=80;fence=100;phase='ascent'
+            terrainMicroseconds=31.5;nearShadowMicroseconds=0;farShadowMicroseconds=2.25}
+        $passExecution = [pscustomobject]@{Owner=2;Sequence=80;Fence=100}
+        $passIndex = Get-SkyPrepassIndex @($passRow)
+        Assert-SkyPrepassTiming $passIndex $passExecution 'ascent'
+        if ($passIndex.Count) { throw 'GPU pass evidence was not joined exactly once.' }
+        foreach ($fault in 'missing','duplicate','phase','negative','boolean') {
+            $rejected = $false
+            $row = $passRow.PSObject.Copy()
+            if ($fault -eq 'negative') { $row.terrainMicroseconds = -1 }
+            if ($fault -eq 'boolean') { $row.terrainMicroseconds = $true }
+            try {
+                $inputRows = switch ($fault) { 'missing' { }; 'duplicate' { $row; $row }; default { $row } }
+                $index = Get-SkyPrepassIndex @($inputRows | Where-Object { $null -ne $_ })
+                $phase = if ($fault -eq 'phase') { 'surface' } else { 'ascent' }
+                Assert-SkyPrepassTiming $index $passExecution $phase
+            } catch { $rejected = $true }
+            if (-not $rejected) { throw "Faulty GPU pass timing accepted: $fault" }
+        }
+        Write-Host 'PASS: GPU pass intervals join by owner, fence, sequence and phase and reject missing or invalid evidence.'
         foreach ($requested in $false, $true) {
             $valid = @(1..3 | ForEach-Object { [pscustomobject]@{lookupPrototype=$requested} })
             Assert-SkyLookupOwners $valid $requested

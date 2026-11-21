@@ -139,6 +139,10 @@ try
     var startupRecord = type.GetMethod("LookupRecordTiming", instance)!.CreateDelegate<Action<ulong, ulong, double, double>>(startupObserver);
     var startupStage = type.GetMethod("LookupPreparationStage", instance)!.CreateDelegate<Action<string, long, long, bool>>(startupObserver);
     var startupFlush = type.GetMethod("FlushEvents", instance)!.CreateDelegate<Action>(startupObserver);
+    var passTiming = type.GetMethod("PrepassTiming", instance)!
+        .CreateDelegate<Action<ulong, ulong, double, double, double>>(startupObserver);
+    passTiming(42, 43, 31.5, 0, 2.25);
+    Require((int)countField.GetValue(startupObserver)! == 0, "Unmeasured GPU pass entered the buffer.");
     for (ulong i = 1; i <= 20; i++)
     {
         startupGpu(900 + i, i, 1, 2);
@@ -192,6 +196,15 @@ try
     Require(reuseRow.GetProperty("stage").GetString() == "resources-reused" &&
         reuseRow.GetProperty("reused").GetBoolean(), "Actual resource reuse was not retained in diagnostics.");
     type.GetField("_window", instance)!.SetValue(startupObserver, window);
+    output.GetStringBuilder().Clear();
+    passTiming(42, 43, 31.5, 0, 2.25);
+    startupFlush();
+    var passRow = ReadRows(output).Single();
+    Require(passRow.GetProperty("kind").GetString() == "gpu-prepass" &&
+        passRow.GetProperty("sequence").GetUInt64() == 42 && passRow.GetProperty("fence").GetUInt64() == 43 &&
+        passRow.GetProperty("terrainMicroseconds").GetDouble() == 31.5 &&
+        passRow.GetProperty("nearShadowMicroseconds").GetDouble() == 0 &&
+        passRow.GetProperty("farShadowMicroseconds").GetDouble() == 2.25, "GPU pass counts or identity changed.");
     output.GetStringBuilder().Clear();
     startupGpu(42, 43, 5, 6);
     startupRecord(42, 43, 7, 8);
@@ -318,7 +331,7 @@ static JsonElement[] ReadRows(StringWriter writer) => writer.ToString().Split('\
         Require(line.StartsWith(prefix, StringComparison.Ordinal), "Unexpected measurement event prefix.");
         using var json = JsonDocument.Parse(line[prefix.Length..]);
         var kind = json.RootElement.GetProperty("kind").GetString();
-        Require(kind is "record" or "gpu" or "prepare" or "owner" or "unbound-present" or "lookup-gpu-split" or "lookup-record-split" or "lookup-startup", "Unexpected event kind in the native measurement stream.");
+        Require(kind is "record" or "gpu" or "prepare" or "owner" or "unbound-present" or "lookup-gpu-split" or "lookup-record-split" or "lookup-startup" or "gpu-prepass", "Unexpected event kind in the native measurement stream.");
         return json.RootElement.Clone();
     }).ToArray();
 static void Require(bool value, string message) { if (!value) throw new InvalidOperationException(message); }

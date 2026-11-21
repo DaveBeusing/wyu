@@ -56,7 +56,7 @@ internal sealed partial class SkyMeasurements
                 EvidenceOwners[i]!.FlushEvents();
     }
 
-    private enum EventKind : byte { Gpu, Record, Prepare, Pipeline, GpuTicks, Calibration, Owner, UnboundPresent, LookupGpu, LookupRecord, LookupStartup }
+    private enum EventKind : byte { Gpu, Record, Prepare, Pipeline, GpuTicks, Calibration, Owner, UnboundPresent, LookupGpu, LookupRecord, LookupStartup, GpuPrepass }
     private readonly record struct MeasurementEvent(EventKind Kind, string Phase, ulong Sequence, ulong Fence,
         long Qpc, double A = 0, double B = 0, long Allocated = 0, bool Flag = false,
         ulong T0 = 0, ulong T1 = 0, ulong T2 = 0, ulong T3 = 0, ulong Frequency = 0);
@@ -88,6 +88,17 @@ internal sealed partial class SkyMeasurements
 
     private void LookupGpuTiming(ulong sequence, ulong fence, double compute, double draw) =>
         BufferLookupTiming(EventKind.LookupGpu, sequence, fence, compute, draw);
+
+    private void PrepassTiming(ulong sequence, ulong fence, double terrain, double nearShadow, double farShadow)
+    {
+        var window = Volatile.Read(ref _window);
+        if (window is not null && sequence >= window.First && sequence <= window.Last)
+        {
+            // Reuse existing storage without growing the buffer for other modes.
+            Buffer(new(EventKind.GpuPrepass, window.Phase, sequence, fence, Stopwatch.GetTimestamp(),
+                terrain, nearShadow, T0: BitConverter.DoubleToUInt64Bits(farShadow)));
+        }
+    }
 
     private void LookupRecordTiming(ulong sequence, ulong fence, double compute, double draw) =>
         BufferLookupTiming(EventKind.LookupRecord, sequence, fence, compute, draw);
@@ -173,6 +184,11 @@ internal sealed partial class SkyMeasurements
                         Write(new { kind = e.Kind == EventKind.LookupGpu ? "lookup-gpu-split" : "lookup-record-split",
                             owner = _owner, sequence = e.Sequence, fence = e.Fence, phase = e.Phase,
                             observedQpc = e.Qpc, computeMicroseconds = e.A, drawBarrierMicroseconds = e.B });
+                        break;
+                    case EventKind.GpuPrepass:
+                        Write(new { kind = "gpu-prepass", owner = _owner, sequence = e.Sequence, fence = e.Fence, phase = e.Phase,
+                            observedQpc = e.Qpc, terrainMicroseconds = e.A, nearShadowMicroseconds = e.B,
+                            farShadowMicroseconds = BitConverter.UInt64BitsToDouble(e.T0) });
                         break;
                     case EventKind.Calibration:
                         Write(new { kind = "gpu-clock-calibration", owner = _owner, gpu = e.T0, cpu = e.T1,

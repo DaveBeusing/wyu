@@ -61,6 +61,18 @@ This collects the two-flight diagnostic only. A trace file can lack hardware
 scheduling payload coverage for the measured interval even with zero
 reported event loss.
 
+Add `-GpuPassBreakdown` to the short probe to retain the existing native
+terrain and near/far shadow GPU intervals for every measured execution.
+The kit joins these rows to both variants by owner, sequence, fence and
+phase. It also marks the completion of device initialization inside the
+existing handoff startup interval. The whole-frame and handoff endpoints
+and all acceptance limits remain the same. The option also works without
+ETW or administrator elevation and is confined to the short probe.
+
+```powershell
+pwsh -NoProfile -File "\\X11D\Share\Invoke-GroundworkReferenceMeasurements.ps1" -DiagnosticProbe -DiagnosticComposition orbit-combined -LookupPrototype -ReuseLookupResources -GpuPassBreakdown
+```
+
 ## Freeze the inputs
 
 Use clean checkouts of the final reviewed heads of Groundwork PR #193 and

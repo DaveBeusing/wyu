@@ -26,6 +26,8 @@ internal sealed partial class SkyMeasurements
     private readonly Handoff? _handoff = _pendingHandoff;
     private MeasurementWindow? _window;
     private long _firstPresent;
+    private static readonly bool GpuPassBreakdownEnabled =
+        Environment.GetEnvironmentVariable("WYU_SKY_GPU_PASS_BREAKDOWN") == "1";
     private bool _lookupPrototype;
     private bool _lookupResourceReuse;
 
@@ -94,6 +96,8 @@ internal sealed partial class SkyMeasurements
             Bind("AfterSkyPipelineReady", (Action<long, long, bool>)observer.PipelineReady);
             Bind("AfterSkyTimingDetailsRetired", (Action<ulong, ulong, ulong, ulong, ulong, ulong, ulong>)observer.TimingDetails);
             Bind("AfterSkyClockCalibration", (Action<ulong, ulong, ulong>)observer.ClockCalibration);
+            if (GpuPassBreakdownEnabled)
+                Bind("AfterSkyPrepassTimingRetired", (Action<ulong, ulong, double, double, double>)observer.PrepassTiming);
             if (Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE") == "1")
             {
                 Bind("AfterSkyLookupGpuTimingRetired", (Action<ulong, ulong, double, double>)observer.LookupGpuTiming);
@@ -117,6 +121,8 @@ internal sealed partial class SkyMeasurements
 
     private void Initialize(object device)
     {
+        if (GpuPassBreakdownEnabled)
+            SkyHandoffDiagnostics.Mark("gpu-device-initialized");
         var requested = Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE") == "1";
         var enabled = device.GetType().GetProperty("SkyLookupPrototypeEnabledForTests",
             BindingFlags.NonPublic | BindingFlags.Instance);
