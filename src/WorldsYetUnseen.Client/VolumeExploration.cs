@@ -177,7 +177,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         else if (slot is not null)
             Notice("E remove | Q add | 1/2 material\nF5 save | F6 flight | F10 save and quit");
         if (freeTestWorld)
-            Notice($"{PlanetName} | F1 diagnostics | F2 test actions\nE remove | Q fill | F5 save | F6 flight");
+            Notice($"{PlanetName} | F1 diagnostics | F2 test actions | F3 console\nE remove | Q fill | F5 save | F6 flight");
+        else if (!scripted && overlay is not null)
+            Notice(CurrentNotice is { } controls ? $"{controls}\nF1 diagnostics · F3 console" : "F1 diagnostics · F3 console");
         if (OrbitMaterialFallbackNotice is { } materialNotice)
             Notice(CurrentNotice is { } startupNotice ? $"{materialNotice}\n\n{startupNotice}" : materialNotice);
         var start = state.Position;
@@ -195,10 +197,20 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var exercisedWindow = false;
         var previousFrame = Stopwatch.GetTimestamp();
         using var cadence = new PeriodicTimer(TimeSpan.FromSeconds(1d / 60));
+        var terminal = !scripted && overlay is not null ? CreateConsole() : null;
         while (await cadence.WaitForNextTickAsync(token).ConfigureAwait(false))
         {
             var input = window.Capture();
             var renderer = renderHost.Active;
+            var windowState = window.Read();
+            var focused = windowState.Focused && !input.TransitionLoss;
+            var consoleInput = !_testMenu && terminal?.Handle(input, focused,
+                WorldConsole.Fits(windowState.ClientWidth, windowState.ClientHeight)) == true;
+            if (consoleInput)
+            {
+                overlay!.Console = terminal!.View;
+                input = input with { Events = [], HeldControls = [] };
+            }
             if (freeTestWorld && PrototypeMenu.Pressed(input, InputControl.F2))
             {
                 _testMenu = !_testMenu;
@@ -216,8 +228,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 (token.IsCancellationRequested || window.Read().Phase is HostWindowPhase.Closing or HostWindowPhase.Closed))
                 return;
             var drawable = RequireHealthyRenderer(rendered).Surface == RenderSurfaceState.Drawable;
-            var focused = window.Read().Focused && !input.TransitionLoss;
-            mouse?.Update(drawable && focused && !_testMenu, ref _yaw, ref _pitch);
+            mouse?.Update(drawable && focused && !_testMenu && !consoleInput, ref _yaw, ref _pitch);
             if (!drawable || (!scripted && !focused))
                 continue;
 
@@ -678,8 +689,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var direction = MathF.Cos(_yaw) * tangent + MathF.Sin(_yaw) * Vector3.Cross(tangent, up);
         direction = MathF.Cos(_pitch) * direction + MathF.Sin(_pitch) * up;
         var eye = WalkingEye(foot);
-        var (tick, fraction) = interpolation ?? (_environmentTick, 0);
-        return ApplyNearEnvironment(new(view, eye, direction, up, 1.0f, 0.08f, 150, Vector4.One, Sky), tick, fraction);
+        var (tick, fraction) = _previewTime is { } preview
+            ? (preview, 0d)
+            : interpolation ?? (_environmentTick, 0);
+        return ApplyNearEnvironment(new(view, eye, direction, up, _fieldOfView, 0.08f, 150, Vector4.One, Sky), tick, fraction);
     }
 
     private static PlanetVector WalkingEye(PlanetVector foot) => Add(foot, Scale(Unit(foot), 1.65));

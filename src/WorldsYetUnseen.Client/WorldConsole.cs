@@ -1,0 +1,214 @@
+using Groundwork.Core;
+
+namespace WorldsYetUnseen.Client;
+
+internal sealed record ConsoleCommand(string Name, string Usage, string Description,
+    Func<string, string> Execute, params string[] Values);
+
+internal sealed record ConsoleView(string Prompt, string? Suggestions, string[] Lines, bool ShowingHelp);
+
+internal sealed class WorldConsole(ConsoleCommand[] commands)
+{
+    private const int LineLimit = 80;
+    private const int HistoryLimit = 32;
+    private static readonly string[] BuiltIns = ["help", "clear"];
+    private readonly List<string> _history = [];
+    private readonly Queue<(string Command, string Result)> _output = new();
+    private string _line = "";
+    private string _draft = "";
+    private int _cursor;
+    private int _historyOffset;
+    private string[]? _completions;
+    private int _completionIndex;
+    private bool _showHelp = true;
+
+    private bool IsOpen { get; set; }
+    internal ConsoleView? View { get; private set; }
+
+    internal static bool Fits(int width, int height) => width >= 260 && height >= 250;
+
+    // Consume the entire snapshot on open and close so menu and gameplay shortcuts cannot fire.
+    internal bool Handle(InputSnapshot input, bool focused, bool fits)
+    {
+        if (!fits && IsOpen)
+        {
+            IsOpen = false;
+            View = null;
+            return true;
+        }
+        if (!fits || !focused || input.TransitionLoss)
+            return IsOpen;
+
+        if (PrototypeMenu.Pressed(input, InputControl.F3) ||
+            IsOpen && PrototypeMenu.Pressed(input, InputControl.Escape))
+        {
+            IsOpen = !IsOpen;
+            View = IsOpen ? CreateView() : null;
+            return true;
+        }
+
+        if (!IsOpen)
+            return false;
+
+        foreach (var entry in input.Events)
+        {
+            if (entry is { Kind: InputEventKind.Pressed, Device: InputDevice.Keyboard } && Edit(entry.Control))
+                View = CreateView();
+        }
+        return true;
+    }
+
+    private bool Edit(InputControl control)
+    {
+        if (control == InputControl.Tab)
+        {
+            Complete();
+            return true;
+        }
+
+        _completions = null;
+        switch (control)
+        {
+            case InputControl.Enter or InputControl.NumpadEnter:
+                Submit();
+                return true;
+            case InputControl.Up:
+                Recall(1);
+                return true;
+            case InputControl.Down:
+                Recall(-1);
+                return true;
+            case InputControl.Left:
+                _cursor = Math.Max(0, _cursor - 1);
+                return true;
+            case InputControl.Right:
+                _cursor = Math.Min(_line.Length, _cursor + 1);
+                return true;
+            case InputControl.Home:
+                _cursor = 0;
+                return true;
+            case InputControl.End:
+                _cursor = _line.Length;
+                return true;
+            case InputControl.Backspace when _cursor > 0:
+                _line = _line.Remove(--_cursor, 1);
+                return true;
+            case InputControl.Delete when _cursor < _line.Length:
+                _line = _line.Remove(_cursor, 1);
+                return true;
+        }
+
+        if (_line.Length >= LineLimit || Character(control) is not { } character)
+            return false;
+        _line = _line.Insert(_cursor++, character.ToString());
+        return true;
+    }
+
+    private static char? Character(InputControl control) => control switch
+    {
+        >= InputControl.A and <= InputControl.Z => (char)('a' + (control - InputControl.A)),
+        >= InputControl.Digit0 and <= InputControl.Digit9 => (char)('0' + (control - InputControl.Digit0)),
+        >= InputControl.Numpad0 and <= InputControl.Numpad9 => (char)('0' + (control - InputControl.Numpad0)),
+        InputControl.Space => ' ',
+        InputControl.Period or InputControl.NumpadDecimal => '.',
+        InputControl.Comma => ',',
+        InputControl.Minus or InputControl.NumpadSubtract => '-',
+        _ => null,
+    };
+
+    private void Submit()
+    {
+        var line = _line.Trim();
+        if (line.Length == 0)
+            return;
+
+        if (_history.Count == 0 || _history[^1] != line)
+            _history.Add(line);
+        if (_history.Count > HistoryLimit)
+            _history.RemoveAt(0);
+        _historyOffset = 0;
+        _draft = "";
+        SetLine("");
+
+        if (line == "help")
+        {
+            _showHelp = true;
+            return;
+        }
+
+        _showHelp = false;
+        if (line == "clear")
+        {
+            _output.Clear();
+            return;
+        }
+
+        var (name, value) = Split(line);
+        var command = Find(name);
+        var result = command is not null ? command.Execute(value)
+            : name is "help" or "clear" ? $"Usage: {name}" : $"Unknown command: {name}. Type help.";
+        if (_output.Count == 8)
+            _output.Dequeue();
+        _output.Enqueue((line, result));
+    }
+
+    private void Recall(int direction)
+    {
+        if (_historyOffset == 0)
+            _draft = _line;
+        _historyOffset = Math.Clamp(_historyOffset + direction, 0, _history.Count);
+        SetLine(_historyOffset == 0 ? _draft : _history[^_historyOffset]);
+    }
+
+    private void Complete()
+    {
+        if (_completions is null)
+        {
+            _completions = Matches();
+            _completionIndex = -1;
+        }
+        if (_completions.Length == 0)
+            return;
+        _completionIndex = (_completionIndex + 1) % _completions.Length;
+        SetLine(_completions[_completionIndex]);
+        if (_completions.Length == 1)
+            _completions = null;
+    }
+
+    private string[] Matches()
+    {
+        var (name, value) = Split(_line.TrimStart());
+        if (!_line.TrimStart().Contains(' '))
+            return BuiltIns.Concat(commands.Select(command => command.Name))
+                .Where(candidate => candidate.StartsWith(name, StringComparison.Ordinal))
+                .Select(candidate => candidate + (Find(candidate)?.Values.Length > 0 ? " " : "")).ToArray();
+        return Find(name)?.Values.Where(candidate => candidate.StartsWith(value, StringComparison.Ordinal))
+            .Select(candidate => $"{name} {candidate}").ToArray() ?? [];
+    }
+
+    private ConsoleView CreateView()
+    {
+        var matches = _completions ?? Matches();
+        var suggestions = _line.Length == 0 || matches.Length == 0 ? null
+            : string.Join("  ·  ", matches.Select(match => match.TrimEnd()));
+        var lines = _showHelp
+            ? commands.Select(command => $"{command.Usage,-20} {command.Description}")
+                .Append($"{"help / clear",-20} Show commands / clear output").ToArray()
+            : _output.SelectMany(entry => new[] { $"> {entry.Command}", entry.Result }).ToArray();
+        return new(_line.Insert(_cursor, "▏"), suggestions, lines, _showHelp);
+    }
+
+    private ConsoleCommand? Find(string name) => Array.Find(commands, command => command.Name == name);
+
+    private static (string Name, string Value) Split(string line)
+    {
+        var separator = line.IndexOf(' ');
+        return separator < 0 ? (line, "") : (line[..separator], line[(separator + 1)..].Trim());
+    }
+
+    private void SetLine(string value)
+    {
+        _line = value;
+        _cursor = value.Length;
+    }
+}
