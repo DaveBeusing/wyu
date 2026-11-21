@@ -12,6 +12,8 @@ internal sealed partial class VolumeExploration
     private ReferenceTerrainMaterial _material = ReferenceTerrainMaterial.Basalt;
     private string? _notice;
     private long _noticeUntil;
+    private OrePreview? _oreConfirmation;
+    private long _oreConfirmUntil;
 
     private string? CurrentNotice => Environment.TickCount64 < _noticeUntil ? _notice : null;
 
@@ -39,12 +41,16 @@ internal sealed partial class VolumeExploration
         var saveAndQuit = PrototypeMenu.Pressed(input, InputControl.F10);
         if (saveAndQuit || PrototypeMenu.Pressed(input, InputControl.F5))
         {
+            var settling = slot?.HasPendingWrite == true;
             var result = await SaveAsync(terrain, token).ConfigureAwait(false);
             var saved = result.Status is VolumeSlotStatus.Committed or VolumeSlotStatus.AlreadyCommitted;
-            _quitAfterSave = saveAndQuit && saved;
+            _quitAfterSave = saveAndQuit && saved && !settling;
             diagnostics?.Write(saved ? "save" : "save-held", $"status={result.Status} generation={result.Checkpoint?.Generation ?? 0} revision={_published.TerrainRevision}");
+            if (result.Error is { } error)
+                diagnostics?.Write("save-error", $"{error.GetType().Name} 0x{error.HResult:X8} {error.Message}");
             Notice(saved && result.Checkpoint is { } checkpoint
-                ? $"Saved generation {checkpoint.Generation}" : result.Status == VolumeSlotStatus.Busy
+                ? settling ? $"Previous save confirmed (generation {checkpoint.Generation}).\nF5 to save current state · F10 to save and quit"
+                    : $"Saved generation {checkpoint.Generation}" : result.Status == VolumeSlotStatus.Busy
                     ? "Save busy. Close the other writer or wait, then try again." : $"Save unavailable: {result.Status}");
             return true;
         }
@@ -65,7 +71,42 @@ internal sealed partial class VolumeExploration
         }
 
         var beforeOre = CaveOre;
-        var edited = await EditAsync(terrain, renderer, state, center, operation, cave is null ? (ushort)_material : CavePlanet.ShallowRock, token).ConfigureAwait(false);
+        OrePreview? approval = null;
+        if (!add && cave is not null && ReadInventory() is { } inventory &&
+            // A 3-vertex-wide brush can affect at most four cells on each axis.
+            InventoryOperations.AcquireOre(inventory.Items, 64).Status != InventoryChangeStatus.Applied)
+        {
+            using var lease = terrain.TryRead();
+            if (lease is null || lease.Info != _published || !InventoryOrePreview.TryCount(lease, cave.Field, center, out var deposits))
+            {
+                Notice("Mining held. Wait for confirmed terrain coverage.");
+                return true;
+            }
+            if (deposits > 0)
+            {
+                var preview = InventoryOperations.AcquireOre(inventory.Items, deposits);
+                if (preview is { Status: InventoryChangeStatus.OverloadConfirmation, ProjectedLoad: { } projected })
+                {
+                    var confirmation = new OrePreview(center, _published.TerrainRevision, inventory.Items.Revision, deposits);
+                    if (_oreConfirmation != confirmation || Environment.TickCount64 >= _oreConfirmUntil)
+                    {
+                        _oreConfirmation = confirmation;
+                        _oreConfirmUntil = Environment.TickCount64 + 4500;
+                        Notice($"Mining would overload you\n{InventoryLoadText(projected)}\nE again at this spot to confirm");
+                        return true;
+                    }
+                    approval = confirmation;
+                }
+                else if (preview.Status != InventoryChangeStatus.Applied)
+                {
+                    Notice($"Ore acquisition blocked. Terrain retained.\n{InventoryResultText(preview, InventoryAction.Transfer)}");
+                    return true;
+                }
+            }
+        }
+        _oreConfirmation = null;
+        var edited = await EditAsync(terrain, renderer, state, center, operation, cave is null ? (ushort)_material : CavePlanet.ShallowRock,
+            token, approvedOre: approval).ConfigureAwait(false);
         diagnostics?.Write(edited ? "edit" : "edit-held", $"operation={operation} revision={_published.TerrainRevision}");
         var acquired = CaveOre - beforeOre;
         Notice(!edited ? "Edit blocked. Terrain retained." : acquired > 0
@@ -97,7 +138,7 @@ internal sealed partial class VolumeExploration
 
     private async Task<bool> EditAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetWalkState state,
         LatticeCoordinate center, VolumeBrushOperation operation, ushort material, CancellationToken token,
-        R09EarlyPrebuild? earlyPrebuild = null)
+        R09EarlyPrebuild? earlyPrebuild = null, OrePreview? approvedOre = null)
     {
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var begin = await BeginAsync(token).ConfigureAwait(false);
@@ -106,7 +147,24 @@ internal sealed partial class VolumeExploration
             new(center.X - 1, center.Y - 1, center.Z - 1), new(center.X + 1, center.Y + 1, center.Z + 1),
             operation, operation == VolumeBrushOperation.Add ? material : (ushort)0);
         var admission = terrain.SealEditTick(begin.Tick, Descriptor, [edit]);
-        Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
+        var cut = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
+        if (approvedOre is { } selected && admission == VolumeAdmission.Accepted)
+        {
+            if (ReadInventory() is not { } inventory || inventory.Items.Revision != selected.InventoryRevision ||
+                edit.ExpectedRevision != selected.TerrainRevision)
+            {
+                Finish(cut);
+                terrain.RejectEdit(edit.Tick, edit.Id);
+                return false;
+            }
+            if (!CommitInventoryRoot(cut, inventory, inventory with { OreApproval = new(edit, selected.InventoryRevision, selected.Deposits) }, token))
+            {
+                terrain.RejectEdit(edit.Tick, edit.Id);
+                return false;
+            }
+        }
+        else
+            Finish(cut);
         if (admission != VolumeAdmission.Accepted)
             return false;
 
@@ -128,12 +186,7 @@ internal sealed partial class VolumeExploration
         if (slot is null || slot.ReadOnly)
             return new(VolumeSlotStatus.ReadOnlyRecovery);
         if (slot.HasPendingWrite)
-        {
-            // Settle the original operation before capturing the state requested by this Save.
-            var settled = await Task.Run(() => slot.Execute(token)).ConfigureAwait(false);
-            if (settled.Status is not (VolumeSlotStatus.Committed or VolumeSlotStatus.AlreadyCommitted))
-                return settled;
-        }
+            return await Task.Run(() => slot.Execute(token)).ConfigureAwait(false);
         if (_ports.Committed.Read().Root is not VolumeWorldRoot { Player: not null })
             return new(VolumeSlotStatus.InvalidCheckpoint);
 
@@ -146,4 +199,6 @@ internal sealed partial class VolumeExploration
         var environmentTick = _environmentTick;
         return await Task.Run(() => slot.Save(cut, environmentTick, token)).ConfigureAwait(false);
     }
+
+    private readonly record struct OrePreview(LatticeCoordinate Center, ulong TerrainRevision, ulong InventoryRevision, int Deposits);
 }
