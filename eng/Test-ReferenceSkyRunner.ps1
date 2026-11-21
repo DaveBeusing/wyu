@@ -89,7 +89,7 @@ try {
         $ast = [Management.Automation.Language.Parser]::ParseFile(
             (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1'), [ref]$tokens, [ref]$parseErrors)
         if ($parseErrors.Count) { throw 'Reference runner has syntax errors.' }
-        foreach ($name in @('Number','Get-SkyNativeExecutions','Assert-SkyControlledWindow')) {
+        foreach ($name in @('Number','Get-SkyNativeExecutions','Assert-SkyControlledWindow','Assert-SkyLookupOwners')) {
             $functionAst = $ast.Find({ param($node)
                 $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
             }, $false)
@@ -97,6 +97,21 @@ try {
             . ([scriptblock]::Create($functionAst.Extent.Text))
         }
         $invariant = [Globalization.CultureInfo]::InvariantCulture
+        foreach ($requested in $false, $true) {
+            $valid = @(1..3 | ForEach-Object { [pscustomobject]@{lookupPrototype=$requested} })
+            Assert-SkyLookupOwners $valid $requested
+            foreach ($invalid in @(
+                @($valid[0],$valid[1]),
+                @($valid[0],$valid[1],[pscustomobject]@{lookupPrototype=(-not $requested)}),
+                @($valid[0],$valid[1],[pscustomobject]@{lookupPrototype='true'}),
+                @($valid[0],$valid[1],[pscustomobject]@{})
+            )) {
+                $rejected=$false
+                try { Assert-SkyLookupOwners $invalid $requested } catch { $rejected=$true }
+                if (-not $rejected) { throw 'Missing, mistyped or inconsistent prototype owner identity was accepted.' }
+            }
+        }
+        Write-Host 'PASS: Direct and lookup mode identities fail closed for every native owner.'
         $window = [pscustomobject]@{ owner=1; first=80; last=80; phase='surface' }
         $prepare = [pscustomobject]@{ kind='prepare'; owner=1; sequence=80; phase='surface'; preparationMicroseconds=7; allocatedBytes=50 }
         $gpuFirst = [pscustomobject]@{ kind='gpu'; owner=1; sequence=80; fence=100; phase='surface'; frameMicroseconds=100; skyMicroseconds=20; hasSky=$true }

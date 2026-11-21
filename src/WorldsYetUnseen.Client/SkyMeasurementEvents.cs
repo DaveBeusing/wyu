@@ -102,7 +102,8 @@ internal sealed partial class SkyMeasurements
                 {
                     case EventKind.Owner:
                         Write(new { kind = "owner", owner = _owner, mode = Mode, frequency = Stopwatch.Frequency,
-                            smoke = Smoke, engine = typeof(D3D12Renderer).Assembly.GetName().Version?.ToString(), engineHash = EngineHash.Value,
+                            smoke = Smoke, lookupPrototype = _lookupPrototype,
+                            engine = typeof(D3D12Renderer).Assembly.GetName().Version?.ToString(), engineHash = EngineHash.Value,
                             wp15 = ReferenceSunlight.Enabled, composition = Composition,
                             orbitPbr = OrbitCombined && OrbitDemoPreset.PbrEnabled,
                             boulder = OrbitCombined && OrbitDemoPreset.BoulderEnabled });

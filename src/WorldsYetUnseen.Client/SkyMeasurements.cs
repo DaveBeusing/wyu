@@ -26,6 +26,7 @@ internal sealed partial class SkyMeasurements
     private readonly Handoff? _handoff = _pendingHandoff;
     private MeasurementWindow? _window;
     private long _firstPresent;
+    private bool _lookupPrototype;
 
     private SkyMeasurements(D3D12Renderer renderer) => _renderer = renderer;
 
@@ -109,6 +110,17 @@ internal sealed partial class SkyMeasurements
 
     private void Initialize(object device)
     {
+        var requested = Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE") == "1";
+        var enabled = device.GetType().GetProperty("SkyLookupPrototypeEnabledForTests",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        if (enabled is null)
+        {
+            if (requested)
+                throw Mismatch();
+        }
+        else if (enabled.PropertyType != typeof(bool) || enabled.GetValue(device) is not bool actual || actual != requested)
+            throw Mismatch();
+        _lookupPrototype = requested;
         var enable = device.GetType().GetMethod("EnableSkyTimingForTests", BindingFlags.NonPublic | BindingFlags.Instance,
             Type.EmptyTypes) ?? throw Mismatch();
         enable.Invoke(device, null);

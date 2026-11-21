@@ -128,6 +128,9 @@ jobs:
       - name: Verify exact presentation acknowledgement without polling
         run: ./eng/Test-SkyPresentationWait.ps1
 
+      - name: Verify sky runner mode identity and failure evidence without a GPU
+        run: ./eng/Test-ReferenceSkyRunner.ps1
+
       - name: Verify Handoff diagnostic endpoints without a GPU
         run: ./eng/Test-SkyHandoffDiagnostics.ps1
 

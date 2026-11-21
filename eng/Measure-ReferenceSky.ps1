@@ -9,12 +9,14 @@ param(
     [string]$RendererSourceCommit,
     [switch]$Smoke,
     [switch]$Diagnostics,
-    [switch]$DiagnosticProbe
+    [switch]$DiagnosticProbe,
+    [switch]$LookupPrototype
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($DiagnosticProbe -and $Smoke) { throw 'A diagnostic probe uses full-size native windows, not Smoke.' }
+if ($LookupPrototype -and -not ($DiagnosticProbe -or $Smoke)) { throw 'LookupPrototype requires DiagnosticProbe or Smoke; it is never acceptance evidence.' }
 if ($DiagnosticProbe) { $Diagnostics = $true }
 if ($Diagnostics) { . (Join-Path $PSScriptRoot 'ReferenceGpuDiagnostics.ps1') }
 $Composition = $Composition.ToLowerInvariant()
@@ -56,7 +58,8 @@ $environmentNames = 'WYU_PACKAGE_G_MEASURE','WYU_SKY_MEASURE_SMOKE','WYU_SKY_MEA
     'WYU_WP15_PROBE','WYU_WP16','WYU_WP16_SMOKE','WYU_R09_LATENCY','WYU_HOST_RETRY_SMOKE',
     'WYU_R09_RECOVERY_AT_HANDOFF','WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
     'WYU_SKY_MEASURE_COMPOSITION','WYU_ORBIT_DEMO_SMOKE','WYU_ORBIT_PBR','WYU_ORBIT_BOULDER',
-    'WYU_ORBIT_PBR_MEASURE','WYU_ORBIT_CAPTURE','WYU_WP15_FLIP','WYU_SKY_DIAGNOSTICS'
+    'WYU_ORBIT_PBR_MEASURE','WYU_ORBIT_CAPTURE','WYU_WP15_FLIP','WYU_SKY_DIAGNOSTICS',
+    'GROUNDWORK_SKY_LOOKUP_PROTOTYPE'
 $previous = @{}
 foreach ($name in $environmentNames) { $previous[$name] = [Environment]::GetEnvironmentVariable($name) }
 $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll' |
@@ -65,6 +68,8 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
     Schema=3; HookSchema=2; Smoke=[bool]$Smoke; Qualified=$false; Adapter=$Adapter; Assembly=$client; Composition=$Composition
     ProcessDeadlineMilliseconds=$deadline
     Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe
+    LookupPrototype=[bool]$LookupPrototype
+    SkyImplementation=$(if ($LookupPrototype) { 'Experimental fixed-size GPU lookup; visual approval pending; all build/update work charged.' } else { 'Direct 8x4 integration' })
     AcceptanceRequiredPairs=5; AcceptanceRequiredFlights=60; AcceptanceSamplesPerPhasePerVariant=2000
     EvidenceKind=$(if ($Diagnostics) { 'DIAGNOSTIC ONLY: telemetry and/or reduced flight count; never acceptance evidence.' } else { 'Required measurement subset; all original gates apply.' })
     EventOutput='Bounded value buffers flushed after each phase/native endpoint; overflow fails, no sample selection.'
@@ -93,6 +98,16 @@ function Number($value) {
     $number = [Convert]::ToDouble($value, $invariant)
     if (-not [double]::IsFinite($number) -or $number -lt 0) { throw 'Invalid timing value.' }
     $number
+}
+
+function Assert-SkyLookupOwners($Owners, [bool]$Requested) {
+    if (@($Owners).Count -ne 3) { throw 'Missing lookup mode owner evidence.' }
+    foreach ($owner in $Owners) {
+        $mode = $owner.PSObject.Properties['lookupPrototype']
+        if ($null -eq $mode -or $mode.Value -isnot [bool] -or $mode.Value -ne $Requested) {
+            throw 'Lookup mode was not positively verified for every native owner.'
+        }
+    }
 }
 
 function Percentile($values, [double]$percentile) {
@@ -251,6 +266,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 [bool]$_.orbitPbr -ne ($Composition -ceq 'orbit-combined') -or [bool]$_.boulder -ne ($Composition -ceq 'orbit-combined') }).Count) {
             throw 'Missing or inconsistent near/far/near owner records.'
         }
+        Assert-SkyLookupOwners $owners ([bool]$LookupPrototype)
         foreach ($direction in 'to-orbit','to-ground') {
             $handoff = @($rows | Where-Object { $_.kind -ceq 'handoff' -and $_.direction -ceq $direction })
             if ($handoff.Count -ne 1 -or $handoff[0].end -le $handoff[0].start -or $handoff[0].fence -le 0 -or
@@ -366,6 +382,7 @@ try {
     $env:WYU_WP15, $env:WYU_WP16 = 'off','off'
     $env:WYU_SKY_MEASURE_COMPOSITION = $Composition
     $env:WYU_SKY_DIAGNOSTICS = if ($Diagnostics) { '1' } else { '0' }
+    $env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE = if ($LookupPrototype) { '1' } else { $null }
     if ($Composition -ceq 'orbit-combined') {
         $env:WYU_ORBIT_DEMO_SMOKE, $env:WYU_ORBIT_PBR, $env:WYU_ORBIT_BOULDER = '1','on','on'
         $env:WYU_WP15, $env:WYU_WP16, $env:WYU_WP16_SMOKE = 'on','on','1'
@@ -377,7 +394,7 @@ try {
         }
     }
 } catch {
-    [pscustomobject]@{ Status='BLOCKED'; FullQualification=$false; Failure=$_.Exception.Message
+    [pscustomobject]@{ Status='BLOCKED'; FullQualification=$false; LookupPrototype=[bool]$LookupPrototype; Failure=$_.Exception.Message
         CleanupFailures=@($attempts | Where-Object { $_.CleanupFailures } | Select-Object Pair,Replay,Mode,CleanupFailures)
         Attempts=$attempts.Count; FailedAttempts=@($attempts | Where-Object { -not $_.Passed }).Count
         RequiredAttempts=2*$pairs*$replays; RawNativeExtras=(Get-SkyNativeExtraCount $nativeExtras)
@@ -430,6 +447,7 @@ $summary | Where-Object Pair -EQ 0 | Format-Table -AutoSize
 $failed = @($summary | Where-Object { -not $_.Passed }).Count
 [pscustomobject]@{ Status=if ($Smoke) { 'SMOKE ONLY' } elseif ($failed) { 'CHANGES REQUIRED' } elseif ($Diagnostics) { 'DIAGNOSTIC ONLY' } else { 'MEASURED GATES PASSED' }
     Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe
+    LookupPrototype=[bool]$LookupPrototype
     FullQualification=$false; Attempts=$attempts.Count; FailedAttempts=@($attempts | Where-Object { -not $_.Passed }).Count
     RequiredAttempts=2*$pairs*$replays; FailedSummaryRows=$failed
     RawNativeExtras=(Get-SkyNativeExtraCount $nativeExtras)

@@ -39,6 +39,25 @@ const BindingFlags statics = BindingFlags.Static | BindingFlags.NonPublic;
 var renderer = (D3D12Renderer)RuntimeHelpers.GetUninitializedObject(typeof(D3D12Renderer));
 GC.SuppressFinalize(renderer);
 var observer = type.GetConstructor(instance, null, [typeof(D3D12Renderer)], null)!.Invoke([renderer]);
+var initialize = type.GetMethod("Initialize", instance)!;
+var priorLookup = Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE");
+try
+{
+    foreach (var requested in new[] { false, true })
+    foreach (var device in new object[] { new DirectOnlyDevice(), new LookupDevice(false), new LookupDevice(true) })
+    {
+        Environment.SetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE", requested ? "1" : null);
+        var candidate = type.GetConstructor(instance, null, [typeof(D3D12Renderer)], null)!.Invoke([renderer]);
+        var shouldPass = device is LookupDevice lookup ? lookup.SkyLookupPrototypeEnabledForTests == requested : !requested;
+        var passed = false;
+        try { initialize.Invoke(candidate, [device]); passed = true; }
+        catch (TargetInvocationException error) when (error.InnerException is InvalidOperationException) { }
+        Require(passed == shouldPass, "Prototype request silently accepted a missing/disabled private engine capability.");
+        Require((bool)type.GetField("_lookupPrototype", instance)!.GetValue(candidate)! == (requested && shouldPass),
+            "Prototype owner evidence did not reflect verified initialization.");
+    }
+}
+finally { Environment.SetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE", priorLookup); }
 var owners = type.GetField("Owners", statics)!.GetValue(null)!;
 owners.GetType().GetMethod("Add")!.Invoke(owners, [renderer, observer]);
 var windowType = type.GetNestedType("MeasurementWindow", BindingFlags.NonPublic)!;
@@ -196,6 +215,15 @@ static JsonElement[] ReadRows(StringWriter writer) => writer.ToString().Split('\
         return json.RootElement.Clone();
     }).ToArray();
 static void Require(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
+sealed class DirectOnlyDevice
+{
+    internal void EnableSkyTimingForTests() { }
+}
+sealed class LookupDevice(bool enabled)
+{
+    internal bool SkyLookupPrototypeEnabledForTests => enabled;
+    internal void EnableSkyTimingForTests() { }
+}
 sealed class PartialFailWriter(StringWriter prefix) : TextWriter
 {
     private int count;
