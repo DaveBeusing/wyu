@@ -6,9 +6,15 @@ internal static class Program
 {
     private const DepositMask AllDeposits = DepositMask.West | DepositMask.Seam | DepositMask.East;
 
-    private static int Main()
+    private static int Main(string[] args)
     {
-        (string Name, Action Run)[] tests =
+        (string Name, Action Run)[] inventory =
+        [
+            (nameof(InventoryTests.LoadAndRecovery), InventoryTests.LoadAndRecovery),
+            (nameof(InventoryTests.TransfersAndSupport), InventoryTests.TransfersAndSupport),
+            (nameof(InventoryTests.SaveBudgetRelief), InventoryTests.SaveBudgetRelief),
+        ];
+        (string Name, Action Run)[] tests = args.Contains("--inventory-only", StringComparer.Ordinal) ? inventory :
         [
             (nameof(FixedRouteRepeatsEveryCheckpoint), FixedRouteRepeatsEveryCheckpoint),
             (nameof(AllMiningOrdersConserveStone), AllMiningOrdersConserveStone),
@@ -19,7 +25,10 @@ internal static class Program
             (nameof(ReferencePlanetTests.SeedAudit), ReferencePlanetTests.SeedAudit),
             (nameof(ReferencePlanetTests.ChartContinuity), ReferencePlanetTests.ChartContinuity),
             (nameof(ReferencePlanetTests.PublishedSpawnAndLanding), ReferencePlanetTests.PublishedSpawnAndLanding),
+            .. inventory,
         ];
+        if (args.Contains("--measure-inventory", StringComparer.Ordinal))
+            tests = [.. tests, (nameof(InventoryTests.MeasureMoves), InventoryTests.MeasureMoves)];
         var failed = 0;
         foreach (var (name, run) in tests)
         {

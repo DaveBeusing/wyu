@@ -5,19 +5,28 @@ using WorldsYetUnseen.Gameplay;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, ReferencePlanet? planet, CavePlanet? cave, bool orbitDemo = false) : IDisposable
+internal sealed record InventoryImportResult(VolumeWorldSlot? Slot, VolumeSlotStatus Status, string? Reason = null);
+
+internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Guid terrainWorld, ReferencePlanet? planet,
+    CavePlanet? cave, bool orbitDemo = false) : IDisposable
 {
-    private const int ManifestBytes = 32;
+    private const int LegacyManifestBytes = 32;
+    private const int ManifestBytes = 49;
     private VolumeCheckpointWriter? _writer;
     private bool _retry;
 
     internal ReferencePlanet? Planet { get; } = planet;
     internal CavePlanet? Cave { get; } = cave;
-    internal VolumeCheckpointSlot Storage { get; private set; } = new(root, id, lineage, (cave?.Descriptor ?? planet!.Descriptor), Validate);
+    internal VolumeCheckpointSlot Storage { get; private set; } = new(root, id, lineage, (cave?.Descriptor ?? planet!.Descriptor), InventoryCheckpoint.Validate);
     internal VolumeCheckpoint? Checkpoint { get; private set; }
     internal bool OrbitDemo { get; } = orbitDemo;
     internal bool ReadOnly { get; private set; }
     internal bool HasPendingWrite => _retry;
+    internal bool NeedsInventoryImport => Checkpoint is { } cut && !InventoryCheckpoint.IsCurrent(cut.Game);
+    internal string? InventoryImportError => NeedsInventoryImport && Checkpoint is { } cut &&
+        InventoryCheckpoint.Read(cut, out _, out _, out _) != SaveGameValidation.Valid
+        ? "The original inventory cannot be represented within the new save limits. The original slot is preserved."
+        : null;
 
     internal static WorldProfile DefaultProfile => WorldProfile.Connected;
 
@@ -54,25 +63,11 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
     internal static VolumeWorldSlot Create(string root, ulong seed, bool cave = false, bool connected = false,
         bool orbitDemo = false)
     {
-        Directory.CreateDirectory(root);
-        cave |= connected;
-        if (orbitDemo && cave)
+        if (orbitDemo && (cave || connected))
             throw new ArgumentException("The Orbit demo uses the reference planet.", nameof(orbitDemo));
-        var id = Guid.NewGuid();
-        var lineage = Guid.NewGuid();
-        var geology = cave ? new CavePlanet(id, seed, connected) : null;
-        var planet = cave ? null : new ReferencePlanet(id, seed);
-        var slot = new VolumeWorldSlot(root, id, lineage, planet, geology, orbitDemo)
-        {
-            Storage = VolumeCheckpointSlot.Reserve(root, id, lineage, geology?.Descriptor ?? planet!.Descriptor, Validate)
-        };
-        Span<byte> bytes = stackalloc byte[ManifestBytes];
-        (orbitDemo ? "WYUVOL04"u8 : connected ? "WYUVOL03"u8 : cave ? "WYUVOL02"u8 : "WYUVOL01"u8).CopyTo(bytes);
-        BinaryPrimitives.WriteUInt64LittleEndian(bytes[8..], seed);
-        lineage.TryWriteBytes(bytes[16..]);
-        using var manifest = new FileStream(ManifestPath(root, id), FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        manifest.Write(bytes);
-        manifest.Flush(flushToDisk: true);
+        var profile = orbitDemo ? WorldProfile.OrbitDemo : connected ? WorldProfile.Connected : cave ? WorldProfile.Cave : WorldProfile.Reference;
+        var slot = Reserve(root, seed, profile);
+        slot.PublishManifest(seed, profile);
         return slot;
     }
 
@@ -84,21 +79,18 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
         try
         {
             using var manifest = new FileStream(ManifestPath(root, id), FileMode.Open, FileAccess.Read, FileShare.Read);
-            Span<byte> bytes = stackalloc byte[ManifestBytes];
-            if (manifest.Length != bytes.Length)
+            var length = manifest.Length;
+            if (length is not (LegacyManifestBytes or ManifestBytes))
                 return null;
+            Span<byte> bytes = stackalloc byte[(int)length];
             manifest.ReadExactly(bytes);
-            var connected = bytes[..8].SequenceEqual("WYUVOL03"u8);
-            var cave = connected || bytes[..8].SequenceEqual("WYUVOL02"u8);
-            var orbitDemo = bytes[..8].SequenceEqual("WYUVOL04"u8);
-            if ((!cave && !orbitDemo && !bytes[..8].SequenceEqual("WYUVOL01"u8)) || new Guid(bytes[16..]) == Guid.Empty)
+            var slotLineage = new Guid(bytes.Slice(16, 16));
+            if (slotLineage == Guid.Empty || !TryReadProfile(bytes, id, out var profile, out var worldIdentity))
                 return null;
             var seed = BinaryPrimitives.ReadUInt64LittleEndian(bytes[8..]);
-            if (cave && !connected && seed != CavePlanet.Seed)
+            if (profile == WorldProfile.Cave && seed != CavePlanet.Seed)
                 return null;
-            var geology = cave ? new CavePlanet(id, seed, connected) : null;
-            var planet = cave ? null : new ReferencePlanet(id, seed);
-            var slot = new VolumeWorldSlot(root, id, new Guid(bytes[16..]), planet, geology, orbitDemo);
+            var slot = Describe(root, id, slotLineage, worldIdentity, seed, profile);
             var loaded = slot.Storage.Load();
             status = loaded.Status;
             if (loaded.Status is not (VolumeSlotStatus.Loaded or VolumeSlotStatus.ReadOnlyRecovery) || loaded.Checkpoint is null)
@@ -122,8 +114,8 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
 
     internal static Guid[] List(string root) => Directory.Exists(root)
         ? Directory.EnumerateDirectories(root).Select(Path.GetFileName)
-            .Where(static name => Guid.TryParseExact(name, "N", out _))
-            .Select(static name => Guid.ParseExact(name!, "N")).Where(static id => id != Guid.Empty).Order().ToArray()
+            .Where(static name => Guid.TryParseExact(name, "N", out _)).Select(static name => Guid.ParseExact(name!, "N"))
+            .Where(id => id != Guid.Empty && File.Exists(ManifestPath(root, id))).Order().ToArray()
         : [];
 
     internal VolumeSlotResult Save(VolumeCheckpointCut cut, ulong environmentTick, CancellationToken token)
@@ -133,6 +125,8 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
         {
             if (ReadOnly)
                 return new(VolumeSlotStatus.ReadOnlyRecovery);
+            if (NeedsInventoryImport)
+                return new(VolumeSlotStatus.Incompatible);
             if (token.IsCancellationRequested)
                 return new(VolumeSlotStatus.Canceled);
             if (_writer is null)
@@ -148,10 +142,10 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
                 }
             }
 
-            var admitted = _writer.TryAdmit(cut, 1, (root, buffer) => root.State is CaveInventory caveState
-                ? caveState.Write(buffer.Span) : ProceduralLanding.Write(
-                (root.State as GameHost.ExplorationRoot)?.Landing, root.Player, root.Terrain.TerrainRevision,
-                environmentTick, buffer.Span));
+            var admitted = _writer.TryAdmit(cut, 1, (root, buffer) => root.State is CaveInventory state
+                ? InventoryCheckpoint.Write(state.Items, state.Landing, root.Player, root.Terrain.TerrainRevision,
+                    environmentTick, buffer.Span)
+                : -1);
             if (admitted != VolumeCaptureAdmission.Accepted)
                 return new(admitted switch
                 {
@@ -179,14 +173,123 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Refere
         return result;
     }
 
+    internal InventoryImportResult ImportInventory(VolumeCheckpointCut cut, CancellationToken token)
+    {
+        var transferred = false;
+        try
+        {
+            if (!NeedsInventoryImport || Checkpoint is not { } source)
+                return new(null, VolumeSlotStatus.Incompatible, "The selected slot has no supported legacy checkpoint to import.");
+            if (token.IsCancellationRequested)
+                return new(null, VolumeSlotStatus.Canceled, "The import was canceled.");
+            if (InventoryCheckpoint.Read(source, out var inventory, out var landing, out var environmentTick) != SaveGameValidation.Valid ||
+                inventory is null)
+                return new(null, VolumeSlotStatus.Incompatible, "The original inventory cannot be represented within the new save limits.");
+
+            var expected = new byte[VolumeCheckpoint.MaximumGameBytes];
+            var length = InventoryCheckpoint.Write(inventory, landing, source.Player, source.TerrainRevision, environmentTick, expected);
+            if (length < 0)
+                return new(null, VolumeSlotStatus.InvalidCheckpoint, "The imported game state exceeds its save budget.");
+            var profile = OrbitDemo ? WorldProfile.OrbitDemo : Cave is null ? WorldProfile.Reference :
+                Cave.Descriptor.GeneratorVersion == PlanetGeologyField.ConnectedGeneratorVersion ? WorldProfile.Connected : WorldProfile.Cave;
+
+            // Keep terrain identity, but reserve a different save ID and lineage. Publish its menu entry only after readback.
+            using var target = Reserve(root, source.Planet.Seed, profile, terrainWorld);
+            transferred = true;
+            var saved = target.Save(cut, environmentTick, token);
+            if (target.HasPendingWrite)
+                saved = target.Execute(token);
+            var loaded = target.Storage.Load();
+            if (loaded.Status != VolumeSlotStatus.Loaded || loaded.Checkpoint is not { } restored ||
+                restored.Generation != 1 || restored.Planet != source.Planet || restored.Player != source.Player ||
+                restored.TerrainRevision != source.TerrainRevision || !restored.Overlay.SequenceEqual(source.Overlay) ||
+                !restored.Game.SequenceEqual(expected.AsSpan(0, length)))
+            {
+                var committed = saved.Status is VolumeSlotStatus.Committed or VolumeSlotStatus.AlreadyCommitted;
+                return new(null, committed ? VolumeSlotStatus.InvalidCheckpoint : saved.Status,
+                    committed ? "The new slot did not reproduce the original checkpoint." : $"The import could not save ({saved.Status}).");
+            }
+
+            target.PublishManifest(source.Planet.Seed, profile);
+            var verified = Open(root, restored.Operation.SlotId, out var verifiedStatus);
+            return verified is not null && verifiedStatus == VolumeSlotStatus.Loaded
+                ? new(verified, VolumeSlotStatus.Committed)
+                : new(null, verifiedStatus, $"The imported slot could not be opened ({verifiedStatus}).");
+        }
+        catch (IOException)
+        {
+            return new(null, VolumeSlotStatus.StorageError, "The new slot could not be written or read back.");
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new(null, VolumeSlotStatus.StorageError, "The save folder does not permit the import.");
+        }
+        finally
+        {
+            if (!transferred)
+                cut.Dispose();
+        }
+    }
+
     public void Dispose() => _writer?.Dispose();
 
     internal static bool SupportsMaterial(ushort material) =>
         material is (ushort)ReferenceTerrainMaterial.Basalt or (ushort)ReferenceTerrainMaterial.OchreStone;
 
-    private static SaveGameValidation Validate(VolumeCheckpoint checkpoint) =>
-        checkpoint.Planet.GeneratorVersion is PlanetGeologyField.GeneratorVersion or PlanetGeologyField.ConnectedGeneratorVersion
-            ? CaveInventory.Read(checkpoint, out _, out _) : ProceduralLanding.Read(checkpoint, out _);
+    private static VolumeWorldSlot Reserve(string root, ulong seed, WorldProfile profile, Guid? worldIdentity = null)
+    {
+        Directory.CreateDirectory(root);
+        var id = Guid.NewGuid();
+        var lineage = Guid.NewGuid();
+        var slot = Describe(root, id, lineage, worldIdentity ?? id, seed, profile);
+        slot.Storage = VolumeCheckpointSlot.Reserve(root, id, lineage, slot.Cave?.Descriptor ?? slot.Planet!.Descriptor,
+            InventoryCheckpoint.Validate);
+        return slot;
+    }
+
+    private static VolumeWorldSlot Describe(string root, Guid id, Guid lineage, Guid worldIdentity, ulong seed, WorldProfile profile)
+    {
+        var cave = profile is WorldProfile.Cave or WorldProfile.Connected
+            ? new CavePlanet(worldIdentity, seed, profile == WorldProfile.Connected) : null;
+        return new(root, id, lineage, worldIdentity, cave is null ? new ReferencePlanet(worldIdentity, seed) : null,
+            cave, profile == WorldProfile.OrbitDemo);
+    }
+
+    private static bool TryReadProfile(ReadOnlySpan<byte> bytes, Guid id, out WorldProfile profile, out Guid worldIdentity)
+    {
+        var magic = bytes[..8];
+        if (bytes.Length == ManifestBytes && magic.SequenceEqual("WYUVOL05"u8))
+        {
+            profile = (WorldProfile)bytes[48];
+            worldIdentity = new(bytes.Slice(32, 16));
+            return worldIdentity != Guid.Empty && Enum.IsDefined(profile);
+        }
+
+        worldIdentity = id;
+        profile = magic.SequenceEqual("WYUVOL01"u8) ? WorldProfile.Reference :
+            magic.SequenceEqual("WYUVOL02"u8) ? WorldProfile.Cave :
+            magic.SequenceEqual("WYUVOL03"u8) ? WorldProfile.Connected :
+            magic.SequenceEqual("WYUVOL04"u8) ? WorldProfile.OrbitDemo : (WorldProfile)(-1);
+        return bytes.Length == LegacyManifestBytes && Enum.IsDefined(profile);
+    }
+
+    private void PublishManifest(ulong seed, WorldProfile profile)
+    {
+        Span<byte> bytes = stackalloc byte[ManifestBytes];
+        "WYUVOL05"u8.CopyTo(bytes);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes[8..], seed);
+        lineage.TryWriteBytes(bytes[16..]);
+        terrainWorld.TryWriteBytes(bytes[32..]);
+        bytes[48] = (byte)profile;
+        var path = ManifestPath(root, id);
+        var candidate = path + ".pending";
+        using (var manifest = new FileStream(candidate, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            manifest.Write(bytes);
+            manifest.Flush(flushToDisk: true);
+        }
+        File.Move(candidate, path);
+    }
 
     private static string ManifestPath(string root, Guid id) => Path.Combine(root, $"{id:N}.wyu");
 }

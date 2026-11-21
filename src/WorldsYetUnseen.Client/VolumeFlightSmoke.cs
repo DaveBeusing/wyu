@@ -151,20 +151,23 @@ internal sealed partial class VolumeExploration
 
     private static void VerifyEnvironmentPayload(VolumeCheckpoint checkpoint, ProceduralLanding landed)
     {
+        Span<byte> environment = stackalloc byte[53];
+        if (ProceduralLanding.Write(landed, checkpoint.Player, checkpoint.TerrainRevision, ReferenceWeather.InitialTick,
+                environment) != environment.Length)
+            throw new InvalidOperationException("Could not construct the legacy landing fixture.");
         Span<byte> legacy = stackalloc byte[44];
         "WYUVOL02"u8.CopyTo(legacy);
-        checkpoint.Game[17..].CopyTo(legacy[8..]);
+        environment[17..].CopyTo(legacy[8..]);
         if (ProceduralLanding.Read(checkpoint, legacy, out var oldLanding, out var oldTick) != SaveGameValidation.Valid ||
             oldLanding != landed || oldTick != ReferenceWeather.InitialTick ||
             ProceduralLanding.Read(checkpoint, "WYUVOL01"u8, out oldLanding, out oldTick) != SaveGameValidation.Valid ||
             oldLanding is not null || oldTick != ReferenceWeather.InitialTick)
             throw new InvalidOperationException("Legacy environment payload migration failed.");
 
-        Span<byte> malformed = stackalloc byte[53];
-        checkpoint.Game.CopyTo(malformed);
-        malformed[16] = 2;
-        if (ProceduralLanding.Read(checkpoint, malformed, out _, out _) != SaveGameValidation.Malformed ||
-            ProceduralLanding.Read(checkpoint, checkpoint.Game[..^1], out _, out _) != SaveGameValidation.Malformed)
+        if (ProceduralLanding.Read(checkpoint, environment[..^1], out _, out _) != SaveGameValidation.Malformed)
+            throw new InvalidOperationException("Truncated environment payload was accepted.");
+        environment[16] = 2;
+        if (ProceduralLanding.Read(checkpoint, environment, out _, out _) != SaveGameValidation.Malformed)
             throw new InvalidOperationException("Malformed environment payload was accepted.");
     }
 

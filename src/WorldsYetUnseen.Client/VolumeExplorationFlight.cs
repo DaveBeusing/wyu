@@ -464,8 +464,9 @@ internal sealed partial class VolumeExploration
         var draft = terrain.TryPlanMovement(player, 0, 0, out var status)
             ?? throw new InvalidOperationException($"Ground return could not be admitted ({status}).");
         var candidates = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
-        var state = Connected ? ((VolumeWorldRoot)_ports.Committed.Read().Root).State :
-            new GameHost.ExplorationRoot(begin.World, landing);
+        var state = ReadInventory() ?? throw new InvalidOperationException("The inventory root is unavailable on landing.");
+        if (!Connected)
+            state = state with { Landing = landing };
         var prepared = terrain.TryPrepareMovement(draft, candidates, [], state)
             ?? throw new InvalidOperationException("Landing state could not be prepared.");
         if (Finish(candidates, prepared).Status != BarrierStatus.Committed)

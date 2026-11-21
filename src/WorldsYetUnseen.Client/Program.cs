@@ -6,6 +6,9 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        if (args is ["--inventory-checkpoint-proof"])
+            return InventoryCheckpointVerification.Run();
+
         if (args is ["--cave-smoke", "init" or "resume" or "v3-init" or "v3-resume", _])
             return await RunCaveSmokeAsync(args[1], args[2]).ConfigureAwait(false);
 
