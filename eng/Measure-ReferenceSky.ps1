@@ -76,6 +76,7 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
     Provenance='Operator-identified diagnostic assemblies. Hook binding and recorded hashes do not establish immutable archive approval.'
     GpuFrameInterval='Clear through last draw pass in one graphics command list, excluding separate uploads and native Present. Phase geometry is held fixed.'
     PresentationConfiguration='Native DXGI Present syncInterval=1 flags=0. Actual compositor/scanout mode is not captured by this runner.'
+    HeldPresentationWait='Exact renderer sequence acknowledgement, 30-second bound, fault/cancellation checks; no additional 8 ms polling.'
     SamplesPerPhasePerRun=$count; Seeds=@(42,20261111); SkyProfile='wyu.far-horizon.atmosphere.v2'
     Flags=@{ B='on'; E='on'; CanonicalG='on'; WP15=$(if ($Composition -ceq 'orbit-combined') { 'on' } else { 'off' })
         Props=$(if ($Composition -ceq 'orbit-combined') { 'on' } else { 'off' })

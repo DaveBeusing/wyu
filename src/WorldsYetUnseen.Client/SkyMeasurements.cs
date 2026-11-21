@@ -21,6 +21,7 @@ internal sealed partial class SkyMeasurements
     private static int _nextOwner;
     private static Handoff? _pendingHandoff;
     private readonly D3D12Renderer _renderer;
+    private Func<ulong, CancellationToken, ValueTask<RendererSnapshot>>? _presentationWait;
     private readonly int _owner = Interlocked.Increment(ref _nextOwner);
     private readonly Handoff? _handoff = _pendingHandoff;
     private MeasurementWindow? _window;
@@ -78,6 +79,8 @@ internal sealed partial class SkyMeasurements
         if (parameters.Any(parameter => !parameter.HasDefaultValue || parameter.DefaultValue is not null))
             throw Mismatch();
         var observer = new SkyMeasurements(renderer);
+        var presentationWait = type.GetMethod("WaitForPresentedAsync", [typeof(ulong), typeof(CancellationToken)]) ?? throw Mismatch();
+        observer._presentationWait = presentationWait.CreateDelegate<Func<ulong, CancellationToken, ValueTask<RendererSnapshot>>>(renderer);
         var arguments = new object?[parameters.Length];
         Action<object> initialized = observer.Initialize;
         Bind("AfterDeviceInitialize", Delegate.CreateDelegate(typeof(Action<>).MakeGenericType(gpuType), initialized.Target, initialized.Method));
@@ -183,6 +186,41 @@ internal sealed partial class SkyMeasurements
         if (window is not null && sequence >= window.First && sequence <= window.Last)
             observer.Buffer(new(EventKind.Prepare, window.Phase, sequence, 0, Stopwatch.GetTimestamp(),
                 microseconds, 0, allocatedBytes));
+    }
+
+    internal static ValueTask<RendererSnapshot> WaitForPresentedAsync(D3D12Renderer renderer, ulong sequence, CancellationToken token)
+    {
+        var observer = Owners.GetValue(renderer, _ => throw Mismatch());
+        return AwaitPresentationAsync(observer._presentationWait ?? throw Mismatch(), sequence, TimeSpan.FromSeconds(30), token);
+    }
+
+    internal static async ValueTask<RendererSnapshot> AwaitPresentationAsync(
+        Func<ulong, CancellationToken, ValueTask<RendererSnapshot>> wait, ulong sequence, TimeSpan deadline, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        using var underlyingCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var pending = wait(sequence, underlyingCancellation.Token);
+        RendererSnapshot state;
+        try
+        {
+            state = pending.IsCompletedSuccessfully ? pending.Result :
+                await pending.AsTask().WaitAsync(deadline, token).ConfigureAwait(false);
+        }
+        catch (Exception failure) when (failure is TimeoutException || failure is OperationCanceledException && token.IsCancellationRequested)
+        {
+            try { underlyingCancellation.Cancel(); }
+            catch (Exception error)
+            {
+                try { Console.Error.WriteLine("Presentation waiter cancellation also failed: " + error); }
+                catch { /* Retain the original wait failure. */ }
+            }
+            throw;
+        }
+        if (state.FirstFault is not null || state.Lifecycle != RendererLifecycle.Running)
+            throw new InvalidOperationException($"Terrain renderer failed ({state}).");
+        if (state.LastPresentedSequence < sequence)
+            throw new InvalidOperationException("Presentation acknowledgement did not reach the requested sequence.");
+        return state;
     }
 
     internal static void Write(object value) => Console.WriteLine("PACKAGE G MEASURE " + JsonSerializer.Serialize(value));
@@ -328,7 +366,7 @@ internal sealed partial class VolumeExploration
                 Props?.Pump();
                 RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, SkyMeasurements.Submit(prepared)));
             }
-            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+            await SkyMeasurements.WaitForPresentedAsync(renderer, sequence, token).ConfigureAwait(false);
             Drain(terrain);
         }
 

@@ -1,5 +1,10 @@
 # Far Horizon GPU and handoff investigation
 
+The [21 November follow-up](reference-results-2026-11-21.md) contains the returned
+probe, observed GPU-state differences, new wait/depth corrections and renewed
+verification. Its failed reference rows remain open; this document describes the
+diagnostic tool and the preceding investigation.
+
 The [20 November reference archive](reference-results-2026-11-20.md) remains
 **CHANGES REQUIRED**: eleven per-pair GPU-relative rows and four per-pair handoff
 rows fail. All five pooled rows pass. No row, pair, outlier or failed attempt is

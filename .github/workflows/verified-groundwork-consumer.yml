@@ -125,6 +125,9 @@ jobs:
       - name: Verify buffered sky measurement events without a GPU
         run: ./eng/Test-SkyMeasurementBuffer.ps1
 
+      - name: Verify exact presentation acknowledgement without polling
+        run: ./eng/Test-SkyPresentationWait.ps1
+
       - name: Verify Handoff diagnostic endpoints without a GPU
         run: ./eng/Test-SkyHandoffDiagnostics.ps1
 
