@@ -81,7 +81,7 @@ internal sealed partial class VolumeExploration
         var texturedOrbit = false;
         var warpReadback = renderHost.WarpReadback;
         var orbitReadback = false;
-        var skySmoke = scripted && Environment.GetEnvironmentVariable("WYU_PACKAGE_G_SMOKE") == "1";
+        var skySmoke = scripted && Environment.GetEnvironmentVariable("WYU_PACKAGE_G_SMOKE") == "1" && !SkyMeasurements.Enabled;
         var recoveryAtHandoff = MeasureR09 && scripted &&
             Environment.GetEnvironmentVariable("WYU_R09_RECOVERY_AT_HANDOFF") == "1";
         var orbitSkyChecked = false;
@@ -116,6 +116,7 @@ internal sealed partial class VolumeExploration
                     var next = flight.Propose();
                     if (far && Length(next.Position) <= FlightBoundary)
                     {
+                        SkyMeasurements.BeginHandoff("to-ground");
                         transitionStarted = BiomeMeasurements.Start();
                         transition = "to-ground";
                         var handoffStarted = MeasureR09 ? Stopwatch.GetTimestamp() : 0;
@@ -187,6 +188,14 @@ internal sealed partial class VolumeExploration
 
                     if (!far && !usedFar && Length(next.Position) > FlightBoundary)
                     {
+                        if (SkyMeasurements.Enabled)
+                        {
+                            var measuredTick = checked(_environmentTick + (ulong)flight.Tick);
+                            await MeasureSkyPhaseAsync(terrain, renderHost.Active,
+                                FlightCamera(terrain.View, next.Position, player.Heading, measuredTick),
+                                "ascent", false, measuredTick, token).ConfigureAwait(false);
+                        }
+                        SkyMeasurements.BeginHandoff("to-orbit");
                         transitionStarted = BiomeMeasurements.Start();
                         transition = "to-orbit";
                         if (skySmoke)
@@ -196,6 +205,7 @@ internal sealed partial class VolumeExploration
                                 player.Heading, handoffTick.Value, far: false, token).ConfigureAwait(false);
                         }
                         var globe = await globeTask.ConfigureAwait(false);
+                        SkyHandoffDiagnostics.Mark("globe-ready");
                         if (warpReadback is { MarkerOnly: false })
                             await CaptureHandoffAsync(warpReadback, "near-before-ascent", renderHost.Active, terrain, player,
                                 flight, digest, pad, null, token).ConfigureAwait(false);
@@ -240,7 +250,7 @@ internal sealed partial class VolumeExploration
                 var renderer = renderHost.Active;
                 OrbitMaterialHost?.RetryMaterials(renderer, sequence);
                 var tick = checked(_environmentTick + (ulong)flight.Tick);
-                var fraction = acceptedAt == 0 || flight.Phase == ProceduralFlightPhase.Landed ? 1 :
+                var fraction = SkyMeasurements.Enabled || acceptedAt == 0 || flight.Phase == ProceduralFlightPhase.Landed ? 1 :
                     Math.Clamp(Stopwatch.GetElapsedTime(acceptedAt).TotalSeconds * 60, 0, 1);
                 var presentationTick = fraction == 1 ? tick : tick - 1;
                 var subTick = fraction == 1 ? 0 : fraction;
@@ -269,16 +279,25 @@ internal sealed partial class VolumeExploration
                 var orbitSubmit = frameStarted != 0 && orbitDemo && OrbitPbrMeasurements.Enabled
                     ? Stopwatch.GetTimestamp() : 0;
                 if (far)
-                    RequireFrame(renderer.TrySubmit(orbit));
+                {
+                    SkyHandoffDiagnostics.Mark("far-frame-submit", sequence);
+                    RequireFrame(renderer.TrySubmit(SkyMeasurements.Submit(orbit)));
+                }
                 else
                 {
                     Props?.Pump();
-                    RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, nearCamera));
+                    SkyHandoffDiagnostics.Mark("near-frame-submit", sequence);
+                    RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, SkyMeasurements.Submit(nearCamera)));
                 }
                 if (scripted || flight.Phase == ProceduralFlightPhase.Landed)
                     await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
                         pauseWhileMinimized: true).ConfigureAwait(false);
                 var orbitReceipt = orbitSubmit != 0 ? Stopwatch.GetTimestamp() : 0;
+                if (SkyMeasurements.Enabled && far && !orbitSkyChecked && flight.Phase == ProceduralFlightPhase.Orbit)
+                {
+                    orbitSkyChecked = true;
+                    await MeasureSkyPhaseAsync(terrain, renderer, camera, "orbit", true, presentationTick, token, texturedOrbit).ConfigureAwait(false);
+                }
                 if (sampleOrbit)
                 {
                     await warpReadback!.CompleteAsync(renderer, terrain, _published,
@@ -371,7 +390,7 @@ internal sealed partial class VolumeExploration
                 var forward = Vector3.Normalize(ProceduralGlobe.MarkerAimPoint(globe) - ProceduralGlobe.Float(camera.Position));
                 var tangent = ProceduralGlobe.Float(player.Heading);
                 var up = Vector3.Normalize(tangent - forward * Vector3.Dot(forward, tangent));
-                camera = ApplySky(camera with { Forward = forward, Up = up }, tick, 0);
+                camera = ApplySky(camera with { Forward = forward, Up = up }, tick, 0, Atmosphere(camera.Position, tick));
             }
             var frame = readback.MarkerOnly ? ProceduralGlobe.Frame(sequence, camera) :
                 GlobeFrame(sequence, camera, flight.State.Position, player.Heading, tick, 0);
@@ -402,7 +421,7 @@ internal sealed partial class VolumeExploration
         {
             Forward = forward,
             Up = up,
-        }, tick, 0), tick, 0);
+        }, tick, 0, Atmosphere(flightCamera.Position, tick)), tick, 0);
         var sequence = ++_sequence;
         readback.Arm("edited-final-approach", sequence);
         RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, camera));
@@ -637,8 +656,9 @@ internal sealed partial class VolumeExploration
         }
         var (forward, up) = ProceduralGlobe.ViewBasis(position, heading);
         var eye = FlightEye(position);
+        var weather = Atmosphere(eye, tick, fraction);
         return ApplySky(ApplyAtmosphere(new(view, eye, forward, up, ProceduralGlobe.FieldOfView,
-            0.08f, 210, Vector4.One, Sky), Atmosphere(eye, tick, fraction)), tick, fraction);
+            0.08f, 210, Vector4.One, Sky), weather), tick, fraction, weather);
     }
 
     private async Task<SkyPixels[]> CaptureFlightSkyAsync(D3D12Renderer renderer, VolumeViewIdentity view,
@@ -646,6 +666,7 @@ internal sealed partial class VolumeExploration
     {
         var camera = FlightCamera(view, position, heading, tick);
         var sky = camera.Sky ?? throw new InvalidOperationException("Missing sky for pixel fixture.");
+        using var captureWindow = new SkyPixels.CaptureWindow();
         var radial = Vector3.Normalize(sky.EyeMeters);
         var tangent = Vector3.Normalize(Vector3.Cross(radial, Vector3.UnitZ));
         // Keep the accepted eye fixed. Controlled lighting separates stars and the solar disk from the horizon.
@@ -668,7 +689,9 @@ internal sealed partial class VolumeExploration
             await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
             await Task.Delay(100, token).ConfigureAwait(false);
             var surface = renderer.Read();
-            captures[index] = SkyPixels.Capture(surface.AppliedWidth, index == 0 ? surface.AppliedHeight * 2 / 3 : surface.AppliedHeight);
+            captureWindow.RequireUnobstructed(surface.AppliedWidth, surface.AppliedHeight, upperTwoThirds: index == 0);
+            captures[index] = SkyPixels.Capture(surface.AppliedWidth, surface.AppliedHeight,
+                clientSurface: true, upperTwoThirds: index == 0);
         }
         return captures;
     }

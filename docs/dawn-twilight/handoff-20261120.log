@@ -1,0 +1,89 @@
+PACKAGE G twilight seed=42 tick=35500 tint=0.20887637
+WP11 FLIGHT launch tick=0 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=20.998899336795883,4104.27134737776,15.99911183959177 v=0,0,0 drift=0
+D3D12 adapter: NVIDIA RTX PRO 5000 Blackwell Generation Laptop GPU (10DE:2C38), driver 32.0.15.9653; software=False.
+D3D12 debug layer=True; DRED=True.
+D3D12 live-object report: warnings=2, errors=0, corruption=0, discarded=0, HRESULT=0x00000000, live child objects=1, retained session queue=True.
+PACKAGE G PIXELS to-orbit/horizon seed=42 pixels=315296 lit=249713 differing=0
+PACKAGE G PIXELS to-orbit/sun seed=42 pixels=472944 lit=58 differing=0
+PACKAGE G PIXELS to-orbit/stars seed=42 pixels=472944 lit=1022 differing=0
+WP11 FLIGHT far-ascent tick=659 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=21.32549375587879,4168.104793834006,16.24794491190132 v=0.05973177631361182,11.674679425796057,0.04550978383626614 drift=0
+PACKAGE G to-orbit seed=42 flightTick=659 present=16 radius=4170.791
+WP11 FLIGHT Injection tick=1440 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=21.774746185924243,4255.911961571815,16.590231417361675 v=1.557354778469744E-07,3.0438750400207937E-05,1.1865516569287138E-07 drift=0
+WP11 FLIGHT Orbit tick=2640 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=1916.7359957523604,3799.926276356675,14.812725653842666 v=175.6121214595214,-88.49506039144217,-0.34496802199964094 drift=0
+PACKAGE G orbit seed=42 flightTick=2640 present=33 radius=4258.600
+WP11 FLIGHT Brake tick=17759 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=-1875.5460524895716,3818.9654332090367,14.886943358775273 v=176.5461471844582,86.75401427742611,0.3381811433701862 drift=1.6442418942806398
+WP11 FLIGHT Descent tick=18957 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=21.774746185922158,4255.911961571815,16.590231417361675 v=0.00013706393801271588,-2.449087332934141E-07,-9.547562740408466E-10 drift=1.6442418942806398
+D3D12 adapter: NVIDIA RTX PRO 5000 Blackwell Generation Laptop GPU (10DE:2C38), driver 32.0.15.9653; software=False.
+D3D12 debug layer=True; DRED=True.
+D3D12 live-object report: warnings=7, errors=0, corruption=0, discarded=0, HRESULT=0x00000000, live child objects=1, retained session queue=True.
+PACKAGE G PIXELS to-ground/horizon seed=42 pixels=315296 lit=4496 differing=0
+PACKAGE G PIXELS to-ground/sun seed=42 pixels=472944 lit=58 differing=0
+PACKAGE G PIXELS to-ground/stars seed=42 pixels=472944 lit=1022 differing=0
+WP11 FLIGHT near-return tick=19745 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=21.324552264428437,4167.920777694802,16.247227587304035 v=-0.05876681195346123,-11.486075465618342,-0.04477457517282346 drift=1.6442418942806398
+PACKAGE G to-ground seed=42 flightTick=19797 present=184 radius=4160.826
+WP11 FLIGHT FinalApproach tick=20397 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=21.009131830304305,4106.271306006318,16.00690800097211 v=-1.536814409064391E-07,-3.0037335818633437E-05,-1.1709012426308618E-07 drift=1.6442418942806398
+WP11 FLIGHT Landed tick=20664 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=20.99889933679593,4104.271347377759,15.999111839591981 v=0,0,0 drift=1.6442418942806398
+WP11 FLIGHT touchdown tick=20664 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=20.99889933679593,4104.271347377759,15.999111839591981 v=0,0,0 drift=1.6442418942806398
+WP11 LANDED generation=2 tick=20664 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc craft=20.99889933679593,4104.271347377759,15.999111839591981 player=15.999968133015392,4104.491013356644,15.999968133015392
+PACKAGE E LANDED tick=56164 tint=0.1296 fog=0.42434335 band=83.86829,496.42026
+PACKAGE G landed seed=42 tick=56164 sun=-0.36877358,-0.92951924 eye=16.0064,4106.141,16.0064
+D3D12 presented WP11 exploration frame 192 at 944x501; native close requested.
+D3D12 adapter: NVIDIA RTX PRO 5000 Blackwell Generation Laptop GPU (10DE:2C38), driver 32.0.15.9653; software=False.
+D3D12 debug layer=True; DRED=True.
+D3D12 live-object report: warnings=11, errors=0, corruption=0, discarded=0, HRESULT=0x00000000, live child objects=0, retained session queue=False.
+D3D12 renderer stopped; native window closed; Core resources released.
+PASS: WYU WP11 exploration, rebase and native shutdown.
+WP11 LANDED generation=2 tick=20664 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc craft=20.99889933679593,4104.271347377759,15.999111839591981 player=15.999968133015392,4104.491013356644,15.999968133015392
+PACKAGE E LANDED tick=56164 tint=0.1296 fog=0.42434335 band=83.86829,496.42026
+PACKAGE G landed seed=42 tick=56164 sun=-0.36877358,-0.92951924 eye=16.0064,4106.141,16.0064
+D3D12 presented WP11 exploration frame 2 at 944x501; native close requested.
+D3D12 adapter: NVIDIA RTX PRO 5000 Blackwell Generation Laptop GPU (10DE:2C38), driver 32.0.15.9653; software=False.
+D3D12 debug layer=True; DRED=True.
+D3D12 live-object report: warnings=1, errors=0, corruption=0, discarded=0, HRESULT=0x00000000, live child objects=0, retained session queue=False.
+D3D12 renderer stopped; native window closed; Core resources released.
+PASS: WYU WP11 exploration, rebase and native shutdown.
+PACKAGE G twilight seed=20261111 tick=35500 tint=0.20882407
+WP11 FLIGHT launch tick=0 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=52.98953077690998,4133.682943348507,15.996715601545024 v=0,0,0 drift=0
+D3D12 adapter: NVIDIA RTX PRO 5000 Blackwell Generation Laptop GPU (10DE:2C38), driver 32.0.15.9653; software=False.
+D3D12 debug layer=True; DRED=True.
+D3D12 live-object report: warnings=3, errors=0, corruption=0, discarded=0, HRESULT=0x00000000, live child objects=1, retained session queue=True.
+PACKAGE G PIXELS to-orbit/horizon seed=20261111 pixels=315296 lit=244104 differing=0
+PACKAGE G PIXELS to-orbit/sun seed=20261111 pixels=472944 lit=58 differing=0
+PACKAGE G PIXELS to-orbit/stars seed=20261111 pixels=472944 lit=903 differing=0
+WP11 FLIGHT far-ascent tick=543 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=53.42508249123994,4167.6600830980915,16.128201893303956 v=0.10772377957422918,8.40347034007209,0.032520134451132776 drift=0
+PACKAGE G to-orbit seed=20261111 flightTick=543 present=17 radius=4170.633
+WP11 FLIGHT Injection tick=1440 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=54.552618196920854,4255.618497642508,16.468587394928825 v=3.1375819276036054E-07,2.4476030375808477E-05,9.471868622767943E-08 drift=0
+WP11 FLIGHT Orbit tick=2640 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=1945.9457177885356,3785.05174498481,14.64756662072545 v=174.92533467546764,-89.84496826832583,-0.3476861736411152 drift=0
+PACKAGE G orbit seed=20261111 flightTick=2640 present=35 radius=4258.600
+WP11 FLIGHT Brake tick=17759 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=-1846.077216150183,3833.2975950956506,14.834270621433244 v=177.2090798193429,85.39173423642558,0.3304528445996921 drift=1.6442418937394905
+WP11 FLIGHT Descent tick=18957 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=54.55261819691877,4255.618497642508,16.468587394928825 v=0.0001370579869330868,-1.3005046639591455E-06,-5.03277419738879E-09 drift=1.6442418937394905
+D3D12 adapter: NVIDIA RTX PRO 5000 Blackwell Generation Laptop GPU (10DE:2C38), driver 32.0.15.9653; software=False.
+D3D12 debug layer=True; DRED=True.
+D3D12 live-object report: warnings=8, errors=0, corruption=0, discarded=0, HRESULT=0x00000000, live child objects=1, retained session queue=True.
+PACKAGE G PIXELS to-ground/horizon seed=20261111 pixels=315296 lit=515 differing=0
+PACKAGE G PIXELS to-ground/sun seed=20261111 pixels=472944 lit=58 differing=0
+PACKAGE G PIXELS to-ground/stars seed=20261111 pixels=472944 lit=903 differing=0
+WP11 FLIGHT near-return tick=19864 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=53.42603295861319,4167.734228513448,16.128488824628608 v=-0.1045360023009323,-8.154793660978612,-0.03155779404750092 drift=1.6442418937394905
+PACKAGE G to-ground seed=20261111 flightTick=19917 present=187 radius=4163.827
+WP11 FLIGHT FinalApproach tick=20397 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=53.01516640576192,4135.6827640710835,16.004454599380985 v=-3.0861201594234444E-07,-2.4074670363916084E-05,-9.316515559021354E-08 drift=1.6442418937394905
+WP11 FLIGHT Landed tick=20664 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=52.989530776908865,4133.682943348507,15.996715601544638 v=0,0,0 drift=1.6442418937394905
+WP11 FLIGHT touchdown tick=20664 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc p=52.989530776908865,4133.682943348507,15.996715601544638 v=0,0,0 drift=1.6442418937394905
+WP11 LANDED generation=2 tick=20664 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc craft=52.989530776908865,4133.682943348507,15.996715601544638 player=47.99990509913738,4134.523484547611,15.999968366379127
+PACKAGE E LANDED tick=56164 tint=0.1296 fog=0.43457875 band=76.88162,453.42538
+PACKAGE G landed seed=20261111 tick=56164 sun=-0.36877358,-0.92951924 eye=48.01906,4136.1733,16.006353
+D3D12 presented WP11 exploration frame 194 at 944x501; native close requested.
+D3D12 adapter: NVIDIA RTX PRO 5000 Blackwell Generation Laptop GPU (10DE:2C38), driver 32.0.15.9653; software=False.
+D3D12 debug layer=True; DRED=True.
+D3D12 live-object report: warnings=12, errors=0, corruption=0, discarded=0, HRESULT=0x00000000, live child objects=0, retained session queue=False.
+D3D12 renderer stopped; native window closed; Core resources released.
+PASS: WYU WP11 exploration, rebase and native shutdown.
+WP11 LANDED generation=2 tick=20664 revision=1 overlay=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc craft=52.989530776908865,4133.682943348507,15.996715601544638 player=47.99990509913738,4134.523484547611,15.999968366379127
+PACKAGE E LANDED tick=56164 tint=0.1296 fog=0.43457875 band=76.88162,453.42538
+PACKAGE G landed seed=20261111 tick=56164 sun=-0.36877358,-0.92951924 eye=48.01906,4136.1733,16.006353
+D3D12 presented WP11 exploration frame 2 at 944x501; native close requested.
+D3D12 adapter: NVIDIA RTX PRO 5000 Blackwell Generation Laptop GPU (10DE:2C38), driver 32.0.15.9653; software=False.
+D3D12 debug layer=True; DRED=True.
+D3D12 live-object report: warnings=1, errors=0, corruption=0, discarded=0, HRESULT=0x00000000, live child objects=0, retained session queue=False.
+D3D12 renderer stopped; native window closed; Core resources released.
+PASS: WYU WP11 exploration, rebase and native shutdown.
+PASS: Package G two-seed sky route and Continue on hardware.

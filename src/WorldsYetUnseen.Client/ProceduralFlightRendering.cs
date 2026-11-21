@@ -18,7 +18,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     private readonly ProcessResourceBudget _budget = new(new ProcessResourceLimits(1, quota));
     private RuntimeSafetyAuthority? _runtime;
     private readonly D3D12DeviceSession _device = new(
-        new D3D12DiagnosticsOptions(!measure, true) { EnableResourceSnapshots = qualifyR09 }, warp, reuseDirectQueue: true);
+        new D3D12DiagnosticsOptions(!measure, true) { EnableResourceSnapshots = qualifyR09 || SkyMeasurements.Enabled }, warp, reuseDirectQueue: true);
     internal D3D12Renderer? Current { get; private set; }
     internal Wp11WarpReadback? WarpReadback { get; init; }
     internal R09NativeUploadGate? R09UploadGate { get; private set; }
@@ -32,6 +32,11 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     internal OrbitTerrainMaterials? OrbitMaterials { private get; set; }
 
     internal bool BuildsOrbitalMaterials => OrbitMaterials is not null;
+
+    internal bool MaterialsResident(D3D12Renderer renderer, VolumeViewIdentity? nearView) =>
+        ReferenceEquals(renderer, Current) && OrbitMaterials is { } materials &&
+        _materialStream is { } stream && _materialCut is { } cut &&
+        (!nearView.HasValue || nearView.Value == cut.View) && materials.IsResident(stream, cut, _orbitalMaterialCut);
 
     internal void SetBiomes(ReferenceBiomes biomes)
     {
@@ -81,7 +86,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     // without gating a protected terrain frame on optional upload admission.
     internal void RetryMaterials(D3D12Renderer renderer, ulong sequence)
     {
-        if (_materialRequestsPending && (sequence & 15) == 0 && ReferenceEquals(renderer, Current) &&
+        if (_materialRequestsPending && sequence % OrbitTerrainMaterials.RetryFrameInterval == 0 && ReferenceEquals(renderer, Current) &&
             OrbitMaterials is { } materials && _materialStream is { } stream && _materialCut is { } cut)
             QueueMaterialCut(materials, stream, cut);
     }
@@ -115,17 +120,25 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     private async Task StartAsync(Func<IRuntimeOwnership, D3D12Renderer> create, CancellationToken token,
         Action? onStarted = null)
     {
+        SkyHandoffDiagnostics.Mark("owner-start-entry");
         if (_runtime is not null || Current is not null)
             throw new InvalidOperationException("The previous graphics owner must settle before handoff.");
         using var reservation = _budget.TryReserveRuntime(quota)
             ?? throw new InvalidOperationException("Graphics runtime admission failed.");
         var clock = TimeProvider.System;
         _runtime = RuntimeSafetyAuthority.Create(clock, timing, reservation);
+        SkyHandoffDiagnostics.Mark("owner-create-begin");
         Current = create(_runtime.RuntimeOwnership);
+        SkyHandoffDiagnostics.Mark("owner-create-end");
+        SkyMeasurements.Attach(Current);
         WarpReadback?.Attach(Current);
         var context = new EngineModuleContext(clock, timing, _runtime.Reporter, _runtime.StopControl);
+        SkyHandoffDiagnostics.Mark("renderer-initialize-begin");
         await Current.InitializeAsync(context, token).ConfigureAwait(false);
+        SkyHandoffDiagnostics.Mark("renderer-initialize-end");
+        SkyHandoffDiagnostics.Mark("renderer-start-begin");
         await Current.StartAsync(token).ConfigureAwait(false);
+        SkyHandoffDiagnostics.Mark("renderer-start-end");
         onStarted?.Invoke();
     }
 
@@ -133,12 +146,14 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     {
         if (_runtime is not { } runtime)
             return;
+        SkyHandoffDiagnostics.Mark("previous-stop-begin");
         if (Props is { } props)
             await props.StopAsync().ConfigureAwait(false);
         var renderer = Current;
         var deadline = runtime.StopControl.RequestStop(HostStopReason.ExternalCancellation);
         if (renderer is not null)
             await renderer.DisposeAsync().ConfigureAwait(false);
+        SkyHandoffDiagnostics.Mark("previous-renderer-disposed");
         var settlement = runtime.SettleStop();
         while (settlement == ShutdownSettlement.Pending &&
             deadline.GetRemainingForSettlement(TimeProvider.System) > TimeSpan.Zero)
@@ -150,6 +165,9 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
             renderer is not null && renderer.Read() is not { Lifecycle: RendererLifecycle.Stopped, FirstFault: null,
                 FirstCleanupFault: null, IncompleteCleanup: false })
             throw new InvalidOperationException("The planet renderer did not settle for handoff.");
+        SkyHandoffDiagnostics.Mark("previous-runtime-settled");
+        if (renderer is not null)
+            SkyMeasurements.Flush(renderer);
         _runtime = null;
         Current = null;
         R09UploadGate = null;
@@ -160,6 +178,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
         if (qualifyHandoff && renderer is not null)
             DesktopSmoke.VerifyAdapterSettlement(renderer, requireDebugLayer: !measure, requireNvidia: !warp,
                 useWarp: warp, allowRetainedSessionQueue: true);
+        SkyHandoffDiagnostics.Mark("previous-stop-end");
     }
 }
 

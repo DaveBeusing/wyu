@@ -143,8 +143,14 @@ internal static class Program
         }
 
         using var stop = new CancellationTokenSource();
+        // The complete PBR/shadow scene is slower under the software adapter.
+        // This is a bounded functional smoke allowance, not a hardware budget.
+        var softwareCombinedSmoke = SkyMeasurements.Enabled && SkyMeasurements.Smoke && SkyMeasurements.OrbitCombined &&
+            flightSmoke && args.Length >= 4 && args[3] == "warp";
+        var skyMinutes = SkyMeasurements.Smoke ? softwareCombinedSmoke ? 6 : 3 : 10;
         if (scripted)
-            stop.CancelAfter(TimeSpan.FromMinutes(Environment.GetEnvironmentVariable("WYU_PACKAGE_E_TIMESTAMP_PAIRS") == "1" ? 6 : 3));
+            stop.CancelAfter(TimeSpan.FromMinutes(SkyMeasurements.Enabled ? skyMinutes :
+                Environment.GetEnvironmentVariable("WYU_PACKAGE_E_TIMESTAMP_PAIRS") == "1" ? 6 : 3));
         var fixture = playtest ? Path.GetFullPath(args[1]) : null;
         if (fixture is not null && !File.Exists(Path.Combine(fixture, "wyu-planet-playtest.fixture")))
             return 2;

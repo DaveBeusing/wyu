@@ -25,16 +25,12 @@ internal static class ReferenceSunlight
         var sun = camera.Sky?.SunDirection ??
             (orbitDemo ? OrbitDemoPreset.SunDirection(tick, fraction) : ReferenceWeather.SunDirection(tick, fraction));
         var up = Vector3.Normalize(ProceduralGlobe.Float(camera.Position));
-        var horizon = Math.Clamp(Vector3.Dot(sun, up) / 0.12f, 0, 1);
-        var direct = 0.65f * camera.Tint.X * horizon * horizon * (3 - 2 * horizon);
-        var ambient = camera.Tint.X - direct;
+        var light = ReferenceDaylight.Evaluate(Vector3.Dot(sun, up));
         return camera with
         {
             Tint = Vector4.One,
-            Sunlight = orbitDemo
-                ? new(sun, direct * new Vector3(1f, 0.75f, 0.50f), ambient * new Vector3(0.72f, 0.85f, 1f))
-                : new(sun, new(direct), new(ambient)),
-            TerrainShadows = direct > 0,
+            Sunlight = new(sun, light.Direct, light.Ambient),
+            TerrainShadows = light.Direct.X > 0,
         };
     }
 }
