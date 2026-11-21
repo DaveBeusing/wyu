@@ -112,6 +112,10 @@ remains historical evidence, not a reference-machine acceptance result.
 
 ## Previous frozen kit
 
+The command and hash below are retained for the already evaluated 15:09 archive.
+Use the [new pinned candidate and scheduling command](reference-probe-2026-11-21-150957.md#next-reference-run)
+for the next reference run.
+
 Run the frozen diagnostic kit on the designated i9-10850K/RTX 5070:
 
 ```powershell
