@@ -10,6 +10,7 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
     private const double SlowPollMilliseconds = 33;
     private const double WarmupSeconds = 1;
     private const double FinalPollGraceSeconds = 0.25;
+    private const int RepeatSampleSeconds = 5;
     private int _seconds;
     private object? _renderer;
     private RendererSnapshot _baseline;
@@ -23,13 +24,25 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
     private Measurement? _last;
     private Measurement? _a;
     private Measurement? _b;
+    private string? _repeatSummary;
     private Comparison? _comparison;
 
-    private sealed class Comparison(Func<ulong> applyB, Action restore)
+    private sealed class Comparison(int pairs, Func<ulong> applyA, Func<ulong> applyB, Action restore)
     {
-        internal Func<ulong> ApplyB { get; } = applyB;
         internal Action Restore { get; } = restore;
-        internal Measurement? First { get; set; }
+        internal Measurement[] A { get; } = new Measurement[pairs];
+        internal Measurement[] B { get; } = new Measurement[pairs];
+        internal int CompletedSamples { get; private set; }
+        internal int Pair => CompletedSamples / 2;
+        internal int Pairs => A.Length;
+        // Even pairs run A then B, odd pairs B then A.
+        internal bool IsSampleA => CompletedSamples % 2 == Pair % 2;
+        internal Func<ulong> Apply => IsSampleA ? applyA : applyB;
+        internal void Record(Measurement measurement)
+        {
+            (IsSampleA ? A : B)[Pair] = measurement;
+            CompletedSamples++;
+        }
         internal long AppliedAt { get; set; }
         internal ulong MinimumSequence { get; set; }
         internal long? WarmupStarted { get; set; }
@@ -47,9 +60,16 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
 
     internal bool IsComparing => _comparison is not null;
 
-    internal string State() => _comparison is { } comparison
-        ? $"A/B {(comparison.Warming ? "warmup" : "sampling")} {(comparison.First.HasValue ? "B" : "A")}."
-        : _seconds == 0 ? "Profile idle." : "Profile running.";
+    internal string State()
+    {
+        if (_comparison is not { } comparison)
+            return _seconds == 0 ? "Profile idle." : "Profile running.";
+
+        var phase = comparison.Warming ? "warmup" : "sampling";
+        var sample = comparison.IsSampleA ? 'A' : 'B';
+        return comparison.Pairs == 1 ? $"A/B {phase} {sample}."
+            : FormattableString.Invariant($"A/B {phase} {sample} {comparison.Pair + 1}/{comparison.Pairs}.");
+    }
 
     internal string Handle(string value)
     {
@@ -80,21 +100,37 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
         if (seconds is not (>= 1 and <= 30))
             return "A/B duration: 1–30 s.";
 
-        var comparison = new Comparison(applyB, restore);
-        _comparison = comparison;
-        _seconds = seconds;
-        ApplyComparisonSettings(comparison, applyA);
+        BeginComparison(seconds, 1, applyA, applyB, restore);
         return FormattableString.Invariant($"A/B sampling {seconds} s each.\nKeep console open.\nEsc cancels.");
     }
 
-    private void ApplyComparisonSettings(Comparison comparison, Func<ulong> apply)
+    internal string StartRepeatedComparison(int count, Func<ulong> applyA, Func<ulong> applyB, Action restore)
+    {
+        if (_seconds != 0)
+            return State();
+        if (count is not (>= 2 and <= 6))
+            return "A/B repeats: 2–6.";
+
+        BeginComparison(RepeatSampleSeconds, count, applyA, applyB, restore);
+        return FormattableString.Invariant($"A/B repeat {count} pairs.\n{RepeatSampleSeconds} s per sample.\nKeep console open.\nEsc cancels.");
+    }
+
+    private void BeginComparison(int seconds, int pairs, Func<ulong> applyA, Func<ulong> applyB, Action restore)
+    {
+        var comparison = new Comparison(pairs, applyA, applyB, restore);
+        _comparison = comparison;
+        _seconds = seconds;
+        ApplyComparisonSettings(comparison);
+    }
+
+    private void ApplyComparisonSettings(Comparison comparison)
     {
         comparison.Warming = true;
         comparison.AppliedAt = clock.GetTimestamp();
         comparison.WarmupStarted = null;
         try
         {
-            comparison.MinimumSequence = apply();
+            comparison.MinimumSequence = comparison.Apply();
         }
         catch
         {
@@ -111,6 +147,7 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
             return "Complete a profile first.";
 
         slot = result;
+        _repeatSummary = null;
         return FormattableString.Invariant($"Kept {result.Seconds:0.0} s in {name}.");
     }
 
@@ -120,13 +157,31 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
             return _a is null && _b is null ? "Keep profiles in A and B."
                 : _a is null ? "Slot A is empty." : "Slot B is empty.";
 
-        return DescribeComparison(a, b);
+        return _repeatSummary ?? DescribeComparison(a, b);
     }
 
-    internal string? ReadComparisonReport(string build) =>
-        _a is { } a && _b is { } b
-            ? $"WYU A/B performance report\nBuild {build}\n\n{DescribeComparison(a, b)}\n\nA at start\n{a.StartContext}\n\nB at start\n{b.StartContext}"
-            : null;
+    internal string? ReadComparisonReport(string build)
+    {
+        if (_a is not { } a || _b is not { } b)
+            return null;
+
+        var comparison = DescribeComparison(a, b);
+        if (_repeatSummary is { } summary)
+            comparison = $"{summary}\n\nLast pair\n{comparison}";
+        return $"WYU A/B performance report\nBuild {build}\n\n{comparison}\n\nA at start\n{a.StartContext}\n\nB at start\n{b.StartContext}";
+    }
+
+    private static string DescribeRepeat(Comparison comparison) =>
+        FormattableString.Invariant(
+            $"A/B repeat {comparison.Pairs} pairs\nObserved FPS\n{DescribeFps("A", comparison.A)}\n{DescribeFps("B", comparison.B)}");
+
+    private static string DescribeFps(string label, Measurement[] samples)
+    {
+        var values = samples.Select(sample => sample.ObservedFps).Order().ToArray();
+        var median = (values[(values.Length - 1) / 2] + values[values.Length / 2]) / 2;
+        return FormattableString.Invariant(
+            $"{label} median {median:0.0}\n{label} min–max {values[0]:0.0}–{values[^1]:0.0}");
+    }
 
     private static string DescribeComparison(Measurement a, Measurement b) =>
         FormattableString.Invariant(
@@ -214,17 +269,20 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
         if (_observedPresents == 0)
             return Interrupt("A/B sample stopped.\nNo observed presents.");
 
-        if (comparison.First is { } first)
+        comparison.Record(measurement);
+        if (comparison.Pair < comparison.Pairs)
         {
-            var result = DescribeComparison(first, measurement);
-            Interrupt(result);
-            (_a, _b, _last) = (first, measurement, measurement);
-            return result;
+            ApplyComparisonSettings(comparison);
+            return null;
         }
 
-        comparison.First = measurement;
-        ApplyComparisonSettings(comparison, comparison.ApplyB);
-        return null;
+        var a = comparison.A[^1];
+        var b = comparison.B[^1];
+        var summary = comparison.Pairs == 1 ? null : DescribeRepeat(comparison);
+        var result = summary ?? DescribeComparison(a, b);
+        Interrupt(result);
+        (_a, _b, _last, _repeatSummary) = (a, b, measurement, summary);
+        return result;
     }
 
     private void BeginMeasurement(long now, RendererSnapshot snapshot)

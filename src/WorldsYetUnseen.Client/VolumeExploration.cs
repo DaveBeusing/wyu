@@ -47,6 +47,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
     private readonly string? _testBuild = freeTestWorld ? ClientBuild : null;
     private VolumeStreamingSelection? _selection;
+    private VolumeResources _streamingBudget;
     private VolumePublicationInfo _published;
     private int _transitions, _views, _windows, _fineBricks;
 
@@ -63,7 +64,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var baseline = unit.Retained + unit.Retained;
         baseline = baseline with { LeaseSlots = baseline.LeaseSlots + 16, CpuBytes = baseline.CpuBytes + 32L * OverlayLimit };
         var movement = diagnostics?.LimitPlanetStreaming == true ? unit with { CpuBytes = unit.CpuBytes - 1 } : unit;
-        var limits = new VolumeStreamingLimits(baseline + unit + unit + unit + unit,
+        _streamingBudget = baseline + unit + unit + unit + unit;
+        var limits = new VolumeStreamingLimits(_streamingBudget,
             baseline, movement, unit, unit, unit, 12, 12, 256);
         var terrain = restore && slot?.Checkpoint is { } checkpoint
             ? checkpoint.RestoreTerrain(world, Field, limits, OverlayLimit,
@@ -219,7 +221,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         using var profile = !scripted && overlay is not null
             ? new ConsoleFrameProfile(TimeProvider.System,
                 () => ReadProfileContext((comparisonView?.Pose ?? state).Position, comparisonView?.LiveTick)) : null;
-        var terminal = profile is null ? null : CreateConsole(() => state.Position, profile, overlay!.TryCopyText);
+        var terminal = profile is null || overlay is null ? null : CreateConsole(() => state.Position, profile, overlay.TryCopyText,
+            overlay.ReadPresetText, () => InspectAim(terrain, state), () => ReadStreamStatus(terrain));
         void ReportProfile(string? result)
         {
             if (result is null || terminal is null)

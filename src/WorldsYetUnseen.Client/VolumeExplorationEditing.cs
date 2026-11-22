@@ -125,22 +125,30 @@ internal sealed partial class VolumeExploration
     private LatticeCoordinate? Aim(VolumeStreamingCoordinator terrain, PlanetWalkState state, VolumeBrushOperation operation, out ushort material)
     {
         material = 0;
+        if (TraceTerrainAim(terrain, state, out _) is not { } first || first.Distance < 3.5)
+            return null;
+        material = first.Material;
+        var offset = operation == VolumeBrushOperation.Add ? 0.75 : -0.75;
+        return Descriptor.SampleAt(new PlanetVector(first.Position.X + offset * first.Normal.X,
+            first.Position.Y + offset * first.Normal.Y, first.Position.Z + offset * first.Normal.Z)).Vertex;
+    }
+
+    private VolumeRayHit? TraceTerrainAim(VolumeStreamingCoordinator terrain, PlanetWalkState state, out VolumeQueryStatus status)
+    {
         using var lease = terrain.TryRead();
         if (lease is null || lease.Info != _published || terrain.Statistics.MovementHeld)
+        {
+            status = VolumeQueryStatus.CoverageUnavailable;
             return null;
+        }
         var camera = Camera(terrain.View, state.Position, state.Heading);
         var start = camera.Position;
         var end = new PlanetVector(start.X + camera.Forward.X * 10, start.Y + camera.Forward.Y * 10,
             start.Z + camera.Forward.Z * 10);
         Span<VolumeRayHit> hits = stackalloc VolumeRayHit[8];
         var hit = lease.Raycast(start, end, hits);
-        if (hit.Status != VolumeQueryStatus.Contact || hits[0].Distance < 3.5)
-            return null;
-        var first = hits[0];
-        material = first.Material;
-        var offset = operation == VolumeBrushOperation.Add ? 0.75 : -0.75;
-        return Descriptor.SampleAt(new PlanetVector(first.Position.X + offset * first.Normal.X,
-            first.Position.Y + offset * first.Normal.Y, first.Position.Z + offset * first.Normal.Z)).Vertex;
+        status = hit.Status;
+        return status == VolumeQueryStatus.Contact && hit.Count > 0 ? hits[0] : null;
     }
 
     private async Task<bool> EditAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetWalkState state,
