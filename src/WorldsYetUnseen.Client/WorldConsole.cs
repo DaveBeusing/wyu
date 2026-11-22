@@ -230,7 +230,8 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
         var values = name == "help" ? CommandNames()
             : command?.CompleteValue?.Invoke(line[(name.Length + 1)..].TrimStart()) ?? command?.Values ?? [];
         return values.Where(candidate => candidate.StartsWith(value, StringComparison.Ordinal))
-            .Select(candidate => $"{name} {candidate}").ToArray();
+            .Select(candidate => $"{name} {candidate}")
+            .Where(candidate => candidate.Length <= LineLimit).ToArray();
     }
 
     private ConsoleView CreateView()
