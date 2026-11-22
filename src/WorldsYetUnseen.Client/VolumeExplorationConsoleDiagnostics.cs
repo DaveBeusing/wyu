@@ -7,7 +7,7 @@ internal sealed partial class VolumeExploration
 {
     private string InspectAim(VolumeStreamingCoordinator terrain, PlanetWalkState state)
     {
-        if (TraceTerrainAim(terrain, state, out var status) is not { } hit)
+        if (TraceTerrainAim(terrain, state, out var status, out _) is not { } hit)
             return status switch
             {
                 VolumeQueryStatus.Clear => "No terrain hit (10 m).",
