@@ -39,12 +39,43 @@ without arguments. The sidebar includes these session entry points.
 | **Esc**, **arrow keys**, **Enter** | Toggle the sidebar and navigate its options in the rescue mission |
 | **F1** | Toggle diagnostics. In Free Test World, this includes build, profile, seed, generator version, and position. |
 | **F2** | Open setup actions in Free Test World |
+| **F3** | Open or close the console while exploring a planet on foot |
 | **F5**, **F10** | Save or save and exit in Free Test World |
 | **F6** | Request flight on supported worlds, subject to the launch-site check |
 
 In Free Test World, Ember Ridges and Ember Caves can grant ore through the
 setup menu. **New Far Horizon World** exposes time and fog controls and includes
 biomes, vegetation, sky, and terrain shadows.
+
+In the world console, type a command and press **Enter**. **Tab** completes
+commands and supported values, **Up/Down** recalls earlier input, and **Esc**
+returns control to the game. Type **help** for the commands available in the
+current world. **help <command>** shows usage, an example and the current value
+where available. **status** shows the world, seed, generator, position and
+presentation settings. **reset** restores the default field of view, live time
+and automatic fog where available. Use **fov** to adjust the vertical field of view, **stats** to
+toggle F1 diagnostics, and **time** and **fog** where the world supports weather.
+Use **time live** to return to the world clock. Console overrides apply during
+the current exploration session and are left out of the save.
+
+**profile 10** targets a ten-second sample of the on-foot view. The report gives
+the actual sampled span. If the final poll is more than 250 ms late, the run
+exits without a report. Close the console to
+move during the measurement, then reopen it for the report. Use **profile** to
+show the last completed result or **profile cancel** to stop a run. Observed
+FPS counts at most one acknowledged sequence advance per poll. The report also
+shows poll gaps and renderer replacement and skip counter deltas.
+
+Use **profile keep a** or **profile keep b** to copy the last completed
+measurement into that session's slot. A new measurement leaves the two slots
+available. **profile compare** shows both measured durations and rates side by
+side. The count-based metrics are shown per second, including poll gaps over
+33 ms, so you can compare samples of different lengths.
+
+**report copy** copies the A/B comparison to the Windows clipboard. It includes
+the client build and the world, seed, generator, position and presentation
+settings recorded at the start of each measurement. Keep a profile in both A
+and B before copying.
 
 ## Build and verification
 

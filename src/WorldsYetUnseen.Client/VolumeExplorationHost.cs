@@ -14,7 +14,8 @@ internal static partial class GameHost
 {
     internal static async Task RunExplorationAsync(ulong? smokeSeed, bool useWarp, AlphaDiagnostics? diagnostics,
         CancellationToken cancellationToken, string? settingsDirectory = null,
-        string? saveRoot = null, string? saveSmoke = null, bool flightSmoke = false, string? caveSmoke = null, bool freeTestWorld = false)
+        string? saveRoot = null, string? saveSmoke = null, bool flightSmoke = false, string? caveSmoke = null, bool freeTestWorld = false,
+        bool constructionContinue = false, bool constructionMotion = false, bool constructionMeasure = false)
     {
         var clock = TimeProvider.System;
         var timeout = TimeSpan.FromSeconds(10);
@@ -41,6 +42,7 @@ internal static partial class GameHost
             Environment.GetEnvironmentVariable("WYU_R09_LATENCY") == "1";
         using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure, measureR09)
         {
+            ConstructionVisuals = scripted ? null : new ConstructionVisuals(),
             WarpReadback = readbackSmoke
                 ? new Wp11WarpReadback(saveRoot!, markerOnly: saveSmoke == "marker-readback") : null,
         };
@@ -66,7 +68,16 @@ internal static partial class GameHost
                 overlay = new AlphaOverlay(activateOwner: true);
                 AlphaWindowSize.TryApply(settings.Size);
             }
-            if (!scripted)
+            if (constructionContinue)
+            {
+                if (saveRoot is null || renderHost.ConstructionVisuals is null)
+                    throw new InvalidOperationException("Construction proof needs a fixture and an active construction renderer.");
+                var selected = VolumeWorldSlot.List(saveRoot).Single();
+                slot = VolumeWorldSlot.Open(saveRoot, selected, out var loaded);
+                if (slot is null || loaded != VolumeSlotStatus.Loaded || slot.NeedsInventoryImport)
+                    throw new InvalidDataException($"Construction proof could not continue the fixture ({loaded}).");
+            }
+            else if (!scripted)
                 slot = await ChooseVolumeSlotAsync(window, overlay!, saveRoot ?? (freeTestWorld ? Path.Combine(FreeTestWorldRoot(), "v2") : DefaultVolumeRoot()),
                     token, freeTestWorld).ConfigureAwait(false);
             else if (caveSmoke is not null)
@@ -86,23 +97,13 @@ internal static partial class GameHost
             diagnostics?.Enter("PlanetTerrain");
             if (!runtime.TryAllocateWorldId(out var id))
                 throw new InvalidOperationException("Could not allocate an exploration world.");
-            IWorldStateRoot initial;
-            if (slot?.Cave is not null)
-            {
-                var ore = 0;
-                ulong inventoryRevision = 1;
-                if (slot.Checkpoint is { } caveCheckpoint &&
-                    CaveInventory.Read(caveCheckpoint, out ore, out inventoryRevision) != SaveGameValidation.Valid)
-                    throw new InvalidDataException("The cave inventory checkpoint is invalid.");
-                initial = new CaveInventory(id, ore, inventoryRevision);
-            }
-            else
-            {
-                ProceduralLanding? landed = null;
-                if (slot?.Checkpoint is { } checkpoint && ProceduralLanding.Read(checkpoint, out landed) != SaveGameValidation.Valid)
-                    throw new InvalidDataException("The procedural checkpoint payload is invalid.");
-                initial = new ExplorationRoot(id, landed);
-            }
+            InventoryState? inventory = scripted ? InventoryState.Empty : InventoryState.Starter;
+            ConstructionState? construction = ConstructionState.Empty;
+            ProceduralLanding? landed = null;
+            if (slot?.Checkpoint is { } checkpoint &&
+                InventoryCheckpoint.Read(checkpoint, out inventory, out construction, out landed, out _) != SaveGameValidation.Valid)
+                throw new InvalidDataException("The game checkpoint could not be restored.");
+            var initial = new CaveInventory(id, inventory!, landed) { Construction = construction! };
             var world = runtime.OpenWorld(id, WorldQuota,
                 new BarrierSupervisorPolicy(WorldQuota.Diagnostics.RequiredEvidenceRecords), initial,
                 measureR09 ? new R09JobScope() : new ExplorationJobScope(), slot?.Checkpoint?.Tick ?? 0);
@@ -132,6 +133,7 @@ internal static partial class GameHost
             }
             exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld, orbitDemo)
             {
+                ConstructionRenderer = renderHost.ConstructionVisuals,
                 VerifyTerrainRetries = retrySmoke == "1",
                 R09RenderHost = measureR09 ? renderHost : null,
                 OrbitMaterialHost = renderHost.BuildsOrbitalMaterials ? renderHost : null,
@@ -165,6 +167,20 @@ internal static partial class GameHost
             await renderHost.NearAsync(terrain, token).ConfigureAwait(false);
             renderer = renderHost.Active;
             diagnostics?.Write("adapter", renderer.ReadDiagnostics().Adapter?.Description);
+            if (!scripted && slot?.NeedsInventoryImport == true)
+            {
+                var imported = await exploration.ImportInventoryAsync(terrain, renderer, token).ConfigureAwait(false);
+                if (imported.Slot is not { } importedSlot)
+                {
+                    overlay!.Menu = $"Import stopped\n{imported.Reason ?? imported.Status.ToString()}\nThe original slot was kept.\nEsc to return";
+                    while (!PrototypeMenu.Pressed(window.Capture(), InputControl.Escape))
+                        await Task.Delay(16, token).ConfigureAwait(false);
+                    reason = HostStopReason.ExternalCancellation;
+                    return;
+                }
+                slot.Dispose();
+                slot = importedSlot;
+            }
             diagnostics?.Enter("PlanetTerrain");
             reason = HostStopReason.RuntimeFault;
             if (caveSmoke is not null)
@@ -172,7 +188,8 @@ internal static partial class GameHost
             else if (flightSmoke)
                 await exploration.RunFlightSmokeAsync(terrain, renderHost, saveSmoke!, token).ConfigureAwait(false);
             else if (saveSmoke is null)
-                await exploration.ExploreAsync(terrain, renderHost, scripted, token).ConfigureAwait(false);
+                await exploration.ExploreAsync(terrain, renderHost, scripted, token, constructionContinue, constructionMotion, constructionMeasure)
+                    .ConfigureAwait(false);
             else
                 await exploration.RunSaveSmokeAsync(terrain, renderer, saveSmoke, token).ConfigureAwait(false);
             if (scripted)
@@ -343,7 +360,39 @@ internal static partial class GameHost
                 return (loaded, status);
             }).ConfigureAwait(false);
             if (opened.loaded is { } slot)
-                return slot;
+            {
+                if (!slot.NeedsInventoryImport)
+                    return slot;
+                if (slot.InventoryImportError is { } importError)
+                {
+                    notice = $"{importError}\nThe original slot was kept.";
+                    slot.Dispose();
+                    continue;
+                }
+                overlay.Menu = "Import saved world\n\nImport the validated state into a new slot. The original slot will be kept.\n\nEnter to import\nEsc to go back";
+                var accepted = false;
+                try
+                {
+                    while (true)
+                    {
+                        await Task.Delay(16, token).ConfigureAwait(false);
+                        var confirmation = window.Capture();
+                        if (PrototypeMenu.Pressed(confirmation, InputControl.Enter))
+                        {
+                            accepted = true;
+                            return slot;
+                        }
+                        if (PrototypeMenu.Pressed(confirmation, InputControl.Escape))
+                            break;
+                    }
+                }
+                finally
+                {
+                    if (!accepted)
+                        slot.Dispose();
+                }
+                continue;
+            }
             notice = opened.status switch
             {
                 VolumeSlotStatus.Incompatible => "This slot has an incompatible world format. Its files were kept.",
@@ -359,8 +408,6 @@ internal static partial class GameHost
                 : "\nChoose a new world for a separate slot.";
         }
     }
-
-    internal sealed record ExplorationRoot(WorldId World, ProceduralLanding? Landing = null) : IWorldStateRoot;
 
     private sealed class ExplorationJobScope : IJobScopePolicy
     {

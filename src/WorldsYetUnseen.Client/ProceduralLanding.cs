@@ -34,7 +34,9 @@ internal readonly record struct ProceduralLanding(PlanetVector Foot, ulong Revis
         Read(checkpoint, out landed, out _);
 
     internal static SaveGameValidation Read(VolumeCheckpoint checkpoint, out ProceduralLanding? landed,
-        out ulong environmentTick) => Read(checkpoint, checkpoint.Game, out landed, out environmentTick);
+        out ulong environmentTick) => InventoryCheckpoint.IsCurrent(checkpoint.Game)
+        ? InventoryCheckpoint.Read(checkpoint, out _, out landed, out environmentTick)
+        : Read(checkpoint, checkpoint.Game, out landed, out environmentTick);
 
     internal static SaveGameValidation Read(VolumeCheckpoint checkpoint, ReadOnlySpan<byte> bytes,
         out ProceduralLanding? landed, out ulong environmentTick)

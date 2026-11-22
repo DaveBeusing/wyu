@@ -480,11 +480,15 @@ internal sealed partial class VolumeExploration
     {
         var begin = await BeginAsync(token).ConfigureAwait(false);
         terrain.BeginTick(begin);
-        var draft = terrain.TryPlanMovement(player, 0, 0, out var status)
-            ?? throw new InvalidOperationException($"Ground return could not be admitted ({status}).");
+        var state = ReadInventory() ?? throw new InvalidOperationException("The inventory root is unavailable on landing.");
+        var draft = state.Construction.Blocks.IsEmpty
+            ? terrain.TryPlanMovement(player, 0, 0, out var status)
+            : terrain.TryPlanMovementWithStaticObstacles(player, 0, 0, Collision(state.Construction).Query, out status);
+        if (draft is null)
+            throw new InvalidOperationException($"Ground return could not be admitted ({status}).");
         var candidates = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
-        var state = Connected ? ((VolumeWorldRoot)_ports.Committed.Read().Root).State :
-            new GameHost.ExplorationRoot(begin.World, landing);
+        if (!Connected)
+            state = state with { Landing = landing };
         var prepared = terrain.TryPrepareMovement(draft, candidates, [], state)
             ?? throw new InvalidOperationException("Landing state could not be prepared.");
         if (Finish(candidates, prepared).Status != BarrierStatus.Committed)
@@ -595,7 +599,11 @@ internal sealed partial class VolumeExploration
         blocked = "landing footprint lacks full collision detail";
         if (!HasFineLandingCoverage(pad))
             return false;
-        var clear = SweepGear(lease, Add(pad, Scale(up, 0.04)), outer);
+        var corridorStart = Add(pad, Scale(up, 0.04));
+        blocked = "a constructed block intersects the landing footprint or flight corridor";
+        if (!ConstructionGearClear(pad, outer))
+            return false;
+        var clear = SweepGear(lease, corridorStart, outer);
         blocked = $"takeoff corridor {clear.Status}";
         return clear.Status == VolumeQueryStatus.Clear;
     }
@@ -622,6 +630,8 @@ internal sealed partial class VolumeExploration
         using var lease = terrain.TryRead();
         if (lease is null || lease.Info != _published || lease.Info.TerrainRevision != revision)
             throw new InvalidOperationException("Descent held for missing landing coverage.");
+        if (!ConstructionGearClear(previous.Position, next.Position))
+            throw new InvalidOperationException("Descent held by a constructed block.");
         var result = SweepGear(lease, previous.Position, next.Position);
         if (result.Status == VolumeQueryStatus.Clear)
             return next;
@@ -638,10 +648,19 @@ internal sealed partial class VolumeExploration
 
     private static VolumeSweepResult SweepGear(VolumeStreamingLease lease, PlanetVector start, PlanetVector end)
     {
-        var up = Unit(start);
-        return lease.Sweep(new VolumeCapsule(Add(start, Scale(up, GearRadius)),
-            Add(start, Scale(up, GearHeight - GearRadius)), GearRadius), Subtract(end, start), FlightQueries);
+        return lease.Sweep(GearBody(start, Unit(start)), Subtract(end, start), FlightQueries);
     }
+
+    private bool ConstructionGearClear(PlanetVector start, PlanetVector end)
+    {
+        if (ReadInventory()?.Construction is not { Blocks.IsEmpty: false } state)
+            return true;
+        var up = Unit(start);
+        return Collision(state).Sweep(GearBody(start, up), GearBody(end, up)).Status == VolumeQueryStatus.Clear;
+    }
+
+    private static VolumeCapsule GearBody(PlanetVector foot, PlanetVector up) =>
+        new(Add(foot, Scale(up, GearRadius)), Add(foot, Scale(up, GearHeight - GearRadius)), GearRadius);
 
     private VolumeCamera FlightCamera(VolumeViewIdentity view, PlanetVector position, PlanetVector heading, ulong tick,
         double fraction = 0)

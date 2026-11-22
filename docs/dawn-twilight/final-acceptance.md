@@ -2,11 +2,13 @@
 
 ## Integrated inputs
 
-PR #83 integrates WYU master `29a42542e2ab5ac7b4d62fde07fd56e2044aea4e`
-(merged Orbit Demo #69, including texture fallback and the approved package pin).
+PR #83 integrates WYU master `904489845830a1a73b1527aca6138df3e441906d`,
+including static construction #90 and console changes through #92.
 Groundwork #193 integrates the complete #186 head
 `b40c11b14e64bff9b446d6eab18e8755916f66ec`: owner wake, presentation waiting,
-acknowledged-frame arbitration and texture-refinement fairness.
+acknowledged-frame arbitration and texture-refinement fairness. It also
+integrates static construction through Groundwork master
+`751a1e022d703c6dfd582c6521cd1cc4f9c6a2eb`.
 
 The shared sun direction drives sky, weather and terrain lighting. Orbit retains
 its celestial frame; the approved dawn/dusk colour curve replaces its former
@@ -14,12 +16,14 @@ additional warm multiplier. PBR textures, boulders, fallback, prop warm-up and
 save/profile metadata remain present. TW1–TW3 remain approved. Weather density,
 the accepted clock and save payloads are not migrated.
 
-All ten WYU engine modules retain immutable baseline `0.1.0-dev.44510519303.1`,
-source `067bb610127b7436431a498fc70d0f12c05f8f7b`, manifest SHA-256
-`BDF297C13C2E719DC7B8919D848E5ABF1C924C349FC5CC3FB5311AEB4307511A`.
-Both `Groundwork.Rendering.dll` and `Groundwork.Rendering.D3D12.dll` from the
-same PR #193 build are staged together only in a diagnostic output folder.
-Existing master-only producer, archive and locked-restore checks remain required.
+All ten WYU engine modules use the immutable baseline approved in WYU
+#90, `0.1.0-dev.45005277801.1`, source
+`751a1e022d703c6dfd582c6521cd1cc4f9c6a2eb`, manifest SHA-256
+`8E76DE5FE00E38755AC46F68693CEE75164078AC919B321E50ABBDB37FFA63C6`.
+The archived 09:31 and 11:58 runs used baseline `0.1.0-dev.44510519303.1`
+with both rendering DLLs staged together as a diagnostic overlay.
+Preserve the master-only producer, archive and locked-restore checks when
+qualifying the integrated combination.
 
 ## Required evidence
 
@@ -33,7 +37,7 @@ the measurement ZIP identify the delivered and tested source snapshots.
 | Renderer | Admission/waiter cancellation, arbitration, sky/twilight, refinement, WARP/hardware handoff and window lifecycle coverage. |
 | Functional route | Renew Far Horizon and Orbit flight/Continue, rebase, shared sunlight and native shutdown with the paired renderer. |
 | Visual review | Renew sunrise/sunset captures for both profiles. Orbit samples its actual solar plane. Captures alone do not establish detailed night navigation or frame-by-frame animation acceptance. |
-| Reference timing | **CHANGES REQUIRED.** The [09:31 Lookup reuse series](reference-series-2026-11-22-093150.md) completes all 120 flights. Far Horizon fails nine comparison rows and Orbit Combined fails seven. The [00:08 scheduling probe](reference-probe-2026-11-22-000819.md) remains the short-run pass and scheduling evidence for Orbit Combined. |
+| Reference timing | **CHANGES REQUIRED.** The [09:31 Lookup reuse series](reference-series-2026-11-22-093150.md) completes all 120 flights. Far Horizon fails nine comparison rows and Orbit Combined fails seven. The [11:58 Far Horizon probe](reference-probe-2026-11-22-115849.md) still misses both Ascent frame gates. The [00:08 Orbit probe](reference-probe-2026-11-22-000819.md) remains short-run evidence. |
 | Full memory | **BLOCKED** until incremental peak GPU memory includes driver backing and overlapping handoff resources. A resource ledger alone cannot close the 4 MiB gate. |
 | Protected work | **BLOCKED** until movement/edit/recovery and speculative CPU/GPU pressure limits cover the exact installed composition. |
 | Published installation | **BLOCKED** until required approval, engine master CI/archive, coordinated consumer pins/locks/digests and installed-route checks are complete. |

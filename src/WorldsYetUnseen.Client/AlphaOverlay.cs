@@ -10,6 +10,9 @@ internal sealed partial class AlphaOverlay : IDisposable
 {
     private const byte PanelOpacity = 179;
     private const int ReticleSize = 21;
+    private const int PanelLeft = 16, PanelRight = 12, PanelBottom = 10;
+    private const uint PanelText = 0x00000810; // Word wrap, no mnemonic processing.
+    private const uint CalculateText = 0x00000400;
     private const uint PopupStyle = 0x80000000;
     private const uint OverlayStyle = 0x080800A0; // No activate, layered, tool window, transparent.
     private readonly ManualResetEventSlim _stop = new();
@@ -59,17 +62,19 @@ internal sealed partial class AlphaOverlay : IDisposable
 
     private void Run(nint owner, TaskCompletionSource ready)
     {
-        nint sidebar = 0, telemetry = 0, reticle = 0;
+        nint sidebar = 0, telemetry = 0, reticle = 0, terminal = 0;
         Point? reticleOrigin = null;
         try
         {
             sidebar = CreateWindowEx(OverlayStyle, "STATIC", "WYU sidebar", PopupStyle, 0, 0, 0, 0, owner, 0, 0, 0);
             telemetry = CreateWindowEx(OverlayStyle, "STATIC", "WYU performance", PopupStyle, 0, 0, 0, 0, owner, 0, 0, 0);
-            if (sidebar == 0 || telemetry == 0)
+            terminal = CreateWindowEx(OverlayStyle, "STATIC", "WYU world console", PopupStyle, 0, 0, 0, 0, owner, 0, 0, 0);
+            if (sidebar == 0 || telemetry == 0 || terminal == 0)
                 throw new Win32Exception(Marshal.GetLastPInvokeError());
 
             var menu = new Panel(sidebar, "WYU sidebar", 18);
-            var metrics = new Panel(telemetry, "WYU performance", 16);
+            var metrics = new Panel(telemetry, "WYU performance", 16, fitHeight: true);
+            var console = new ConsolePanel(terminal);
             ready.SetResult();
             do
             {
@@ -80,6 +85,7 @@ internal sealed partial class AlphaOverlay : IDisposable
                 {
                     menu.Hide();
                     metrics.Hide();
+                    console.Hide();
                     HideReticle();
                     continue;
                 }
@@ -87,12 +93,27 @@ internal sealed partial class AlphaOverlay : IDisposable
                 if (ClientToScreen(owner, ref origin) == 0 || bounds.Right <= 0 || bounds.Bottom <= 0)
                     continue;
 
-                var performance = _performance;
-                var width = Math.Min(340, bounds.Right);
-                var height = Math.Min(124, bounds.Bottom);
-                var offset = performance is null ? 0 : height;
-                menu.Update(_menu, new Point(origin.X, origin.Y + offset), new Size(width, bounds.Bottom - offset), 18);
-                metrics.Update(performance, origin, new Size(width, height), 10);
+                if (_console is { } view)
+                {
+                    menu.Hide();
+                    metrics.Hide();
+                    HideReticle();
+                    if (GetForegroundWindow() == owner && WorldConsole.Fits(bounds.Right, bounds.Bottom))
+                    {
+                        var consoleWidth = Math.Min(760, bounds.Right);
+                        var consoleHeight = Math.Min(316, bounds.Bottom);
+                        console.Update(view, new Point(origin.X + (bounds.Right - consoleWidth) / 2, origin.Y),
+                            new Size(consoleWidth, consoleHeight));
+                    }
+                    else
+                        console.Hide();
+                    continue;
+                }
+                console.Hide();
+
+                var offset = metrics.Update(_performance, origin, new Size(Math.Min(540, bounds.Right), bounds.Bottom), 10);
+                menu.Update(_menu, new Point(origin.X, origin.Y + offset),
+                    new Size(Math.Min(340, bounds.Right), bounds.Bottom - offset), 18);
 
                 if (!_reticle || bounds.Right < ReticleSize || bounds.Bottom < ReticleSize)
                 {
@@ -118,6 +139,8 @@ internal sealed partial class AlphaOverlay : IDisposable
         }
         finally
         {
+            if (terminal != 0)
+                _ = DestroyWindow(terminal);
             if (reticle != 0)
                 _ = DestroyWindow(reticle);
             if (telemetry != 0)
@@ -135,9 +158,10 @@ internal sealed partial class AlphaOverlay : IDisposable
         }
     }
 
-    private sealed class Panel(nint handle, string label, int fontSize)
+    private sealed class Panel(nint handle, string label, int fontSize, bool fitHeight = false)
     {
-        private (string Text, Point Origin, Size Size, int Top)? _drawn;
+        private (string Text, Point Origin, Size Available, int Top)? _drawn;
+        private int _height;
 
         internal void Hide()
         {
@@ -145,42 +169,91 @@ internal sealed partial class AlphaOverlay : IDisposable
                 return;
             _ = ShowWindow(handle, 0);
             _drawn = null;
+            _height = 0;
         }
 
-        internal void Update(string? text, Point origin, Size size, int top)
+        internal int Update(string? text, Point origin, Size available, int top)
         {
-            if (text is null || size.Height <= 0)
+            if (text is null || available.Width <= PanelLeft + PanelRight || available.Height <= top)
             {
                 Hide();
-                return;
+                return 0;
             }
-            var layout = (text, origin, size, top);
+            var layout = (text, origin, available, top);
             if (_drawn == layout)
-                return;
-            if (!Draw(handle, text.Replace(" | ", Environment.NewLine, StringComparison.Ordinal), origin, size, top, fontSize))
-                return;
+                return _height;
+            var height = DrawPanel(handle, text.Replace(" | ", Environment.NewLine, StringComparison.Ordinal),
+                origin, available, top, fontSize, fitHeight);
+            if (height == 0)
+                return _height;
             SetWindowText(handle, label + " | " + text);
             if (_drawn is null)
                 _ = ShowWindow(handle, 4);
             _drawn = layout;
+            _height = height;
+            return height;
         }
     }
 
-    private static bool Draw(nint window, string text, Point origin, Size size, int top, int fontSize) =>
-        DrawLayer(window, origin, size, PanelOpacity, 2, dc =>
+    private static int DrawPanel(nint window, string text, Point origin, Size available, int top, int fontSize, bool fitHeight)
+    {
+        var font = CreateFont(-fontSize, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 4, 0, "Segoe UI");
+        if (font == 0)
+            return 0;
+        try
         {
-            if (SetBkMode(dc, 1) == 0 || SetTextColor(dc, 0x00FFFFFF) == uint.MaxValue)
-                return false;
-            var font = CreateFont(-fontSize, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 4, 0, "Segoe UI");
-            var oldFont = font == 0 ? 0 : SelectObject(dc, font);
-            var rect = new Rect { Left = 16, Top = top, Right = size.Width - 12, Bottom = size.Height };
-            DrawText(dc, text, text.Length, ref rect, 0x00000810); // Word wrap, no mnemonic processing.
+            var height = fitHeight ? MeasurePanelHeight(text, available, top, font) : available.Height;
+            if (height == 0)
+                return 0;
+            var size = available with { Height = height };
+            return DrawLayer(window, origin, size, PanelOpacity, 2, dc =>
+            {
+                if (SetBkMode(dc, 1) == 0 || SetTextColor(dc, 0x00FFFFFF) == uint.MaxValue)
+                    return false;
+                var oldFont = SelectObject(dc, font);
+                if (oldFont == 0)
+                    return false;
+                try
+                {
+                    var rect = PanelTextBounds(size.Width, top, height);
+                    return DrawText(dc, text, text.Length, ref rect, PanelText) != 0;
+                }
+                finally
+                {
+                    _ = SelectObject(dc, oldFont);
+                }
+            }) ? height : 0;
+        }
+        finally
+        {
+            _ = DeleteObject(font);
+        }
+    }
+
+    private static int MeasurePanelHeight(string text, Size available, int top, nint font)
+    {
+        var dc = GetDC(0);
+        if (dc == 0)
+            return 0;
+        var oldFont = SelectObject(dc, font);
+        try
+        {
+            if (oldFont == 0)
+                return 0;
+            var rect = PanelTextBounds(available.Width, top, top);
+            var measured = DrawText(dc, text, text.Length, ref rect, PanelText | CalculateText);
+            return measured == 0 ? 0 : Math.Min(available.Height, top + measured + PanelBottom);
+        }
+        finally
+        {
             if (oldFont != 0)
-                SelectObject(dc, oldFont);
-            if (font != 0)
-                _ = DeleteObject(font);
-            return true;
-        });
+                _ = SelectObject(dc, oldFont);
+            _ = ReleaseDC(0, dc);
+        }
+    }
+
+    private static Rect PanelTextBounds(int width, int top, int bottom) =>
+        new() { Left = PanelLeft, Top = top, Right = width - PanelRight, Bottom = bottom };
 
     private static bool DrawReticle(nint window, Point origin) =>
         DrawLayer(window, origin, new Size(ReticleSize, ReticleSize), byte.MaxValue, 1, static dc =>

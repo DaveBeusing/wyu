@@ -43,8 +43,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private bool _testMenu;
     private int _testAction;
     private bool? _testFog;
-    private readonly string? _testBuild = freeTestWorld ? typeof(VolumeExploration).Assembly
-        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown" : null;
+    private static readonly string ClientBuild = typeof(VolumeExploration).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+    private readonly string? _testBuild = freeTestWorld ? ClientBuild : null;
     private VolumeStreamingSelection? _selection;
     private VolumePublicationInfo _published;
     private int _transitions, _views, _windows, _fineBricks;
@@ -112,7 +113,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (slot?.Checkpoint?.Player is { } saved)
         {
             // Keep both the avatar and the nearby saved landing footprint in the fine support halo.
-            var landing = (_ports.Committed.Read().Root as GameHost.ExplorationRoot)?.Landing;
+            var landing = ReadInventory()?.Landing;
             var center = landing is { } landed ? new PlanetVector(
                 (saved.Position.X + landed.Foot.X) / 2, (saved.Position.Y + landed.Foot.Y) / 2,
                 (saved.Position.Z + landed.Foot.Z) / 2) : (PlanetVector?)null;
@@ -137,7 +138,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     }
 
     internal async Task ExploreAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost, bool scripted,
-        CancellationToken token)
+        CancellationToken token, bool constructionContinue = false, bool constructionMotion = false, bool constructionMeasure = false)
     {
         var placementGate = scripted && Props is not null
             ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) : null;
@@ -173,9 +174,24 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             return;
         }
         diagnostics?.Enter("Exploration");
+        var restoredState = ReadInventory();
         diagnostics?.Write(slot?.Checkpoint is null ? "spawn" : "continue", FormattableString.Invariant(
-            $"seed={Descriptor.Seed} generator={Descriptor.GeneratorVersion} revision={_published.TerrainRevision} generation={slot?.Checkpoint?.Generation ?? 0}"));
-        if (slot?.Checkpoint is { } checkpoint && ProceduralLanding.Read(checkpoint, out var landed) == SaveGameValidation.Valid &&
+            $"seed={Descriptor.Seed} generator={Descriptor.GeneratorVersion} revision={_published.TerrainRevision} generation={slot?.Checkpoint?.Generation ?? 0} blocks={restoredState?.Construction.Blocks.Length ?? 0} anchors={restoredState?.Construction.Anchors.Length ?? 0} ore={restoredState?.Ore ?? 0}"));
+        if (constructionContinue)
+        {
+            while (UpdateConstructionPresentation(terrain, renderHost.Active, state, requireEmpty: true))
+            {
+                RequireHealthyRenderer(renderHost.Active.Read());
+                await Task.Delay(8, token).ConfigureAwait(false);
+            }
+            diagnostics?.Write("construction-present", $"revision={restoredState?.Construction.Revision ?? 0} sequence={renderHost.Active.Read().LastPresentedSequence}");
+            if (constructionMotion)
+                await RunConstructionMotionProofAsync(terrain, renderHost, state, token).ConfigureAwait(false);
+            if (constructionMeasure)
+                await MeasureConstructionAsync(terrain, renderHost.Active, state, token).ConfigureAwait(false);
+            return;
+        }
+        if (slot?.Checkpoint is { } checkpoint && InventoryCheckpoint.Read(checkpoint, out _, out var landed, out _) == SaveGameValidation.Valid &&
             landed is { } restored)
         {
             ConfirmRestoredLanding(terrain, restored);
@@ -189,9 +205,13 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         else if (slot is not null)
             Notice("E remove | Q add | 1/2 material\nF5 save | F6 flight | F10 save and quit");
         if (freeTestWorld)
-            Notice($"{PlanetName} | F1 diagnostics | F2 test actions\nE remove | Q fill | F5 save | F6 flight");
+            Notice($"{PlanetName} | F1 diagnostics | F2 test actions | F3 console\nE remove | Q fill | F5 save | F6 flight");
+        else if (!scripted && overlay is not null)
+            Notice(CurrentNotice is { } controls ? $"{controls}\nF1 diagnostics · F3 console" : "F1 diagnostics · F3 console");
         if (OrbitMaterialFallbackNotice is { } materialNotice)
             Notice(CurrentNotice is { } startupNotice ? $"{materialNotice}\n\n{startupNotice}" : materialNotice);
+        if (!scripted && overlay is not null && CurrentNotice is { } initialNotice)
+            Notice($"{initialNotice}\nI inventory{(ConstructionRenderer is null ? "" : " · B build")}");
         var start = state.Position;
         if (placementGate is not null)
             VerifyPropCollisionCuts(start);
@@ -207,18 +227,38 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var exercisedWindow = false;
         var previousFrame = Stopwatch.GetTimestamp();
         using var cadence = new PeriodicTimer(TimeSpan.FromSeconds(1d / 60));
+        var profile = !scripted && overlay is not null
+            ? new ConsoleFrameProfile(TimeProvider.System, () => ReadProfileContext(state.Position)) : null;
+        var terminal = profile is null ? null : CreateConsole(() => state.Position, profile, overlay!.TryCopyReport);
+        void ReportProfile(string? result)
+        {
+            if (result is null || terminal is null)
+                return;
+            terminal.Report("profile", result);
+            overlay!.Console = terminal.View;
+        }
+
         while (await cadence.WaitForNextTickAsync(token).ConfigureAwait(false))
         {
             var input = window.Capture();
             var renderer = renderHost.Active;
-            if (freeTestWorld && PrototypeMenu.Pressed(input, InputControl.F2))
+            var windowState = window.Read();
+            var focused = windowState.Focused && !input.TransitionLoss;
+            var consoleInput = !_testMenu && !_inventoryOpen && !_constructionOpen && terminal?.Handle(input, focused,
+                WorldConsole.Fits(windowState.ClientWidth, windowState.ClientHeight)) == true;
+            if (consoleInput)
+            {
+                overlay!.Console = terminal!.View;
+                input = input with { Events = [], HeldControls = [] };
+            }
+            if (freeTestWorld && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.F2))
             {
                 _testMenu = !_testMenu;
                 if (!_testMenu && overlay is not null)
                     overlay.Menu = null;
                 previousFrame = Stopwatch.GetTimestamp();
             }
-            if (!scripted && !_testMenu && PrototypeMenu.Pressed(input, InputControl.Escape))
+            if (!scripted && !_testMenu && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.Escape))
                 return;
             if (PrototypeMenu.Pressed(input, InputControl.F1))
                 _debug = !_debug;
@@ -228,8 +268,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 (token.IsCancellationRequested || window.Read().Phase is HostWindowPhase.Closing or HostWindowPhase.Closed))
                 return;
             var drawable = RequireHealthyRenderer(rendered).Surface == RenderSurfaceState.Drawable;
-            var focused = window.Read().Focused && !input.TransitionLoss;
-            mouse?.Update(drawable && focused && !_testMenu, ref _yaw, ref _pitch);
+            ReportProfile(profile?.Observe(renderer, rendered, drawable && focused && !_testMenu && !_inventoryOpen));
+            mouse?.Update(drawable && focused && !_testMenu && !_inventoryOpen && _buildRefund is null && !consoleInput,
+                ref _yaw, ref _pitch);
             if (!drawable || (!scripted && !focused))
                 continue;
 
@@ -242,6 +283,14 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var now = Stopwatch.GetTimestamp();
             var frameTime = Stopwatch.GetElapsedTime(previousFrame, now);
             previousFrame = now;
+            if (!scripted && UpdateConstructionPresentation(terrain, renderer, state))
+                continue;
+            if (!scripted && !_inventoryOpen && await HandleConstructionAsync(terrain, renderer, state, input, token).ConfigureAwait(false))
+                continue;
+            if (!scripted && !_constructionOpen && await HandleInventoryAsync(terrain, state, input, token).ConfigureAwait(false))
+                continue;
+            var load = scripted ? null : ReadInventory()?.Items.Load;
+            var loadHeld = load?.MovementHeld == true;
             if (scripted && steps == 120 && !exercisedWindow)
             {
                 await VerifyWindowHoldAsync(renderer, token).ConfigureAwait(false);
@@ -257,15 +306,23 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 // A new tick must capture focus, surface and keys after the potentially long load.
                 continue;
             }
-            if (!scripted && _caveExitWaypoint < 0 && await HandleWorldCommandsAsync(terrain, renderer, state, input, token).ConfigureAwait(false))
+            var saveRequested = PrototypeMenu.Pressed(input, InputControl.F5) || PrototypeMenu.Pressed(input, InputControl.F10);
+            if (!scripted && (!_constructionOpen || saveRequested) && (_caveExitWaypoint < 0 || loadHeld) &&
+                await HandleWorldCommandsAsync(terrain, renderer, state, input, token).ConfigureAwait(false))
             {
                 if (_quitAfterSave)
                     return;
                 continue;
             }
-            if (!scripted && PrototypeMenu.Pressed(input, InputControl.F6) && (cave is null || Connected))
+            if (!scripted && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.F6) && (cave is null || Connected))
             {
+                if (loadHeld)
+                {
+                    Notice("Movement held by carried load. Open inventory (I) to recover.");
+                    continue;
+                }
                 mouse?.Update(false, ref _yaw, ref _pitch);
+                ReportProfile(profile?.Interrupt("Profile stopped for flight."));
                 var result = await FlyAsync(terrain, renderHost, state, null, false, token).ConfigureAwait(false);
                 if (result.Quit)
                     return;
@@ -273,27 +330,42 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 continue;
             }
 
-            if (cave is not null && _caveExitWaypoint < 0 && AtCaveExitRope(state) &&
+            if (!loadHeld && cave is not null && _caveExitWaypoint < 0 && AtCaveExitRope(state) &&
                 PrototypeMenu.Pressed(input, InputControl.Space))
                 _caveExitWaypoint = 0;
-            var climb = _caveExitWaypoint >= 0 ? NextCaveClimb(state) : null;
+            var speed = load?.SpeedScale ?? 1;
+            var climb = !loadHeld && _caveExitWaypoint >= 0 ? NextCaveClimb(state) : null;
             var forward = scripted ? 0 : Axis(input, InputControl.W, InputControl.S);
             var right = scripted ? 1 : Axis(input, InputControl.D, InputControl.A);
             var angle = scripted ? 0 : _yaw;
             var x = Math.Cos(angle) * forward - Math.Sin(angle) * right;
             var z = Math.Sin(angle) * forward + Math.Cos(angle) * right;
-            var divisor = Math.Max(1, Math.Max(Math.Abs(x), Math.Abs(z)));
+            var divisor = Math.Max(1, Math.Sqrt(x * x + z * z));
             var nextEnvironmentTick = cave is null ? checked(_environmentTick + 1) : _environmentTick;
             var begin = await BeginAsync(token).ConfigureAwait(false);
             terrain.BeginTick(begin);
             VolumeQueryStatus status;
             VolumeMovementDraft? draft;
             if (climb is { } displacement)
-                draft = terrain.TryPlanCaveClimb(state, displacement, out status, CaveQueries);
+            {
+                draft = terrain.TryPlanCaveClimb(state, Scale(displacement, speed), out status, CaveQueries);
+                if (draft is not null && ReadInventory()?.Construction is { Blocks.IsEmpty: false } alongRope &&
+                    Collision(alongRope).Sweep(ConstructionCollision.Body(state), ConstructionCollision.Body(draft.Result.State)).Status != VolumeQueryStatus.Clear)
+                {
+                    status = VolumeQueryStatus.Contact;
+                    draft = null;
+                }
+            }
             else
-                draft = cave is null
-                    ? terrain.TryPlanMovement(state, x / divisor, z / divisor, out status)
-                    : PlanCaveMovement(terrain, state, x / divisor, z / divisor, out status);
+            {
+                var obstacles = ReadInventory()?.Construction is { Blocks.IsEmpty: false } buildings ? Collision(buildings) : null;
+                draft = cave is not null
+                    ? PlanCaveMovement(terrain, state, speed * x / divisor, speed * z / divisor, out status, obstacles)
+                    : obstacles is null
+                        ? terrain.TryPlanMovement(state, speed * x / divisor, speed * z / divisor, out status)
+                        : terrain.TryPlanMovementWithStaticObstacles(state, speed * x / divisor, speed * z / divisor,
+                            obstacles.Query, out status);
+            }
 
             var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
             var prepared = draft is null ? null : terrain.TryPrepareMovement(draft, commit, []);
@@ -301,7 +373,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             if (climb is not null && (draft?.Result.Status != PlanetWalkStatus.Moved || outcome.Status != BarrierStatus.Committed))
             {
                 _caveExitWaypoint = -1;
-                Notice(status == VolumeQueryStatus.Contact ? "Exit rope blocked by terrain." : $"Exit rope unavailable ({status}).");
+                Notice(status == VolumeQueryStatus.Contact ? "Exit rope blocked by terrain or a constructed block." : $"Exit rope unavailable ({status}).");
             }
             if (prepared is not null && outcome.Status == BarrierStatus.Committed)
             {
@@ -337,6 +409,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 prepared is not null && outcome.Status == BarrierStatus.Committed && cave is null
                     ? (_environmentTick - 1, fraction) : null);
             Props?.Pump();
+            if (!scripted && ConstructionRenderer is { } buildVisuals && ReadInventory()?.Construction is { } renderConstruction)
+                buildVisuals.Update(terrain.WorldIdentity, _published, renderConstruction, _buildPreview?.Box,
+                    _buildPreview?.Ready == true ? ConstructionVisuals.ReadyPreviewTint : ConstructionVisuals.RejectedPreviewTint);
             var frame = ++_sequence;
             OrbitMaterialHost?.RetryMaterials(renderer, frame);
             var presentStarted = scripted ? BiomeMeasurements.Start() : 0;
@@ -380,7 +455,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             }
             if (overlay is not null)
             {
-                overlay.Menu = ActiveCaveClimbHint ?? CurrentNotice ?? (prepared is null ? $"Movement held\n{status}" : cave is null ? null : CaveHint(terrain, state));
+                overlay.Menu = (_constructionOpen ? _buildPanel : null) ?? CurrentNotice ?? (loadHeld ? "Movement held by carried load\nI inventory" :
+                    ActiveCaveClimbHint ?? (prepared is null ? $"Movement held\n{status}" : cave is null ? null : CaveHint(terrain, state)));
                 var statistics = terrain.Statistics;
                 overlay.Performance = _debug ? FormattableString.Invariant(
                     $"{(_testBuild is null ? "" : $"Test World | {PlanetName}\nBuild {_testBuild}\nF2 test actions\n")}Seed {Descriptor.Seed} / gen {Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions / LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} / GPU {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms / {status}\nX {state.Position.X:F1} Y {state.Position.Y:F1} Z {state.Position.Z:F1} / origin {_published.View.Frame.Revision}") : null;
@@ -695,8 +771,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var direction = MathF.Cos(_yaw) * tangent + MathF.Sin(_yaw) * Vector3.Cross(tangent, up);
         direction = MathF.Cos(_pitch) * direction + MathF.Sin(_pitch) * up;
         var eye = WalkingEye(foot);
-        var (tick, fraction) = interpolation ?? (_environmentTick, 0);
-        return ApplyNearEnvironment(new(view, eye, direction, up, 1.0f, 0.08f, 150, Vector4.One, Sky), tick, fraction);
+        var (tick, fraction) = _previewTime is { } preview
+            ? (preview, 0d)
+            : interpolation ?? (_environmentTick, 0);
+        return ApplyNearEnvironment(new(view, eye, direction, up, _fieldOfView, 0.08f, 150, Vector4.One, Sky), tick, fraction);
     }
 
     private static PlanetVector WalkingEye(PlanetVector foot) => Add(foot, Scale(Unit(foot), 1.65));
@@ -872,7 +950,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
 
     private static ulong ReadEnvironmentTick(VolumeCheckpoint? checkpoint)
     {
-        if (checkpoint is not null && ProceduralLanding.Read(checkpoint, out _, out var tick) == SaveGameValidation.Valid)
+        if (checkpoint is not null && InventoryCheckpoint.Read(checkpoint, out _, out _, out var tick) == SaveGameValidation.Valid)
             return tick;
         return ReferenceWeather.InitialTick;
     }
@@ -1000,28 +1078,14 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             return;
         }
 
-        if (slot?.ReadOnly != false || _ports.Committed.Read().Root is not VolumeWorldRoot { State: CaveInventory inventory } root ||
-            inventory.Ore > int.MaxValue - 16 || inventory.OreInventoryRevision == ulong.MaxValue)
+        if (slot?.ReadOnly != false || ReadInventory() is not { } inventory ||
+            InventoryOperations.AcquireOre(inventory.Items, 16) is not { Status: InventoryChangeStatus.Applied } grant)
         {
             Notice("Ore grant unavailable.");
             return;
         }
 
-        await BeginAsync(token).ConfigureAwait(false);
-        var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
-        var pending = world.State.Read().PendingFaultGeneration;
-        var grant = inventory with { Ore = inventory.Ore + 16, OreInventoryRevision = inventory.OreInventoryRevision + 1 };
-        var changed = root.WithState(grant);
-        var permit = _ports.RootChanges.TryReserve(commit, changed);
-        var prepared = permit is null ? null : _ports.Preparation.TryPrepare(
-            new BarrierPublicationDraft(commit, changed, pending, [], permit)).Publication;
-        if (prepared is null)
-        {
-            permit?.Revoke();
-            Finish(commit);
-            Notice("Ore grant held.");
-            return;
-        }
-        Notice(Finish(commit, prepared).Status == BarrierStatus.Committed ? $"Inventory: {CaveOre} ore" : "Ore grant held.");
+        Notice(await PublishInventoryAsync(inventory, grant.State, token).ConfigureAwait(false)
+            ? $"Inventory: {CaveOre} ore" : "Ore grant held.");
     }
 }

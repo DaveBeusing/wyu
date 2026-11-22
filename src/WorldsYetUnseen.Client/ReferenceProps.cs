@@ -15,6 +15,8 @@ internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder =
     private const int Radius = 12;
     private const int CellCount = 128;
     private const int Candidates = 8;
+    internal const int RenderCellCapacity = CellCount;
+    internal const int RenderInstancesPerCell = Candidates;
     private static readonly D3D12PropAsset[] Assets = CreateAssets();
     private static readonly Lazy<D3D12PropAsset[]> OrbitAssets = new(CreateOrbitAssets);
     private readonly D3D12PropAsset[] _assets = orbitBoulder ? OrbitAssets.Value : Assets;
@@ -25,6 +27,7 @@ internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder =
     private VolumeStreamingSelection? _selection;
     private PlacementWork? _pending;
     private PlacementRun? _running;
+    private PropCellKey[] _renderCoverage = [];
     internal Task? PlacementGateForSmoke { get; set; }
     internal bool PlacementActive => _running is not null;
     internal int Failed { get; private set; }
@@ -33,15 +36,25 @@ internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder =
     internal int Staged { get; private set; }
     internal int Retired { get; private set; }
     internal D3D12PropStatistics Read() => _stream?.ReadStatistics() ?? default;
+    internal ReadOnlySpan<D3D12PropAsset> RenderAssets => _assets;
+    internal ReadOnlySpan<PropCellKey> RenderCoverage => _renderCoverage;
+    internal ulong RenderSeed => planet.Descriptor.Seed;
+    internal bool HasPublished(VolumePublicationInfo publication) => _previous == publication;
 
     internal void Attach(D3D12Renderer renderer)
     {
         var stream = new D3D12PropCells(new(CellCount, CellCount, CellCount * Candidates, CellCount * Candidates, 8),
             Candidates, planet.Descriptor.Seed, Recipe, _assets);
         renderer.AttachPropCells(stream);
+        UseAttachedStream(stream);
+    }
+
+    internal void UseAttachedStream(D3D12PropCells stream)
+    {
         _stream = stream;
         _previous = default;
         _selection = null;
+        _renderCoverage = [];
         Supersede();
         _supports.Clear();
     }
@@ -74,6 +87,7 @@ internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder =
         }
         stream.Publish(new(terrain.WorldIdentity, publication.View.RendererEpoch, publication.TerrainRevision, publication.Generation),
             coverage, invalidated);
+        _renderCoverage = coverage;
         var next = new Dictionary<PropCellKey, LatticeCoordinate[]>();
         var wanted = new List<PropCellKey>(coverage.Length);
         foreach (var key in coverage)

@@ -97,18 +97,22 @@ internal sealed partial class VolumeExploration
         FormattableString.Invariant($"Exit rope {Length(Subtract(CaveExitAnchor, state.Position)):F1} m");
 
     private static VolumeMovementDraft? PlanCaveMovement(VolumeStreamingCoordinator terrain, PlanetWalkState state,
-        double forward, double right, out VolumeQueryStatus status)
+        double forward, double right, out VolumeQueryStatus status, ConstructionCollision? obstacles = null)
     {
-        var draft = terrain.TryPlanMovement(state, forward, right, out status, CaveQueries);
+        var draft = Plan(forward, right, out status);
         for (var attempt = 0; attempt < 3 && draft is null && status == VolumeQueryStatus.BudgetExceeded &&
             (forward != 0 || right != 0); attempt++)
         {
             // Use shorter motion along the same input if a near-tangent sweep runs out of iterations.
             forward *= 0.5;
             right *= 0.5;
-            draft = terrain.TryPlanMovement(state, forward, right, out status, CaveQueries);
+            draft = Plan(forward, right, out status);
         }
         return draft;
+
+        VolumeMovementDraft? Plan(double x, double z, out VolumeQueryStatus result) => obstacles is null
+            ? terrain.TryPlanMovement(state, x, z, out result, CaveQueries)
+            : terrain.TryPlanMovementWithStaticObstacles(state, x, z, obstacles.Query, out result, CaveQueries);
     }
 
     internal async Task RunCaveSmokeAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost,
