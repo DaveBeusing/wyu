@@ -95,15 +95,28 @@ internal sealed partial class VolumeExploration
             UsageDetails = WorldConsoleMarks.Usage,
             CompleteValue = marks.CompleteValue,
         });
-        commands.Add(new("save", "save status", "Checkpoint status", value =>
-            value == "status" ? ReadSaveStatus() : "Usage: save status", "status"));
+        commands.Add(new("save", "save <status|verify>", "Checkpoint status and verification", value => value switch
+        {
+            "status" => ReadSaveStatus(),
+            "verify" => QueueSaveVerification(Measuring()),
+            _ => "Usage: save status / verify",
+        }, "status", "verify")
+        {
+            UsageDetails = "save status · last result\nsave verify · disk check",
+        });
         commands.Add(new("trace", "trace mark <label>", "Tag the running trace", value =>
             value.StartsWith("mark ", StringComparison.Ordinal) ? telemetry.AddTraceMark(value[5..].TrimStart()) : "Usage: trace mark <label>", "mark"));
         if (freeTestWorld)
         {
             commands.Add(new("spectate", "spectate [on|off]", "Free camera",
-                value => setSpectate(value, Measuring() || _queuedConsoleOre is not null), "on", "off"));
+                value => setSpectate(value, Measuring() || HasQueuedConsoleAction), "on", "off"));
             commands.Add(new("give", "give ore <1–64>", "Grant construction ore", value => QueueGive(value, Measuring()), "ore"));
+            commands.Add(new("teleport", "teleport <destination>", "Move within the test world",
+                value => QueueConsoleTeleport(value, marks, Measuring()), "mark", "back")
+            {
+                UsageDetails = TeleportUsage,
+                CompleteValue = marks.CompleteTeleport,
+            });
         }
         return new(commands.ToArray());
 
@@ -141,7 +154,7 @@ internal sealed partial class VolumeExploration
                 return streamWhy();
             if (value != "watch" && !value.StartsWith("watch ", StringComparison.Ordinal))
                 return "Usage: stream status / why\nstream watch [sec]";
-            return profile.IsActive || IsSpectating || _queuedConsoleOre is not null
+            return profile.IsActive || IsSpectating || HasQueuedConsoleAction
                 ? "Finish the active action first." : telemetry.HandleWatch(value[5..].TrimStart());
         }
 
@@ -217,7 +230,7 @@ internal sealed partial class VolumeExploration
 
         string RunProfile(string value)
         {
-            if (IsSpectating || _queuedConsoleOre is not null)
+            if (IsSpectating || HasQueuedConsoleAction)
                 return "Finish the active action first.";
             if (value == "trace" || value.StartsWith("trace ", StringComparison.Ordinal))
                 return profile.IsActive ? "Profile already running." : telemetry.HandleTrace(value[5..].TrimStart());

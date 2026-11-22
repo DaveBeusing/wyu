@@ -19,7 +19,7 @@ internal sealed partial class VolumeExploration
             !int.TryParse(fields[1], NumberStyles.None, CultureInfo.InvariantCulture, out var count) ||
             count is not (>= 1 and <= 64))
             return "Usage: give ore <1–64>";
-        if (_queuedConsoleOre is not null)
+        if (HasQueuedConsoleAction)
             return "Console action already queued.";
         _queuedConsoleOre = count;
         return "Console action queued.";

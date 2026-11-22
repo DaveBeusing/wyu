@@ -320,6 +320,31 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             previousFrame = now;
             if (!scripted && !IsSpectating && UpdateConstructionPresentation(terrain, renderer, state))
                 continue;
+            if (HasQueuedSaveVerification)
+            {
+                ReportConsole("save verify", "Verifying checkpoint…");
+                ReportConsole("save verify", await VerifyQueuedSaveAsync(token).ConfigureAwait(false));
+                continue;
+            }
+            if (_queuedConsoleTeleport is { } target)
+            {
+                _queuedConsoleTeleport = null;
+                if (IsSpectating || _caveExitWaypoint >= 0 || ReadInventory()?.Items.Load.MovementHeld == true)
+                {
+                    ReportConsole("teleport", "Teleport unavailable while movement is held.");
+                    continue;
+                }
+                ReportConsole("teleport", "Teleporting…");
+                var departure = state.Position;
+                var relocated = await RelocateConsoleAsync(terrain, renderer, state, target, token).ConfigureAwait(false);
+                if (relocated.Pose is { } pose)
+                {
+                    state = pose;
+                    _lastTeleportDeparture = departure;
+                }
+                ReportConsole("teleport", relocated.Result);
+                continue;
+            }
             if (_queuedConsoleOre is { } count)
             {
                 _queuedConsoleOre = null;
@@ -541,7 +566,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
         Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null,
         bool recovery = false, long? operationStarted = null, long handoffStarted = 0,
-        R09EarlyPrebuild? earlyPrebuild = null, FlightReturnReadback? warpReturn = null)
+        R09EarlyPrebuild? earlyPrebuild = null, FlightReturnReadback? warpReturn = null,
+        ConsoleRelocationAttempt? relocation = null)
     {
         var started = operationStarted ?? Stopwatch.GetTimestamp();
         var timing = returnTerrain?.Timing ?? StartR09(edit is not null ? VolumeWorkClass.FirstEdit :
@@ -566,6 +592,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             }
             view = terrain.ChangeView(frame, terrain.View.RendererEpoch);
         }
+        if (relocation is not null && view == relocation.Request.SourceTerrain.View)
+            return TerrainPublicationOutcome.Busy;
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement remained open across a terrain view change.");
         var mask = ++_sequence;
@@ -577,7 +605,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             overlay.Menu = ActiveCaveClimbHint ?? $"Loading planet terrain\n\n{PlanetName}\nSeed {Descriptor.Seed}\nGenerator {Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
         if (rendererReady is null)
             RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, camera.Sky));
-        var selection = returnTerrain?.Selection ?? SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
+        var selection = returnTerrain?.Selection ?? relocation?.Selection ??
+            SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
         if (_selection is null || selection.Minimum != _selection.Minimum)
             _windows++;
         var revision = _published.TerrainRevision;
@@ -592,7 +621,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 started, token, timing).ConfigureAwait(false);
             if (result != VolumeAdmission.Accepted || work is null)
             {
-                if (edit is not null)
+                if (edit is not null || relocation is not null)
                     return EditAdmissionOutcome(result);
                 throw TerrainAdmissionFailure(result);
             }
@@ -624,19 +653,19 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (!await generated.ConfigureAwait(false))
         {
             token.ThrowIfCancellationRequested();
-            if (edit is not null)
+            if (edit is not null || relocation is not null)
                 return TerrainPublicationOutcome.Rejected;
             throw new InvalidOperationException("Terrain generation did not complete.");
         }
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
-            pauseWhileMinimized: true, r09Presentation: timing is null ? null :
+            pauseWhileMinimized: relocation is null, r09Presentation: timing is null ? null :
                 new(timing.Path, "mask", terrain, view, work.Generation, mask)).ConfigureAwait(false);
         if (timing is null)
         {
             var packSample = BiomeMeasurements.StartBuild();
             var upload = renderer.TryStageVolumeTerrain(work.Generation);
             BiomeMeasurements.WriteBuild("near-pack", packSample);
-            if (edit is not null)
+            if (edit is not null || relocation is not null)
             {
                 if (upload == MeshReplacementSubmissionResult.Backpressure)
                     return TerrainPublicationOutcome.Busy;
@@ -657,10 +686,23 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             await BeginAsync(token).ConfigureAwait(false);
         }
         var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
-        var prepared = renderer.TryPrepareVolumePublication(work.Generation, commit, [], out var preparation);
+        var preparation = MeshReplacementSubmissionResult.Accepted;
+        PlanetWalkState? relocated = null;
+        PreparedBarrierPublication? prepared;
+        if (relocation is null)
+            prepared = renderer.TryPrepareVolumePublication(work.Generation, commit, [], out preparation);
+        else
+        {
+            if (token.IsCancellationRequested)
+            {
+                Finish(commit);
+                token.ThrowIfCancellationRequested();
+            }
+            prepared = PrepareConsoleRelocation(relocation, renderer, work.Generation, commit, out relocated);
+        }
         if (prepared is null)
         {
-            if (edit is not null)
+            if (edit is not null || relocation is not null)
             {
                 Finish(commit);
                 // The renderer can report StaleGeneration for any rejected Core preparation.
@@ -670,7 +712,22 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             throw new InvalidOperationException($"Terrain publication was rejected ({preparation}).");
         }
         if (Finish(commit, prepared).Status != BarrierStatus.Committed)
+        {
+            if (relocation is not null)
+                return TerrainPublicationOutcome.Stale;
             throw new InvalidOperationException("Terrain publication did not commit.");
+        }
+        if (relocation is not null)
+        {
+            if (relocated is not { } pose ||
+                _ports.Committed.Read().Root is not VolumeWorldRoot root || root.Player != pose ||
+                root.Terrain.Generation != work.Generation || root.Terrain.View != view)
+                throw new InvalidOperationException("Terrain relocation committed without its verified pose.");
+            relocation.CommittedPose = pose;
+            position = pose.Position;
+            heading = pose.Heading;
+            camera = Camera(view, position, heading);
+        }
         using (var lease = terrain.TryRead() ?? throw new InvalidOperationException("Published terrain unavailable."))
         {
             _published = lease.Info;

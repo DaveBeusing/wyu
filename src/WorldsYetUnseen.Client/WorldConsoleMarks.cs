@@ -69,7 +69,18 @@ internal sealed class WorldConsoleMarks(Func<string> world, Func<ulong> seed, Fu
         return names.Order(StringComparer.Ordinal).Select(name => prefix + name);
     }
 
-    private bool TryGetPosition(string name, out PlanetVector target)
+    internal IEnumerable<string> CompleteTeleport(string value)
+    {
+        if (!value.StartsWith("mark ", StringComparison.Ordinal))
+            return ["mark ", "back"];
+        var prefixLength = 5;
+        while (prefixLength < value.Length && value[prefixLength] == ' ')
+            prefixLength++;
+        var prefix = value[..prefixLength];
+        return _marks.Keys.Order(StringComparer.Ordinal).Select(name => prefix + name);
+    }
+
+    internal bool TryGetPosition(string name, out PlanetVector target)
     {
         target = default;
         if (!ValidName(name) || !_marks.TryGetValue(name, out var mark) || !IsCurrentWorld(mark) ||

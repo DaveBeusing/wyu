@@ -118,7 +118,14 @@ named `off`.
 In Free Test World, **spectate on** switches to a free camera in the loaded
 terrain. Use WASD, mouse look, E to rise, and Q to descend. **spectate off**
 or Esc returns to the avatar. **give ore <1–64>** adds construction ore
-through the existing inventory rules.
+through the existing inventory rules. Use **teleport mark <name>** or
+**teleport <x> <y> <z>** to relocate up to 512 m when the destination has
+walkable ground. Coordinates are planet-centered meters at foot level.
+**teleport back** returns to the last departure point in this session.
+
+**save verify** checks the last committed checkpoint against the session's
+saved data without writing to the slot. If a save is pending, retry it with F5
+before verifying.
 
 **preset diff live <name>** compares the current presentation to a saved preset.
 Use **preset diff saved <a> <b>** to compare two saved presets when the first is
