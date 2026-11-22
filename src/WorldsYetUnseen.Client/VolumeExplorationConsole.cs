@@ -8,8 +8,8 @@ internal sealed partial class VolumeExploration
 {
     private const float DefaultFieldOfView = 1f;
     private const int PresetLimit = 16;
-    private const string PresetSaveUsage = "preset save <name>";
-    private const string PresetLoadUsage = "preset load <name>";
+    private const int PresetsPerPage = 7; // Leave room for the command and page heading in the smallest console.
+    private const string PresetUsage = "preset save <name>\npreset load <name>\npreset list [page]\npreset delete <name>";
     private float _fieldOfView = DefaultFieldOfView;
     private ulong? _previewTime;
 
@@ -18,6 +18,7 @@ internal sealed partial class VolumeExploration
     private WorldConsole CreateConsole(Func<PlanetVector> position, ConsoleFrameProfile profile, Func<string, bool> copyReport)
     {
         var presets = new Dictionary<string, PresentationPreset>(StringComparer.Ordinal);
+        string[] presetVerbs = ["save", "load", "list", "delete"];
         var commands = new List<ConsoleCommand>
         {
             new("fov", "fov [50..100|reset]", "Vertical camera angle (deg)", SetFieldOfView, "reset")
@@ -41,26 +42,45 @@ internal sealed partial class VolumeExploration
             CurrentValue = profile.State, Example = "profile 10", UsageDetails = ConsoleFrameProfile.ComparisonUsage,
         });
         commands.Add(new("report", "report copy", "Copy A/B report", value => CopyComparison(value, profile, copyReport), "copy"));
-        commands.Add(new("preset", "preset <save|load>", "Session presets", ApplyPreset, "save", "load")
+        commands.Add(new("preset", "preset <command>", "Session presets", ApplyPreset, presetVerbs)
         {
-            UsageDetails = $"{PresetSaveUsage}\n{PresetLoadUsage}\nName: 1–24 a-z, 0-9, hyphen",
-            CompleteValue = value => value.StartsWith("load ", StringComparison.Ordinal)
-                ? presets.Keys.Order(StringComparer.Ordinal).Select(name => $"load {name}")
-                : ["save", "load"],
+            UsageDetails = $"{PresetUsage}\nName: 1–24 a-z, 0-9, hyphen",
+            CompleteValue = CompletePresetValue,
         });
         return new(commands.ToArray());
+
+        IOrderedEnumerable<string> PresetNames() => presets.Keys.Order(StringComparer.Ordinal);
+
+        IEnumerable<string> CompletePresetValue(string value)
+        {
+            var separator = value.IndexOf(' ');
+            if (separator < 0 || value[..separator] is not ("load" or "delete"))
+                return presetVerbs;
+
+            var nameStart = separator + 1;
+            while (nameStart < value.Length && value[nameStart] == ' ')
+                nameStart++;
+            var prefix = value[..nameStart];
+            return PresetNames().Select(name => prefix + name);
+        }
 
         string ApplyPreset(string value)
         {
             var separator = value.IndexOf(' ');
-            if (separator < 0 || value[..separator] is not ("save" or "load"))
-                return $"{PresetSaveUsage}\n{PresetLoadUsage}";
+            var verb = separator < 0 ? value : value[..separator];
+            var name = separator < 0 ? "" : value[(separator + 1)..].TrimStart();
+            if (verb == "list")
+                return ListPresets(name);
+            if (separator < 0 || verb is not ("save" or "load" or "delete"))
+                return PresetUsage;
 
-            var name = value[(separator + 1)..].TrimStart();
             if (name.Length is < 1 or > 24 || name.Any(c => c is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '-')))
                 return "Name: 1–24 a-z, 0-9, hyphen";
 
-            if (value[..separator] == "load")
+            if (verb == "delete")
+                return presets.Remove(name) ? $"Preset deleted.\n{name}" : $"Preset not found.\n{name}";
+
+            if (verb == "load")
             {
                 if (!presets.TryGetValue(name, out var preset))
                     return $"Preset not found.\n{name}";
@@ -73,6 +93,24 @@ internal sealed partial class VolumeExploration
                 return $"Preset limit: {PresetLimit}.";
             presets[name] = new(_fieldOfView, _testFog, _previewTime);
             return exists ? $"Preset replaced.\n{name}" : $"Preset saved.\n{name}";
+        }
+
+        string ListPresets(string argument)
+        {
+            var pages = Math.Max(1, (presets.Count + PresetsPerPage - 1) / PresetsPerPage);
+            var page = 1;
+            if (argument.Length > 0 &&
+                (!int.TryParse(argument, NumberStyles.None, CultureInfo.InvariantCulture, out page) ||
+                 page < 1 || page > pages))
+                return pages == 1 ? "Usage: preset list" : $"Preset page: 1–{pages}.";
+            if (presets.Count == 0)
+                return "No presets saved.";
+
+            var heading = $"Presets {page}/{pages}";
+            if (page < pages)
+                heading += $" · preset list {page + 1}";
+            var names = PresetNames().Skip((page - 1) * PresetsPerPage).Take(PresetsPerPage);
+            return string.Join('\n', names.Prepend(heading));
         }
     }
 
