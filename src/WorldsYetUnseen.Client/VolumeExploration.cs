@@ -43,8 +43,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private bool _testMenu;
     private int _testAction;
     private bool? _testFog;
-    private readonly string? _testBuild = freeTestWorld ? typeof(VolumeExploration).Assembly
-        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown" : null;
+    private static readonly string ClientBuild = typeof(VolumeExploration).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+    private readonly string? _testBuild = freeTestWorld ? ClientBuild : null;
     private VolumeStreamingSelection? _selection;
     private VolumePublicationInfo _published;
     private int _transitions, _views, _windows, _fineBricks;
@@ -214,8 +215,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var exercisedWindow = false;
         var previousFrame = Stopwatch.GetTimestamp();
         using var cadence = new PeriodicTimer(TimeSpan.FromSeconds(1d / 60));
-        var profile = !scripted && overlay is not null ? new ConsoleFrameProfile(TimeProvider.System) : null;
-        var terminal = profile is null ? null : CreateConsole(() => state.Position, profile);
+        var profile = !scripted && overlay is not null
+            ? new ConsoleFrameProfile(TimeProvider.System, () => ReadProfileContext(state.Position)) : null;
+        var terminal = profile is null ? null : CreateConsole(() => state.Position, profile, overlay!.TryCopyReport);
         void ReportProfile(string? result)
         {
             if (result is null || terminal is null)

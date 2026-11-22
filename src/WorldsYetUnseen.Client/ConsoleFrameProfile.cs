@@ -3,7 +3,7 @@ using Groundwork.Rendering;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class ConsoleFrameProfile(TimeProvider clock)
+internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> describeStart)
 {
     internal const string Usage = "profile [n|cancel]";
     internal const string ComparisonUsage = "profile keep <a|b>\nprofile compare";
@@ -18,12 +18,13 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock)
     private int _observedPresents;
     private int _slowPolls;
     private double _maxPollGap;
+    private string? _startContext;
     private Measurement? _last;
     private Measurement? _a;
     private Measurement? _b;
 
     private readonly record struct Measurement(double Seconds, int Presents, double MaxGap, int SlowPolls,
-        ulong Replaced, ulong Skipped)
+        ulong Replaced, ulong Skipped, string StartContext)
     {
         internal double ObservedFps => Presents / Seconds;
 
@@ -70,9 +71,17 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock)
             return _a is null && _b is null ? "Keep profiles in A and B."
                 : _a is null ? "Slot A is empty." : "Slot B is empty.";
 
-        return FormattableString.Invariant(
-            $"A {a.Seconds:0.0}s | B {b.Seconds:0.0}s\nObs FPS {a.ObservedFps:0.0} | {b.ObservedFps:0.0}\nMax ms {a.MaxGap:0.0} | {b.MaxGap:0.0}\nSlow polls/s {a.SlowPolls / a.Seconds:0.0} | {b.SlowPolls / b.Seconds:0.0}\nReplaced/s {a.Replaced / a.Seconds:0.0} | {b.Replaced / b.Seconds:0.0}\nSkipped/s {a.Skipped / a.Seconds:0.0} | {b.Skipped / b.Seconds:0.0}");
+        return DescribeComparison(a, b);
     }
+
+    internal string? ReadComparisonReport(string build) =>
+        _a is { } a && _b is { } b
+            ? $"WYU A/B performance report\nBuild {build}\n\n{DescribeComparison(a, b)}\n\nA at start\n{a.StartContext}\n\nB at start\n{b.StartContext}"
+            : null;
+
+    private static string DescribeComparison(Measurement a, Measurement b) =>
+        FormattableString.Invariant(
+            $"A {a.Seconds:0.0}s | B {b.Seconds:0.0}s\nObs FPS {a.ObservedFps:0.0} | {b.ObservedFps:0.0}\nMax ms {a.MaxGap:0.0} | {b.MaxGap:0.0}\nSlow polls/s {a.SlowPolls / a.Seconds:0.0} | {b.SlowPolls / b.Seconds:0.0}\nReplaced/s {a.Replaced / a.Seconds:0.0} | {b.Replaced / b.Seconds:0.0}\nSkipped/s {a.Skipped / a.Seconds:0.0} | {b.Skipped / b.Seconds:0.0}");
 
     internal string? Observe(object renderer, RendererSnapshot snapshot, bool eligible)
     {
@@ -84,6 +93,7 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock)
         var now = clock.GetTimestamp();
         if (_renderer is null)
         {
+            _startContext = describeStart();
             _renderer = renderer;
             _baseline = _previous = snapshot;
             _started = _lastPoll = now;
@@ -117,7 +127,7 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock)
 
         var replaced = snapshot.ReplacedFrames - _baseline.ReplacedFrames;
         var skipped = snapshot.SkippedFrames - _baseline.SkippedFrames;
-        var measurement = new Measurement(elapsed, _observedPresents, _maxPollGap, _slowPolls, replaced, skipped);
+        var measurement = new Measurement(elapsed, _observedPresents, _maxPollGap, _slowPolls, replaced, skipped, _startContext!);
         _last = measurement;
         return Interrupt(measurement.Describe());
     }
@@ -129,6 +139,7 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock)
 
         _seconds = 0;
         _renderer = null;
+        _startContext = null;
         return message;
     }
 }

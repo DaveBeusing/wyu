@@ -4,7 +4,6 @@ namespace WorldsYetUnseen.Client;
 
 internal sealed partial class AlphaOverlay
 {
-    private const int ConsoleRowSpace = 124;
     private const string ConsoleTitle = "WYU world console";
     private volatile ConsoleView? _console;
 
@@ -38,11 +37,13 @@ internal sealed partial class AlphaOverlay
         }
     }
 
-    private static int ConsoleRowHeight(int height) => height < ConsoleRowSpace + 7 * 20 ? 18 : 20;
+    private static (int Top, int Footer, int Row) ConsoleLayout(int height) =>
+        height < 284 ? (48, 56, 18) : (59, 63, 20);
 
     private static ArraySegment<string> VisibleConsoleRows(ConsoleView view, int height)
     {
-        var count = Math.Min(view.Lines.Length, Math.Max(0, (height - ConsoleRowSpace) / ConsoleRowHeight(height)));
+        var (top, footer, row) = ConsoleLayout(height);
+        var count = Math.Min(view.Lines.Length, Math.Max(0, (height - top - footer - 2) / row));
         var first = view.ShowingHelp ? 0 : view.Lines.Length - count;
         return new(view.Lines, first, count);
     }
@@ -65,14 +66,16 @@ internal sealed partial class AlphaOverlay
             var previous = font == 0 ? 0 : SelectObject(dc, font);
             try
             {
-                DrawLine("WORLD CONSOLE", Padding, 12, Accent);
+                var (top, footer, row) = ConsoleLayout(size.Height);
+                var compact = row == 18;
+                DrawLine("WORLD CONSOLE", Padding, compact ? 10 : 12, Accent);
                 var controls = size.Width < 510 ? "ESC close   TAB   ↑↓"
                     : "ESC / F3 close   TAB complete   ↑↓ history   ENTER run";
-                DrawLine(controls, Padding, 34, Muted);
-                var promptY = size.Height - 63;
+                DrawLine(controls, Padding, compact ? 29 : 34, Muted);
+                var promptY = size.Height - footer;
                 _ = PaintRect(dc, 8, promptY, size.Width - 8, promptY + 28, Input);
                 for (var i = 0; i < rows.Count; i++)
-                    DrawLine(rows[i], Padding, 59 + i * ConsoleRowHeight(size.Height), Text);
+                    DrawLine(rows[i], Padding, top + i * row, Text);
 
                 var available = Math.Max(1, (size.Width - 2 * Padding - 20) / 9);
                 var caret = view.Prompt.IndexOf('▏');

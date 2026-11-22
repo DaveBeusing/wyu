@@ -72,6 +72,11 @@ available. **profile compare** shows both measured durations and rates side by
 side. The count-based metrics are shown per second, including poll gaps over
 33 ms, so you can compare samples of different lengths.
 
+**report copy** copies the A/B comparison to the Windows clipboard. It includes
+the client build and the world, seed, generator, position and presentation
+settings recorded at the start of each measurement. Keep a profile in both A
+and B before copying.
+
 ## Build and verification
 
 Use Windows, the .NET 10 SDK, PowerShell 7, and GitHub CLI. The
