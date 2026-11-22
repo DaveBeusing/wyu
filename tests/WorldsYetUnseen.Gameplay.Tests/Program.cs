@@ -14,7 +14,14 @@ internal static class Program
             (nameof(InventoryTests.TransfersAndSupport), InventoryTests.TransfersAndSupport),
             (nameof(InventoryTests.SaveBudgetRelief), InventoryTests.SaveBudgetRelief),
         ];
-        (string Name, Action Run)[] tests = args.Contains("--inventory-only", StringComparer.Ordinal) ? inventory :
+        (string Name, Action Run)[] construction =
+        [
+            (nameof(ConstructionTests.GridAndOrientations), ConstructionTests.GridAndOrientations),
+            (nameof(ConstructionTests.AtomicOwnershipAndOverlap), ConstructionTests.AtomicOwnershipAndOverlap),
+            (nameof(ConstructionTests.RecordLimitsAndRestoreValidation), ConstructionTests.RecordLimitsAndRestoreValidation),
+        ];
+        (string Name, Action Run)[] tests = args.Contains("--construction-only", StringComparer.Ordinal) ? construction :
+            args.Contains("--inventory-only", StringComparer.Ordinal) ? inventory :
         [
             (nameof(FixedRouteRepeatsEveryCheckpoint), FixedRouteRepeatsEveryCheckpoint),
             (nameof(AllMiningOrdersConserveStone), AllMiningOrdersConserveStone),
@@ -26,7 +33,10 @@ internal static class Program
             (nameof(ReferencePlanetTests.ChartContinuity), ReferencePlanetTests.ChartContinuity),
             (nameof(ReferencePlanetTests.PublishedSpawnAndLanding), ReferencePlanetTests.PublishedSpawnAndLanding),
             .. inventory,
+            .. construction,
         ];
+        if (args.Contains("--measure-construction", StringComparer.Ordinal))
+            tests = [.. tests, (nameof(ConstructionTests.MeasureStaging), ConstructionTests.MeasureStaging)];
         if (args.Contains("--measure-inventory", StringComparer.Ordinal))
             tests = [.. tests, (nameof(InventoryTests.MeasureMoves), InventoryTests.MeasureMoves)];
         var failed = 0;

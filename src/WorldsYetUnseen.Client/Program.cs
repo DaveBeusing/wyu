@@ -8,11 +8,15 @@ internal static class Program
     {
         if (args is ["--inventory-checkpoint-proof"])
             return InventoryCheckpointVerification.Run();
+        if (args is ["--construction-collision-proof"])
+            return ConstructionCollisionVerification.Run();
 
         if (args is ["--cave-smoke", "init" or "resume" or "v3-init" or "v3-resume", _])
             return await RunCaveSmokeAsync(args[1], args[2]).ConfigureAwait(false);
 
-        if (args is ["--new-world"] or ["--free-test-world", _] || args is ["--planet-playtest", _] or ["--planet-playtest", _, "graphics" or "budget"] ||
+        if (args is ["--new-world"] or ["--free-test-world", _] or ["--construction-continue-proof", _] or
+            ["--construction-motion-proof", _] or ["--construction-measure-proof", _] ||
+            args is ["--planet-playtest", _] or ["--planet-playtest", _, "graphics" or "budget"] ||
             args is ["--volume-smoke", _, "warp" or "hardware"] ||
             args is ["--volume-save-smoke", "init" or "restore" or "interrupt" or "verify" or "protected", _] ||
             args is ["--volume-flight-smoke", "readback" or "marker-readback", _, "warp"] ||
@@ -131,7 +135,10 @@ internal static class Program
     {
         var saveSmoke = args[0] == "--volume-save-smoke";
         var flightSmoke = args[0] == "--volume-flight-smoke";
-        var freeTestWorld = args[0] == "--free-test-world";
+        var constructionMotion = args[0] == "--construction-motion-proof";
+        var constructionMeasure = args[0] == "--construction-measure-proof";
+        var constructionContinue = args[0] == "--construction-continue-proof" || constructionMotion || constructionMeasure;
+        var freeTestWorld = args[0] == "--free-test-world" || constructionContinue;
         var playtest = args[0] == "--planet-playtest" || freeTestWorld;
         var scripted = !playtest && args.Length >= 3;
         ulong? seed = null;
@@ -146,8 +153,9 @@ internal static class Program
         }
 
         using var stop = new CancellationTokenSource();
-        if (scripted)
-            stop.CancelAfter(TimeSpan.FromMinutes(Environment.GetEnvironmentVariable("WYU_PACKAGE_E_TIMESTAMP_PAIRS") == "1" ? 6 : 3));
+        if (scripted || constructionContinue)
+            stop.CancelAfter(TimeSpan.FromMinutes(constructionMeasure ? 10 :
+                Environment.GetEnvironmentVariable("WYU_PACKAGE_E_TIMESTAMP_PAIRS") == "1" ? 6 : 3));
         var fixture = playtest ? Path.GetFullPath(args[1]) : null;
         if (fixture is not null && !File.Exists(Path.Combine(fixture, "wyu-planet-playtest.fixture")))
             return 2;
@@ -169,10 +177,11 @@ internal static class Program
                     return 2;
                 seed = flightSeed;
             }
-            var warp = saveSmoke || scripted && (flightSmoke ? args[3] : args[^1]) == "warp";
+            var warp = constructionContinue || saveSmoke || scripted && (flightSmoke ? args[3] : args[^1]) == "warp";
             await GameHost.RunExplorationAsync(seed, warp, diagnostics, stop.Token,
                 saveRoot: fixture is not null ? freeTestWorld ? Path.Combine(fixture, "test-worlds", "v2") : Path.Combine(fixture, "v2") : saveSmoke || flightSmoke ? args[2] : null,
-                saveSmoke: saveSmoke || flightSmoke ? args[1] : null, flightSmoke: flightSmoke, freeTestWorld: freeTestWorld)
+                saveSmoke: saveSmoke || flightSmoke ? args[1] : null, flightSmoke: flightSmoke, freeTestWorld: freeTestWorld,
+                constructionContinue: constructionContinue, constructionMotion: constructionMotion, constructionMeasure: constructionMeasure)
                 .ConfigureAwait(false);
             diagnostics?.Write("exit");
             return 0;

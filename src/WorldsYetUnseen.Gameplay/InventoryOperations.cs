@@ -75,6 +75,25 @@ public static class InventoryOperations
             allowOverload);
     }
 
+    internal static InventoryChange SpendOre(InventoryState state, int quantity)
+    {
+        if (quantity <= 0 || !CanEdit(state))
+            return Reject(state, InventoryChangeStatus.Invalid);
+        if (quantity > state.OreCount)
+            return Reject(state, InventoryChangeStatus.NothingFits);
+
+        var remaining = quantity;
+        var carried = ImmutableArray.CreateBuilder<InventoryStack>(state.Carried.Length);
+        foreach (var stack in state.Carried)
+        {
+            var used = stack.Item == InventoryItem.Ore ? Math.Min(remaining, stack.Quantity) : 0;
+            if (used < stack.Quantity)
+                carried.Add(stack with { Quantity = (ushort)(stack.Quantity - used) });
+            remaining -= used;
+        }
+        return Commit(state, state with { Carried = carried.ToImmutable() }, [new(InventoryItem.Ore, quantity)], []);
+    }
+
     public static InventoryChange Equip(InventoryState state, ushort slot)
     {
         var stack = Find(state.Carried, slot);

@@ -28,6 +28,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     private bool _materialRequestsPending;
     private bool _orbitalMaterialCut;
     internal ReferenceProps? Props { get; set; }
+    internal ConstructionVisuals? ConstructionVisuals { get; init; }
     internal ReferenceBiomes? Biomes { get; private set; }
     internal OrbitTerrainMaterials? OrbitMaterials { private get; set; }
 
@@ -61,7 +62,10 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
                     terrain.View.RendererEpoch, _device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
             if (qualifyR09)
                 R09UploadGate = R09NativeUploadGate.Attach(renderer);
-            Props?.Attach(renderer);
+            if (ConstructionVisuals is { } buildings)
+                buildings.Attach(renderer, Props);
+            else
+                Props?.Attach(renderer);
             return renderer;
         }, token, onStarted);
 

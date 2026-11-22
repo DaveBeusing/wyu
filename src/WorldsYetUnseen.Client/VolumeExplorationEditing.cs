@@ -70,6 +70,13 @@ internal sealed partial class VolumeExploration
             return true;
         }
 
+        if (add && ReadInventory()?.Construction is { Blocks.IsEmpty: false } buildings &&
+            Collision(buildings).Intersects(ConstructionCollision.TerrainEditBox(center, Descriptor.CellSizeMeters)))
+        {
+            Notice("Terrain fill is blocked by a construction footprint.");
+            return true;
+        }
+
         var beforeOre = CaveOre;
         OrePreview? approval = null;
         if (!add && cave is not null && ReadInventory() is { } inventory &&
