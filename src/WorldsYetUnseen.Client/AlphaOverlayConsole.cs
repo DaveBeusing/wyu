@@ -27,28 +27,51 @@ internal sealed partial class AlphaOverlay
             var layout = (view, origin, size);
             if (_drawn == layout)
                 return;
-            var rows = VisibleConsoleRows(view, size.Height);
-            if (!DrawConsole(handle, view, rows, origin, size))
+            var geometry = LayoutConsole(view, size.Height);
+            var rows = VisibleConsoleRows(view, size.Height, geometry);
+            if (!DrawConsole(handle, view, rows, origin, size, geometry))
                 return;
-            SetWindowText(handle, $"{ConsoleTitle} | {string.Join(" | ", rows.AsSpan())} | > {view.Prompt}");
+            var prompt = view.SearchingHistory ? $"History search: {view.Prompt} | {view.Suggestions}" : $"> {view.Prompt}";
+            SetWindowText(handle, $"{ConsoleTitle} | {string.Join(" | ", rows.AsSpan())} | {prompt}");
             if (_drawn is null)
                 _ = ShowWindow(handle, 4);
             _drawn = layout;
         }
     }
 
-    private static (int Top, int Footer, int Row) ConsoleLayout(int height) =>
-        height < 268 ? (48, 56, 16) : height < 304 ? (48, 56, 18) : (59, 63, 20);
-
-    private static ArraySegment<string> VisibleConsoleRows(ConsoleView view, int height)
+    private readonly record struct ConsoleGeometry(int Top, int Footer, int Row, int Font, bool SingleHeader = false)
     {
-        var (top, footer, row) = ConsoleLayout(height);
-        var count = Math.Min(view.Lines.Length, Math.Max(0, (height - top - footer - 2) / row));
+        internal int RowsAt(int height) => Math.Max(0, (height - Top - Footer - 2) / Row);
+    }
+
+    private static ConsoleGeometry LayoutConsole(ConsoleView view, int height)
+    {
+        ConsoleGeometry standard = height switch
+        {
+            < 268 => new(48, 56, 16, 13),
+            < 304 => new(48, 56, 18, 15),
+            _ => new(59, 63, 20, 15),
+        };
+        if (standard.RowsAt(height) >= view.RequiredRows)
+            return standard;
+
+        return height switch
+        {
+            < 261 => new(28, 55, 15, 12, SingleHeader: true),
+            < 283 => new(28, 55, 16, 13, SingleHeader: true),
+            _ => new(28, 55, 18, 15, SingleHeader: true),
+        };
+    }
+
+    private static ArraySegment<string> VisibleConsoleRows(ConsoleView view, int height, ConsoleGeometry geometry)
+    {
+        var count = Math.Min(view.Lines.Length, geometry.RowsAt(height));
         var first = view.ShowingHelp ? 0 : view.Lines.Length - count;
         return new(view.Lines, first, count);
     }
 
-    private static bool DrawConsole(nint handle, ConsoleView view, ArraySegment<string> rows, Point origin, Size size) =>
+    private static bool DrawConsole(nint handle, ConsoleView view, ArraySegment<string> rows, Point origin, Size size,
+        ConsoleGeometry geometry) =>
         DrawLayer(handle, origin, size, 247, 2, dc =>
         {
             const uint Background = 0x00251C16;
@@ -62,25 +85,39 @@ internal sealed partial class AlphaOverlay
                 !PaintRect(dc, 0, 0, size.Width, 2, Accent) || SetBkMode(dc, 1) == 0)
                 return false;
 
-            var (top, footer, row) = ConsoleLayout(size.Height);
-            var font = CreateFont(row == 16 ? -13 : -15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 4, 0, "Consolas");
+            var font = CreateFont(-geometry.Font, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 4, 0, "Consolas");
             var previous = font == 0 ? 0 : SelectObject(dc, font);
             try
             {
-                var compact = row < 20;
-                DrawLine("WORLD CONSOLE", Padding, compact ? 10 : 12, Accent);
-                var controls = size.Width < 510 ? "ESC close   TAB   ↑↓"
-                    : "ESC / F3 close   TAB complete   ↑↓ history   ENTER run";
-                DrawLine(controls, Padding, compact ? 29 : 34, Muted);
-                var promptY = size.Height - footer;
+                var title = view.SearchingHistory ? "HISTORY SEARCH" : "WORLD CONSOLE";
+                if (geometry.SingleHeader)
+                {
+                    var heading = size.Width >= 620
+                        ? view.SearchingHistory ? "HISTORY SEARCH   Ctrl+R older   Enter edit   Esc cancel"
+                            : "WORLD CONSOLE   Esc / F3 close   Tab complete   Ctrl+R search"
+                        : view.SearchingHistory ? "SEARCH   Ctrl+R Enter Esc" : "CONSOLE   Esc Tab Ctrl+R";
+                    DrawLine(heading, Padding, 9, Accent);
+                }
+                else
+                {
+                    var compact = geometry.Row < 20;
+                    DrawLine(title, Padding, compact ? 10 : 12, Accent);
+                    var controls = view.SearchingHistory
+                        ? size.Width < 510 ? "Ctrl+R · Enter · Esc" : "Ctrl+R older   Enter edit   Esc cancel"
+                        : size.Width < 620 ? "Esc · Tab · Ctrl+R · ↑↓"
+                            : "Esc / F3 close   Tab complete   Ctrl+R search   ↑↓ history   Enter run";
+                    DrawLine(controls, Padding, compact ? 29 : 34, Muted);
+                }
+
+                var promptY = size.Height - geometry.Footer;
                 _ = PaintRect(dc, 8, promptY, size.Width - 8, promptY + 28, Input);
                 for (var i = 0; i < rows.Count; i++)
-                    DrawLine(rows[i], Padding, top + i * row, Text);
+                    DrawLine(rows[i], Padding, geometry.Top + i * geometry.Row, Text);
 
                 var available = Math.Max(1, (size.Width - 2 * Padding - 20) / 9);
                 var caret = view.Prompt.IndexOf('▏');
                 var start = Math.Max(0, caret - available + 1);
-                DrawLine("> " + view.Prompt[start..], Padding, promptY + 5, Accent);
+                DrawLine((view.SearchingHistory ? "? " : "> ") + view.Prompt[start..], Padding, promptY + 5, Accent);
                 DrawLine(view.Suggestions ?? "help [cmd] · clear", Padding, promptY + 35, Muted);
                 return true;
             }

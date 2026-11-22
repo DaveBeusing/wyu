@@ -9,59 +9,122 @@ internal sealed partial class VolumeExploration
     private const float DefaultFieldOfView = 1f;
     private const int PresetLimit = 16;
     private const int PresetsPerPage = 7; // Leave room for the command and page heading in the smallest console.
-    private const string PresetUsage = "preset save <name>\npreset load <name>\npreset list [page]\npreset delete <name>";
+    private const string PresetUsage = "preset save <name>\npreset load <name>\npreset list [page]\npreset delete <name>\npreset show <name>\npreset diff <a> <b>";
+    private const string ProfileRunUsage = "profile run <a> <b> [sec]";
+    private const string ProfileRunTiming = "1–30 s per preset\nDefault: 5 s";
+    private const string PresetNameUsage = "Name: 1–24 a-z, 0-9, hyphen";
     private float _fieldOfView = DefaultFieldOfView;
     private ulong? _previewTime;
+    private string? _comparisonPresetName;
 
     private readonly record struct PresentationPreset(float FieldOfView, bool? Fog, ulong? Time);
 
-    private WorldConsole CreateConsole(Func<PlanetVector> position, ConsoleFrameProfile profile, Func<string, bool> copyReport)
+    private WorldConsole CreateConsole(Func<PlanetVector> position, ConsoleFrameProfile profile, Func<string, bool> copyText)
     {
         var presets = new Dictionary<string, PresentationPreset>(StringComparer.Ordinal);
-        string[] presetVerbs = ["save", "load", "list", "delete"];
+        string[] presetVerbs = ["save", "load", "list", "delete", "show", "diff"];
+        string[] profileValues = ["5", "10", "30", "cancel", "keep a", "keep b", "compare", "run"];
         var commands = new List<ConsoleCommand>
         {
-            new("fov", "fov [50..100|reset]", "Vertical camera angle (deg)", SetFieldOfView, "reset")
+            new("fov", "fov [50..100|reset]", "Vertical camera angle (deg)", value => OutsideComparison(value, SetFieldOfView), "reset")
                 { CurrentValue = ReadFieldOfView, Example = "fov 90" },
-            new("stats", "stats [on|off]", "F1 diagnostics", SetDiagnostics, "on", "off")
+            new("stats", "stats [on|off]", "F1 diagnostics", value => OutsideComparison(value, SetDiagnostics), "on", "off")
                 { CurrentValue = ReadDiagnostics, Example = "stats on" },
         };
         if (_weather is not null)
         {
-            commands.Add(new("time", "time [day|night|live]", "Preview the sky and lighting", SetTimePreview, "day", "night", "live")
+            commands.Add(new("time", "time [day|night|live]", "Preview the sky and lighting", value => OutsideComparison(value, SetTimePreview), "day", "night", "live")
                 { CurrentValue = () => $"Time: {TimeMode}", Example = "time night" });
-            commands.Add(new("fog", "fog [auto|on|off]", "Terrain fog", SetFog, "auto", "on", "off")
+            commands.Add(new("fog", "fog [auto|on|off]", "Terrain fog", value => OutsideComparison(value, SetFog), "auto", "on", "off")
                 { CurrentValue = () => $"Fog: {FogMode}", Example = "fog off" });
         }
         commands.Add(new("status", "status", "World and settings",
             value => value.Length == 0 ? ReadConsoleStatus(position()) : "Usage: status") { Example = "status" });
-        commands.Add(new("reset", "reset", "Reset FOV, time and fog", ResetPresentation) { Example = "reset" });
-        commands.Add(new("profile", ConsoleFrameProfile.Usage, "Sample 1–30 seconds", profile.Handle,
-            "5", "10", "30", "cancel", "keep a", "keep b", "compare")
+        commands.Add(new("reset", "reset", "Reset FOV, time and fog", value => OutsideComparison(value, ResetPresentation)) { Example = "reset" });
+        commands.Add(new("profile", ConsoleFrameProfile.Usage, "Measure performance", RunProfile, profileValues)
         {
-            CurrentValue = profile.State, Example = "profile 10", UsageDetails = ConsoleFrameProfile.ComparisonUsage,
+            CurrentValue = profile.State,
+            UsageDetails = $"{ConsoleFrameProfile.ComparisonUsage}\n{ProfileRunUsage}\n{ProfileRunTiming}",
+            CompleteValue = value => value.StartsWith("run ", StringComparison.Ordinal)
+                ? CompletePresetNames(value, 2)
+                : profileValues,
         });
-        commands.Add(new("report", "report copy", "Copy A/B report", value => CopyComparison(value, profile, copyReport), "copy"));
+        commands.Add(new("report", "report copy", "Copy A/B report", value => CopyComparison(value, profile, copyText), "copy"));
         commands.Add(new("preset", "preset <command>", "Session presets", ApplyPreset, presetVerbs)
         {
-            UsageDetails = $"{PresetUsage}\nName: 1–24 a-z, 0-9, hyphen",
+            UsageDetails = $"{PresetUsage}\n{PresetNameUsage}",
             CompleteValue = CompletePresetValue,
         });
+        commands.Add(new("inspect", "inspect", "Local biome and weather", value => OutsideComparison(value, InspectPosition)));
+        commands.Add(new("pos", "pos copy", "Copy world, seed and XYZ",
+            value => value != "copy" ? "Usage: pos copy"
+                : copyText(ReadPosition(position())) ? "Position copied." : "Clipboard unavailable.\nTry pos copy again.", "copy"));
         return new(commands.ToArray());
+
+        string OutsideComparison(string value, Func<string, string> execute) =>
+            profile.IsComparing ? "A/B profile running." : execute(value);
+
+        string InspectPosition(string value) => value.Length == 0 ? Inspect(position()) : "Usage: inspect";
 
         IOrderedEnumerable<string> PresetNames() => presets.Keys.Order(StringComparer.Ordinal);
 
         IEnumerable<string> CompletePresetValue(string value)
         {
             var separator = value.IndexOf(' ');
-            if (separator < 0 || value[..separator] is not ("load" or "delete"))
-                return presetVerbs;
+            return separator < 0 ? presetVerbs : value[..separator] switch
+            {
+                "load" or "delete" or "show" => CompletePresetNames(value, 1),
+                "diff" => CompletePresetNames(value, 2),
+                _ => presetVerbs,
+            };
+        }
 
-            var nameStart = separator + 1;
-            while (nameStart < value.Length && value[nameStart] == ' ')
-                nameStart++;
-            var prefix = value[..nameStart];
+        IEnumerable<string> CompletePresetNames(string value, int nameCount)
+        {
+            var prefix = value[..(value.LastIndexOf(' ') + 1)];
+            var tokens = prefix.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length > nameCount || tokens.Length == 2 && !presets.ContainsKey(tokens[1]))
+                return [];
             return PresetNames().Select(name => prefix + name);
+        }
+
+        string RunProfile(string value)
+        {
+            if (value != "run" && !value.StartsWith("run ", StringComparison.Ordinal))
+                return profile.Handle(value);
+
+            var parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var seconds = 5;
+            if (parts.Length is < 3 or > 4 || parts.Length == 4 &&
+                (!int.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out seconds) ||
+                 seconds is not (>= 1 and <= 30)))
+                return $"{ProfileRunUsage}\n{ProfileRunTiming}";
+            if (!ValidPresetName(parts[1]) || !ValidPresetName(parts[2]))
+                return PresetNameUsage;
+            if (!presets.TryGetValue(parts[1], out var a))
+                return MissingPreset(parts[1]);
+            if (!presets.TryGetValue(parts[2], out var b))
+                return MissingPreset(parts[2]);
+            if (_caveExitWaypoint >= 0)
+                return "Finish climbing first.";
+
+            var original = ReadPresentation();
+            return profile.StartComparison(seconds,
+                () => ApplyProfilePreset(parts[1], a),
+                () => ApplyProfilePreset(parts[2], b),
+                () =>
+                {
+                    ApplyPresentation(original);
+                    _comparisonPresetName = null;
+                });
+        }
+
+        ulong ApplyProfilePreset(string name, PresentationPreset preset)
+        {
+            var firstSequence = checked(_sequence + 1);
+            ApplyPresentation(preset);
+            _comparisonPresetName = name;
+            return firstSequence;
         }
 
         string ApplyPreset(string value)
@@ -71,28 +134,62 @@ internal sealed partial class VolumeExploration
             var name = separator < 0 ? "" : value[(separator + 1)..].TrimStart();
             if (verb == "list")
                 return ListPresets(name);
-            if (separator < 0 || verb is not ("save" or "load" or "delete"))
+            if (verb == "diff")
+                return ComparePresets(name);
+            if (separator < 0 || verb is not ("save" or "load" or "delete" or "show"))
                 return PresetUsage;
 
-            if (name.Length is < 1 or > 24 || name.Any(c => c is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '-')))
-                return "Name: 1–24 a-z, 0-9, hyphen";
+            if (!ValidPresetName(name))
+                return PresetNameUsage;
+
+            if (verb == "show")
+                return presets.TryGetValue(name, out var stored) ? DescribePreset(name, stored) : MissingPreset(name);
+            if (profile.IsComparing)
+                return "A/B profile running.";
 
             if (verb == "delete")
-                return presets.Remove(name) ? $"Preset deleted.\n{name}" : $"Preset not found.\n{name}";
+                return presets.Remove(name) ? $"Preset deleted.\n{name}" : MissingPreset(name);
 
             if (verb == "load")
             {
                 if (!presets.TryGetValue(name, out var preset))
-                    return $"Preset not found.\n{name}";
-                (_fieldOfView, _testFog, _previewTime) = (preset.FieldOfView, preset.Fog, preset.Time);
+                    return MissingPreset(name);
+                ApplyPresentation(preset);
                 return $"Preset loaded.\n{name}";
             }
 
             var exists = presets.ContainsKey(name);
             if (!exists && presets.Count >= PresetLimit)
                 return $"Preset limit: {PresetLimit}.";
-            presets[name] = new(_fieldOfView, _testFog, _previewTime);
+            presets[name] = ReadPresentation();
             return exists ? $"Preset replaced.\n{name}" : $"Preset saved.\n{name}";
+        }
+
+        string ComparePresets(string argument)
+        {
+            var names = argument.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (names.Length != 2)
+                return "Usage: preset diff <a> <b>";
+            if (!ValidPresetName(names[0]) || !ValidPresetName(names[1]))
+                return PresetNameUsage;
+            if (!presets.TryGetValue(names[0], out var a))
+                return MissingPreset(names[0]);
+            if (!presets.TryGetValue(names[1], out var b))
+                return MissingPreset(names[1]);
+
+            var differences = new List<string>();
+            if (a.FieldOfView != b.FieldOfView)
+            {
+                var aDegrees = Degrees(a.FieldOfView).ToString("0.###", CultureInfo.InvariantCulture);
+                var bDegrees = Degrees(b.FieldOfView).ToString("0.###", CultureInfo.InvariantCulture);
+                differences.Add(aDegrees == bDegrees ? "FOV differs by <0.001°" : $"FOV {aDegrees}° | {bDegrees}°");
+            }
+            if (a.Fog != b.Fog)
+                differences.Add($"Fog {FormatFogMode(a.Fog)} | {FormatFogMode(b.Fog)}");
+            if (a.Time != b.Time)
+                differences.Add($"Time {FormatTimeMode(a.Time)} | {FormatTimeMode(b.Time)}");
+            return differences.Count == 0 ? "Presets match."
+                : $"A {names[0]}\nB {names[1]}\n{string.Join('\n', differences)}";
         }
 
         string ListPresets(string argument)
@@ -114,6 +211,36 @@ internal sealed partial class VolumeExploration
         }
     }
 
+    private static bool ValidPresetName(string name) => name.Length is >= 1 and <= 24 &&
+        name.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-');
+
+    private static string MissingPreset(string name) => $"Preset not found.\n{name}";
+
+    private PresentationPreset ReadPresentation() => new(_fieldOfView, _testFog, _previewTime);
+
+    private void ApplyPresentation(PresentationPreset preset) =>
+        (_fieldOfView, _testFog, _previewTime) = (preset.FieldOfView, preset.Fog, preset.Time);
+
+    private static string DescribePreset(string name, PresentationPreset preset) => FormattableString.Invariant(
+        $"Preset\n{name}\nFOV {Degrees(preset.FieldOfView):0.###}°\nFog {FormatFogMode(preset.Fog)}\nTime {FormatTimeMode(preset.Time)}");
+
+    private string ReadPosition(PlanetVector position) => FormattableString.Invariant(
+        $"World {PlanetName}\nSeed {Descriptor.Seed}\nX {position.X:R}\nY {position.Y:R}\nZ {position.Z:R}");
+
+    private string Inspect(PlanetVector position)
+    {
+        var biome = cave is null ? new ReferenceBiomes(planet).Evaluate(position).Dominant.ToString() : "n/a";
+        var altitude = FlightVector.Length(position) - Descriptor.RadiusMeters;
+        var eye = WalkingEye(position);
+        var regionalWeather = _weather?.Evaluate(eye, _environmentTick,
+            sunDirection: orbitDemo ? OrbitDemoPreset.SunDirection(_environmentTick, 0) : null);
+        var fog = regionalWeather is { } weather
+            ? FormattableString.Invariant($"{weather.FogOpacity:P0}")
+            : "n/a";
+        var mode = _weather is null ? "n/a" : FogMode;
+        return FormattableString.Invariant($"Biome {biome}\nAltitude {altitude:0.#} m\nRegional fog {fog}\nFog mode {mode}");
+    }
+
     private static string CopyComparison(string value, ConsoleFrameProfile profile, Func<string, bool> copyReport)
     {
         if (value != "copy")
@@ -124,12 +251,18 @@ internal sealed partial class VolumeExploration
         return copyReport(report) ? "A/B report copied." : "Clipboard unavailable.\nTry report copy again.";
     }
 
-    private string ReadProfileContext(PlanetVector position) => FormattableString.Invariant(
-        $"{ReadConsoleStatus(position)}\nTime tick {_environmentTick}\n{ReadDiagnostics()}");
+    private string ReadProfileContext(PlanetVector position, ulong? fixedLiveTick)
+    {
+        var context = FormattableString.Invariant($"{ReadConsoleStatus(position)}\nTime tick {_environmentTick}\n{ReadDiagnostics()}");
+        return _comparisonPresetName is { } name ? $"Preset {name}\nLive view tick {fixedLiveTick}\n{context}" : context;
+    }
 
-    private string FogMode => _testFog switch { true => "on", false => "off", null => "auto" };
+    private string FogMode => FormatFogMode(_testFog);
+    private string TimeMode => FormatTimeMode(_previewTime);
 
-    private string TimeMode => _previewTime switch
+    private static string FormatFogMode(bool? fog) => fog switch { true => "on", false => "off", null => "auto" };
+
+    private static string FormatTimeMode(ulong? time) => time switch
     {
         null => "live",
         ReferenceWeather.InitialTick => "day",
@@ -149,13 +282,12 @@ internal sealed partial class VolumeExploration
         if (value.Length != 0)
             return "Usage: reset";
 
-        _fieldOfView = DefaultFieldOfView;
-        _testFog = null;
-        _previewTime = null;
+        ApplyPresentation(new(DefaultFieldOfView, null, null));
         return "Presentation reset.";
     }
 
-    private float FieldOfViewDegrees => _fieldOfView * (180 / MathF.PI);
+    private static float Degrees(float radians) => radians * (180 / MathF.PI);
+    private float FieldOfViewDegrees => Degrees(_fieldOfView);
 
     private string ReadFieldOfView() => FormattableString.Invariant($"Vertical FOV: {FieldOfViewDegrees:0.#}°");
 

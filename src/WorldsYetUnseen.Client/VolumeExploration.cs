@@ -215,9 +215,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var exercisedWindow = false;
         var previousFrame = Stopwatch.GetTimestamp();
         using var cadence = new PeriodicTimer(TimeSpan.FromSeconds(1d / 60));
-        var profile = !scripted && overlay is not null
-            ? new ConsoleFrameProfile(TimeProvider.System, () => ReadProfileContext(state.Position)) : null;
-        var terminal = profile is null ? null : CreateConsole(() => state.Position, profile, overlay!.TryCopyReport);
+        (PlanetWalkState Pose, ulong LiveTick)? comparisonView = null;
+        using var profile = !scripted && overlay is not null
+            ? new ConsoleFrameProfile(TimeProvider.System,
+                () => ReadProfileContext((comparisonView?.Pose ?? state).Position, comparisonView?.LiveTick)) : null;
+        var terminal = profile is null ? null : CreateConsole(() => state.Position, profile, overlay!.TryCopyText);
         void ReportProfile(string? result)
         {
             if (result is null || terminal is null)
@@ -239,6 +241,15 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 overlay!.Console = terminal!.View;
                 input = input with { Events = [], HeldControls = [] };
             }
+            if (profile?.IsComparing == true)
+            {
+                if (terminal?.View is null)
+                    ReportProfile(profile.Interrupt("Profile cancelled."));
+                else if (ReadInventory()?.Construction is { } construction && NeedsConstructionPresentation(construction))
+                    ReportProfile(profile.Interrupt("Profile stopped for building."));
+                else
+                    comparisonView ??= (state, _environmentTick);
+            }
             if (freeTestWorld && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.F2))
             {
                 _testMenu = !_testMenu;
@@ -257,6 +268,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 return;
             var drawable = RequireHealthyRenderer(rendered).Surface == RenderSurfaceState.Drawable;
             ReportProfile(profile?.Observe(renderer, rendered, drawable && focused && !_testMenu && !_inventoryOpen));
+            if (profile?.IsComparing != true)
+                comparisonView = null;
             mouse?.Update(drawable && focused && !_testMenu && !_inventoryOpen && _buildRefund is null && !consoleInput,
                 ref _yaw, ref _pitch);
             if (!drawable || (!scripted && !focused))
@@ -287,6 +300,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var next = terrain.View.Frame;
             if (next.TryRebase(state.Position, out var rebased))
             {
+                if (profile?.IsComparing == true)
+                    ReportProfile(profile.Interrupt("Profile render origin changed."));
                 var crossingStarted = scripted && orbitDemo && OrbitPbrMeasurements.Enabled
                     ? Stopwatch.GetTimestamp() : 0;
                 await LoadAsync(terrain, renderer, state.Position, state.Heading, rebased, token).ConfigureAwait(false);
@@ -393,8 +408,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             if (scripted)
                 _yaw = steps is >= 60 and <= 80 ? (steps - 60) * (MathF.Tau / 20) : 0;
             var fraction = Math.Clamp(Stopwatch.GetElapsedTime(now).TotalSeconds * 60, 0, 1);
-            var camera = Camera(terrain.View, state.Position, state.Heading,
-                prepared is not null && outcome.Status == BarrierStatus.Committed && cave is null
+            var cameraPose = comparisonView?.Pose ?? state;
+            var camera = Camera(terrain.View, cameraPose.Position, cameraPose.Heading,
+                comparisonView is { } fixedView ? (fixedView.LiveTick, 0d)
+                : prepared is not null && outcome.Status == BarrierStatus.Committed && cave is null
                     ? (_environmentTick - 1, fraction) : null);
             Props?.Pump();
             if (!scripted && ConstructionRenderer is { } buildVisuals && ReadInventory()?.Construction is { } renderConstruction)
