@@ -533,7 +533,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 $timeline = if (Test-Path -LiteralPath $log) {
                     @(Get-Content -LiteralPath $log | Where-Object { $_.StartsWith('PACKAGE G MEASURE ') } |
                         ForEach-Object { $_.Substring('PACKAGE G MEASURE '.Length) | ConvertFrom-Json } |
-                        Where-Object { $_.kind -cin @('owner','phase','handoff','handoff-stage','handoff-incomplete','gpu-ticks','gpu-prepass','gpu-pass-ticks','sky-pipeline','gpu-clock-calibration','clock-anchor','lookup-gpu-split','lookup-record-split','lookup-startup') })
+                        Where-Object { $_.kind -cin @('owner','phase','phase-input','handoff','handoff-stage','handoff-incomplete','gpu-ticks','gpu-prepass','gpu-pass-ticks','sky-pipeline','gpu-clock-calibration','clock-anchor','lookup-gpu-split','lookup-record-split','lookup-startup') })
                 } else { @() }
                 [pscustomobject]@{ Schema=1; EvidenceKind='DIAGNOSTIC ONLY'; Pair=$Pair; Replay=$Replay; Mode=$Mode
                     Attempt=$attempt; Collector=$collectorReport; SchedulingTrace=$schedulingReport; Events=@($timeline) } |

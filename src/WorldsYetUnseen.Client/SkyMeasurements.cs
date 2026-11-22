@@ -204,7 +204,8 @@ internal sealed partial class SkyMeasurements
         }
     }
 
-    internal static void BeginPhase(D3D12Renderer renderer, string phase, ulong first, ulong last, string identity)
+    internal static void BeginPhase(D3D12Renderer renderer, string phase, ulong first, ulong last, string identity,
+        ReadOnlySpan<byte> canonicalInputs)
     {
         var observer = Owners.GetValue(renderer, _ => throw Mismatch());
         Volatile.Write(ref observer._window, new(phase, first, last));
@@ -213,6 +214,9 @@ internal sealed partial class SkyMeasurements
             throw new InvalidOperationException("Full sky measurements require a 1920x1080 render extent.");
         Write(new { kind = "phase", owner = observer._owner, phase, first, last, identity,
             width = size.AppliedWidth, height = size.AppliedHeight, composition = Composition });
+        if (GpuPassBreakdownEnabled)
+            Write(new { kind = "phase-input", owner = observer._owner, phase, identity,
+                canonicalBase64 = Convert.ToBase64String(canonicalInputs) });
         if (SkyHandoffDiagnostics.Enabled)
             Write(new { kind = "clock-anchor", owner = observer._owner, phase,
                 qpc = Stopwatch.GetTimestamp(), frequency = Stopwatch.Frequency, utc = DateTime.UtcNow.ToString("O") });
@@ -351,7 +355,7 @@ internal sealed partial class VolumeExploration
         }
         var first = _sequence + 1;
         SkyMeasurements.BeginPhase(renderer, phase, first + (ulong)SkyMeasurements.Warmup,
-            first + (ulong)count - 1, identity);
+            first + (ulong)count - 1, identity, bytes);
         var heldTextures = renderer.ReadTextureDiagnostics();
         for (var i = 0; i < count + 1; i++)
         {

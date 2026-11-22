@@ -74,6 +74,15 @@ inside the existing handoff startup interval. The option works without ETW
 or administrator elevation and is confined to the short probe. Whole-frame,
 sky and handoff endpoints and all acceptance limits remain the same.
 
+Pass breakdown also stores one `phase-input` event per held phase before
+warm-up. Decode `canonicalBase64` as UTF-8 JSON and verify SHA-256 of the
+decoded bytes against the reported phase `identity`. This captures the
+exact pose, projection and atmosphere constants, including the `Sky` value
+for an isolated shader experiment. The payload describes the held scene.
+It does not include the near terrain mesh or its depth buffer. A sky-only
+replay can help select shader candidates. The native flight supplies the
+terrain, Present and full-frame acceptance measurements.
+
 ```powershell
 pwsh -NoProfile -File "\\X11D\Share\Invoke-GroundworkReferenceMeasurements.ps1" -DiagnosticProbe -DiagnosticComposition orbit-combined -LookupPrototype -ReuseLookupResources -GpuPassBreakdown
 ```
