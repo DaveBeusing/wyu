@@ -1,3 +1,4 @@
+using System.Globalization;
 using Groundwork.Core;
 
 namespace WorldsYetUnseen.Client;
@@ -18,6 +19,7 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
 {
     private const int LineLimit = 80;
     private const int HistoryLimit = 32;
+    private const int CatalogPageSize = 10;
     private static readonly string[] BuiltIns = ["help", "clear"];
     private readonly List<string> _history = [];
     private readonly Queue<(string Command, string Result)> _output = new();
@@ -28,6 +30,9 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
     private string[]? _completions;
     private int _completionIndex;
     private bool _showHelp = true;
+    private int _helpPage;
+
+    private int HelpPages => Math.Max(1, (commands.Length + CatalogPageSize - 1) / CatalogPageSize);
     private string? _searchQuery;
     private int _searchIndex = -1;
 
@@ -259,8 +264,12 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
         _draft = "";
         SetLine("");
 
-        if (line == "help")
+        var (name, value) = Split(line);
+        var page = 1;
+        if (name == "help" && (value.Length == 0 || int.TryParse(value, NumberStyles.None,
+            CultureInfo.InvariantCulture, out page) && page >= 1 && page <= HelpPages))
         {
+            _helpPage = page - 1;
             _showHelp = true;
             return;
         }
@@ -272,7 +281,6 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
             return;
         }
 
-        var (name, value) = Split(line);
         var command = Find(name);
         var result = name switch
         {
@@ -301,7 +309,7 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
     private string Describe(string name)
     {
         if (name == "help")
-            return "Usage: help [command]\nList commands or show details.\nExample: help fov";
+            return "Usage: help [command|page]\nList commands or show details.\nExample: help fov";
         if (name == "clear")
             return "Usage: clear\nClear console output.";
         if (Find(name) is not { } command)
@@ -350,7 +358,8 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
             return CommandNames().Where(candidate => candidate.StartsWith(name, StringComparison.Ordinal))
                 .Select(candidate => candidate + (candidate == "help" || Find(candidate)?.Values.Length > 0 ? " " : "")).ToArray();
         var command = Find(name);
-        var values = name == "help" ? CommandNames()
+        var values = name == "help" ? CommandNames().Concat(Enumerable.Range(1, HelpPages)
+            .Select(page => page.ToString(CultureInfo.InvariantCulture)))
             : command?.CompleteValue?.Invoke(line[(name.Length + 1)..].TrimStart()) ?? command?.Values ?? [];
         return values.Where(candidate => candidate.StartsWith(value, StringComparison.Ordinal))
             .Select(candidate => $"{name} {candidate}")
@@ -360,8 +369,7 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
     private ConsoleView CreateView()
     {
         var lines = _showHelp
-            ? commands.Select(command => $"{command.Usage,-20} {command.Description}")
-                .ToArray()
+            ? Catalog()
             : _output.SelectMany(entry => entry.Result.Split('\n').Prepend($"> {entry.Command}")).ToArray();
         var requiredRows = _showHelp ? lines.Length
             : _output.LastOrDefault().Result is { } result ? 2 + result.Count(character => character == '\n') : 0;
@@ -376,6 +384,15 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
         var suggestions = _line.Length == 0 || matches.Length == 0 ? null
             : string.Join("  ·  ", matches.Select(match => match.TrimEnd()));
         return new(_line.Insert(_cursor, "▏"), suggestions, lines, _showHelp, RequiredRows: requiredRows);
+    }
+
+    private string[] Catalog()
+    {
+        var rows = commands.Skip(_helpPage * CatalogPageSize).Take(CatalogPageSize)
+            .Select(command => $"{command.Usage,-20} {command.Description}");
+        if (HelpPages > 1)
+            rows = rows.Append(FormattableString.Invariant($"Page {_helpPage + 1}/{HelpPages} · help {(_helpPage + 1) % HelpPages + 1}"));
+        return rows.ToArray();
     }
 
     private ConsoleCommand? Find(string name) => Array.Find(commands, command => command.Name == name);

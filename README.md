@@ -53,7 +53,7 @@ returns control to the game. **Ctrl+R** searches earlier commands. Press it
 again for an older match, **Enter** to edit the match, or **Esc** to return to
 your draft. Type **help** for the commands available in the
 current world. **help <command>** shows usage, an example and the current value
-where available. **status** shows the world, seed, generator, position and
+where available. **help 2** opens the second command page. **status** shows the world, seed, generator, position and
 presentation settings. **reset** restores the default field of view, live time
 and automatic fog where available. Use **fov** to adjust the vertical field of view, **stats** to
 toggle F1 diagnostics, and **time** and **fog** where the world supports weather.
@@ -66,6 +66,19 @@ differences, and **preset load <name>** to apply them. **preset list** shows
 the names and **preset delete <name>** removes one. **inspect** shows the local
 biome, altitude, and regional fog where available. **pos copy** copies the world,
 seed, and coordinates to the Windows clipboard.
+
+**preset copy <name>** copies a portable preset. Run **preset import** to
+preview it from the clipboard, or enter **preset import <data>** with the copy
+text. Use **preset import confirm** to store it under its original name, or
+**preset import cancel** to discard the preview. Load it separately to apply
+the imported settings. Fog and time overrides require a world that supports them.
+**undo** restores the presentation before the last
+console edit, including a reset or preset load.
+
+**inspect aim** reports the terrain hit along the camera ray. **stream status**
+shows active terrain LODs and streaming resource use. **mark save <name>**
+stores the current location for this session. **mark list** lists saved names
+and coordinates, and **mark show <name>** shows the full location details.
 
 **profile 10** targets a ten-second sample of the on-foot view. The report gives
 the actual sampled span. If the final poll is more than 250 ms late, the run
@@ -88,6 +101,11 @@ default). Presets with live time use the same lighting and weather tick for
 comparison. A successful run fills both slots and restores your earlier settings.
 **profile cancel** or closing the console restores your settings and preserves
 the previous results.
+
+**profile repeat <a> <b> [n]** runs 2–6 pairs (default 3) of five-second
+samples, alternating which preset runs first. The comparison and copied report
+include each preset's median and range of observed FPS. The report also includes
+the settings and measurements from the last pair.
 
 **report copy** copies the A/B comparison to the Windows clipboard. It includes
 the client build and the world, seed, generator, position and presentation
