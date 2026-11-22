@@ -15,6 +15,7 @@ internal sealed record CaveInventory(WorldId World, InventoryState Items, Proced
             ? items : throw new ArgumentException("Invalid legacy ore state.")) { }
 
     internal int Ore => Items.OreCount;
+    internal ConstructionState Construction { get; init; } = ConstructionState.Empty;
     public ulong OreInventoryRevision => Items.Revision;
     internal InventoryOreApproval? OreApproval { get; init; }
 

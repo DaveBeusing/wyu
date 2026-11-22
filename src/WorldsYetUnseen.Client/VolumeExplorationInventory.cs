@@ -176,7 +176,7 @@ internal sealed partial class VolumeExploration
         if (slot?.ReadOnly == false && ReadInventory() is { } current && current.Items.Revision == request.Revision &&
             _published.TerrainRevision == request.TerrainRevision)
         {
-            var plan = PlanInventory(terrain, current.Items, request, out message);
+            var plan = PlanInventory(terrain, current, request, out message);
             if (plan?.Status == InventoryChangeStatus.Applied)
             {
                 message = CommitInventoryRoot(cut, current, current with { Items = plan.State, OreApproval = null }, token)
@@ -193,10 +193,11 @@ internal sealed partial class VolumeExploration
         return message;
     }
 
-    private InventoryChange? PlanInventory(VolumeStreamingCoordinator terrain, InventoryState state, InventoryRequest request,
+    private InventoryChange? PlanInventory(VolumeStreamingCoordinator terrain, CaveInventory current, InventoryRequest request,
         out string failure)
     {
         failure = "Storage is blocked or out of reach. Move closer or clear the path.";
+        var state = current.Items;
         var source = state.Containers.FirstOrDefault(owner => owner.Id == request.Source);
         var destination = state.Containers.FirstOrDefault(owner => owner.Id == request.Destination);
         var requiresSite = request.Action is InventoryAction.Drop or InventoryAction.PlaceChest or InventoryAction.Dismantle or InventoryAction.Relieve;
@@ -210,15 +211,16 @@ internal sealed partial class VolumeExploration
                 failure = "Terrain coverage is pending. Try again when the ground is ready.";
                 return null;
             }
-            if (request.Source != 0 && !CanAccessInventory(lease, player.Position, source) ||
-                request.Destination != 0 && !CanAccessInventory(lease, player.Position, destination))
+            var construction = current.Construction.Blocks.IsEmpty ? null : Collision(current.Construction);
+            if (request.Source != 0 && !CanAccessInventory(lease, player.Position, source, construction) ||
+                request.Destination != 0 && !CanAccessInventory(lease, player.Position, destination, construction))
                 return null;
             if (requiresSite)
             {
                 var occupied = state.Containers.Where(owner => request.Action != InventoryAction.Dismantle || owner.Id != request.Source)
                     .Select(owner => owner.Position).ToArray();
                 var origin = request.Action == InventoryAction.Dismantle ? source!.Position : player.Position;
-                var status = InventoryDropSite.Find(lease, origin, player.Position, occupied, out var site);
+                var status = InventoryDropSite.Find(lease, origin, player.Position, occupied, out var site, construction);
                 if (status != InventoryDropSiteStatus.Found)
                 {
                     failure = status switch
@@ -250,13 +252,18 @@ internal sealed partial class VolumeExploration
 
     private static bool InReach(PlanetVector playerFoot, PlanetVector objectFoot) => Length(Subtract(playerFoot, objectFoot)) <= InventoryReach;
 
-    private static bool CanAccessInventory(VolumeStreamingLease lease, PlanetVector playerFoot, InventoryContainer? owner)
+    private static bool CanAccessInventory(VolumeStreamingLease lease, PlanetVector playerFoot, InventoryContainer? owner,
+        ConstructionCollision? construction)
     {
         if (owner is null || !InReach(playerFoot, owner.Position))
             return false;
+        var eye = Add(playerFoot, Scale(Unit(playerFoot), 1.2));
+        var target = Add(owner.Position, Scale(Unit(owner.Position), 0.3));
+        var ray = Subtract(target, eye);
+        if (construction?.Raycast(eye, Unit(ray), Length(ray)) is not null)
+            return false;
         Span<VolumeRayHit> hits = stackalloc VolumeRayHit[1];
-        return lease.Raycast(Add(playerFoot, Scale(Unit(playerFoot), 1.2)),
-            Add(owner.Position, Scale(Unit(owner.Position), 0.3)), hits).Status == VolumeQueryStatus.Clear;
+        return lease.Raycast(eye, target, hits).Status == VolumeQueryStatus.Clear;
     }
 
     private async Task<bool> PublishInventoryAsync(CaveInventory expected, InventoryState items, CancellationToken token)

@@ -23,7 +23,7 @@ internal static class InventoryDropSite
     // The caller binds this retained collision view and the occupancy list to the same committed root.
     // The shape is a half-metre bundle with the persisted position at the bottom of its clearance volume.
     internal static InventoryDropSiteStatus Find(VolumeStreamingLease lease, PlanetVector origin,
-        PlanetVector playerFoot, IReadOnlyList<PlanetVector> occupied, out PlanetVector site)
+        PlanetVector playerFoot, IReadOnlyList<PlanetVector> occupied, out PlanetVector site, ConstructionCollision? construction = null)
     {
         site = default;
         var length = Length(origin);
@@ -61,8 +61,8 @@ internal static class InventoryDropSite
             if (support != InventoryDropSiteStatus.Found)
                 return support;
             foot = Add(supportPoint, Scale(normal, FootClearance));
-            var center = Add(foot, Scale(normal, Radius));
-            if (IsOccupied(center, playerFoot, occupied))
+            var body = ContainerBody(foot);
+            if (IsOccupied(body.A, playerFoot, occupied) || construction?.Intersects(body) == true)
                 return InventoryDropSiteStatus.NoSupportedSite;
 
             foreach (var (sampleX, sampleZ) in Footprint)
@@ -77,10 +77,16 @@ internal static class InventoryDropSite
 
             if (remaining <= 0)
                 return InventoryDropSiteStatus.QueryBudgetExceeded;
-            var clearance = lease.Sweep(new(center, center, Radius), default, new(remaining));
+            var clearance = lease.Sweep(body, default, new(remaining));
             remaining -= clearance.TriangleTests;
             return clearance.Status == VolumeQueryStatus.Clear ? InventoryDropSiteStatus.Found : Reject(clearance.Status);
         }
+    }
+
+    internal static VolumeCapsule ContainerBody(PlanetVector foot)
+    {
+        var center = Add(foot, Scale(Unit(foot), Radius));
+        return new(center, center, Radius);
     }
 
     private static InventoryDropSiteStatus ProbeSupport(VolumeStreamingLease lease, PlanetVector probe, PlanetVector up,
@@ -114,7 +120,7 @@ internal static class InventoryDropSite
 
         foreach (var foot in occupied)
         {
-            if (Within(center, Add(foot, Scale(Unit(foot), Radius)), Radius * 2))
+            if (Within(center, ContainerBody(foot).A, Radius * 2))
                 return true;
         }
         return false;

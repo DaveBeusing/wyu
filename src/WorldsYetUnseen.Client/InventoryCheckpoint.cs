@@ -10,7 +10,7 @@ namespace WorldsYetUnseen.Client;
 internal static class InventoryCheckpoint
 {
     internal const int HeaderBytes = 16;
-    internal const int ConstructionBytesLimit = 24 * 1024;
+    internal const int ConstructionBytesLimit = ConstructionCheckpoint.Limit;
     internal const int OtherBytesLimit = 8 * 1024;
     private const int EnvironmentBytes = 17;
     private const int EnvironmentWithLandingBytes = 53;
@@ -27,9 +27,14 @@ internal static class InventoryCheckpoint
     }
 
     internal static SaveGameValidation Read(VolumeCheckpoint checkpoint, out InventoryState? inventory,
-        out ProceduralLanding? landing, out ulong environmentTick)
+        out ProceduralLanding? landing, out ulong environmentTick) =>
+        Read(checkpoint, out inventory, out _, out landing, out environmentTick);
+
+    internal static SaveGameValidation Read(VolumeCheckpoint checkpoint, out InventoryState? inventory,
+        out ConstructionState? construction, out ProceduralLanding? landing, out ulong environmentTick)
     {
         inventory = null;
+        construction = null;
         landing = null;
         environmentTick = ReferenceWeather.InitialTick;
         var bytes = checkpoint.Game;
@@ -43,11 +48,15 @@ internal static class InventoryCheckpoint
                 if (!InventoryState.TryFromLegacyOre(ore, revision, out var restored))
                     return SaveGameValidation.Unsupported;
                 inventory = restored;
+                construction = ConstructionState.Empty;
                 return SaveGameValidation.Valid;
             }
             var legacy = ProceduralLanding.Read(checkpoint, bytes, out landing, out environmentTick);
             if (legacy == SaveGameValidation.Valid)
+            {
                 inventory = InventoryState.Empty;
+                construction = ConstructionState.Empty;
+            }
             return legacy;
         }
 
@@ -60,39 +69,52 @@ internal static class InventoryCheckpoint
             constructionLength > ConstructionBytesLimit || HeaderBytes + otherLength > OtherBytesLimit ||
             bytes.Length != HeaderBytes + inventoryLength + constructionLength + otherLength)
             return SaveGameValidation.Malformed;
-        // #76 owns the construction section. Until its decoder exists, protect saves carrying it.
-        if (constructionLength != 0)
-            return SaveGameValidation.Unsupported;
+        var inventoryEnd = HeaderBytes + inventoryLength;
+        var constructionStatus = ConstructionCheckpoint.Read(bytes.Slice(inventoryEnd, constructionLength), out var buildings);
+        if (constructionStatus != SaveGameValidation.Valid)
+            return constructionStatus;
         if (otherLength is not (EnvironmentBytes or EnvironmentWithLandingBytes))
             return SaveGameValidation.Malformed;
-        var other = bytes[(HeaderBytes + inventoryLength)..];
+        var other = bytes[(inventoryEnd + constructionLength)..];
         if (!other.StartsWith("WYUVOL03"u8))
             return SaveGameValidation.Unsupported;
         var environment = ProceduralLanding.Read(checkpoint, other, out landing, out environmentTick);
         if (environment != SaveGameValidation.Valid)
             return environment;
-        return ReadInventory(bytes.Slice(HeaderBytes, inventoryLength), out inventory);
+        var inventoryStatus = ReadInventory(bytes.Slice(HeaderBytes, inventoryLength), out inventory);
+        if (inventoryStatus == SaveGameValidation.Valid)
+            construction = buildings;
+        return inventoryStatus;
     }
 
     internal static int Write(InventoryState inventory, ProceduralLanding? landing, PlanetWalkState? player,
-        ulong terrainRevision, ulong environmentTick, Span<byte> destination)
+        ulong terrainRevision, ulong environmentTick, Span<byte> destination) =>
+        Write(inventory, ConstructionState.Empty, landing, player, terrainRevision, environmentTick, destination);
+
+    internal static int Write(InventoryState inventory, ConstructionState construction, ProceduralLanding? landing,
+        PlanetWalkState? player, ulong terrainRevision, ulong environmentTick, Span<byte> destination)
     {
-        if (player is null || !inventory.IsValid())
+        if (player is null || !inventory.IsValid() || !construction.IsValid())
             return -1;
         var inventoryLength = inventory.EncodedBytes;
+        var constructionLength = ConstructionCheckpoint.Measure(construction);
+        if (constructionLength > ConstructionBytesLimit)
+            return -1;
         var inventoryEnd = HeaderBytes + inventoryLength;
+        var constructionEnd = inventoryEnd + constructionLength;
         Span<byte> other = stackalloc byte[EnvironmentWithLandingBytes];
         var otherLength = ProceduralLanding.Write(landing, player, terrainRevision, environmentTick, other);
-        var length = inventoryEnd + otherLength;
+        var length = constructionEnd + otherLength;
         if (length > destination.Length || length > VolumeCheckpoint.MaximumGameBytes)
             return -1;
         "WYUGAME1"u8.CopyTo(destination);
         WriteUInt16LittleEndian(destination[8..], (ushort)inventoryLength);
-        WriteUInt16LittleEndian(destination[10..], 0);
+        WriteUInt16LittleEndian(destination[10..], (ushort)constructionLength);
         WriteUInt16LittleEndian(destination[12..], (ushort)otherLength);
         WriteUInt16LittleEndian(destination[14..], 0);
         WriteInventory(inventory, destination.Slice(HeaderBytes, inventoryLength));
-        other[..otherLength].CopyTo(destination[inventoryEnd..]);
+        ConstructionCheckpoint.Write(construction, destination.Slice(inventoryEnd, constructionLength));
+        other[..otherLength].CopyTo(destination[constructionEnd..]);
         return length;
     }
 

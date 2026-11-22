@@ -143,7 +143,7 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Guid t
             }
 
             var admitted = _writer.TryAdmit(cut, 1, (root, buffer) => root.State is CaveInventory state
-                ? InventoryCheckpoint.Write(state.Items, state.Landing, root.Player, root.Terrain.TerrainRevision,
+                ? InventoryCheckpoint.Write(state.Items, state.Construction, state.Landing, root.Player, root.Terrain.TerrainRevision,
                     environmentTick, buffer.Span)
                 : -1);
             if (admitted != VolumeCaptureAdmission.Accepted)
@@ -182,12 +182,12 @@ internal sealed class VolumeWorldSlot(string root, Guid id, Guid lineage, Guid t
                 return new(null, VolumeSlotStatus.Incompatible, "The selected slot has no supported legacy checkpoint to import.");
             if (token.IsCancellationRequested)
                 return new(null, VolumeSlotStatus.Canceled, "The import was canceled.");
-            if (InventoryCheckpoint.Read(source, out var inventory, out var landing, out var environmentTick) != SaveGameValidation.Valid ||
-                inventory is null)
+            if (InventoryCheckpoint.Read(source, out var inventory, out var construction, out var landing, out var environmentTick) !=
+                SaveGameValidation.Valid || inventory is null || construction is null)
                 return new(null, VolumeSlotStatus.Incompatible, "The original inventory cannot be represented within the new save limits.");
 
             var expected = new byte[VolumeCheckpoint.MaximumGameBytes];
-            var length = InventoryCheckpoint.Write(inventory, landing, source.Player, source.TerrainRevision, environmentTick, expected);
+            var length = InventoryCheckpoint.Write(inventory, construction, landing, source.Player, source.TerrainRevision, environmentTick, expected);
             if (length < 0)
                 return new(null, VolumeSlotStatus.InvalidCheckpoint, "The imported game state exceeds its save budget.");
             var profile = OrbitDemo ? WorldProfile.OrbitDemo : Cave is null ? WorldProfile.Reference :
