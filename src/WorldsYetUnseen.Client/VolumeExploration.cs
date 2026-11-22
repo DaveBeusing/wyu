@@ -142,7 +142,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     }
 
     internal async Task ExploreAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost, bool scripted,
-        CancellationToken token, bool constructionContinue = false, bool constructionMotion = false, bool constructionMeasure = false)
+        CancellationToken token, bool constructionContinue = false, bool constructionMotion = false, bool constructionMeasure = false,
+        TerrainEditFeedbackMode terrainEditProof = TerrainEditFeedbackMode.None)
     {
         var placementGate = scripted && Props is not null
             ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) : null;
@@ -169,6 +170,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var restoredState = ReadInventory();
         diagnostics?.Write(slot?.Checkpoint is null ? "spawn" : "continue", FormattableString.Invariant(
             $"seed={Descriptor.Seed} generator={Descriptor.GeneratorVersion} revision={_published.TerrainRevision} generation={slot?.Checkpoint?.Generation ?? 0} blocks={restoredState?.Construction.Blocks.Length ?? 0} anchors={restoredState?.Construction.Anchors.Length ?? 0} ore={restoredState?.Ore ?? 0}"));
+        if (terrainEditProof != TerrainEditFeedbackMode.None)
+        {
+            await VerifyTerrainEditFeedbackAsync(terrain, renderHost.Active, state, terrainEditProof, token).ConfigureAwait(false);
+            return;
+        }
         if (constructionContinue)
         {
             while (UpdateConstructionPresentation(terrain, renderHost.Active, state, requireEmpty: true))
@@ -188,15 +194,15 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         {
             ConfirmRestoredLanding(terrain, restored);
             diagnostics?.Write("touchdown-restored", FormattableString.Invariant($"flightTick={restored.FlightTick} revision={restored.Revision}"));
-            Notice(slot.ReadOnly ? "Verified touchdown opened read-only." : "Continued from a verified touchdown.");
+            Notice(slot.ReadOnly ? "Verified touchdown opened read-only.\nEsc to exit without saving." : "Continued from a verified touchdown.");
         }
         else if (slot?.ReadOnly == true)
-            Notice("Recovered checkpoint opened read-only.");
+            Notice("Recovered checkpoint opened read-only.\nEsc to exit without saving.");
         else if (cave is not null)
             Notice("WASD to explore | E mine | Q fill\nF5 save | F10 save and quit");
         else if (slot is not null)
             Notice("E remove | Q add | 1/2 material\nF5 save | F6 flight | F10 save and quit");
-        if (freeTestWorld)
+        if (freeTestWorld && slot?.ReadOnly != true)
             Notice($"{PlanetName} | F1 diagnostics | F2 test actions | F3 console\nE remove | Q fill | F5 save | F6 flight");
         else if (!scripted && overlay is not null)
             Notice(CurrentNotice is { } controls ? $"{controls}\nF1 diagnostics · F3 console" : "F1 diagnostics · F3 console");
@@ -509,7 +515,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
     }
 
-    private async Task<bool> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
+    private async Task<TerrainPublicationOutcome> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
         Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null,
@@ -566,7 +572,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             if (result != VolumeAdmission.Accepted || work is null)
             {
                 if (edit is not null)
-                    return false;
+                    return EditAdmissionOutcome(result);
                 throw TerrainAdmissionFailure(result);
             }
         }
@@ -598,7 +604,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         {
             token.ThrowIfCancellationRequested();
             if (edit is not null)
-                return false;
+                return TerrainPublicationOutcome.Rejected;
             throw new InvalidOperationException("Terrain generation did not complete.");
         }
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
@@ -609,8 +615,15 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var packSample = BiomeMeasurements.StartBuild();
             var upload = renderer.TryStageVolumeTerrain(work.Generation);
             BiomeMeasurements.WriteBuild("near-pack", packSample);
-            if (edit is not null && upload is MeshReplacementSubmissionResult.Backpressure or MeshReplacementSubmissionResult.InvalidRegion)
-                return false;
+            if (edit is not null)
+            {
+                if (upload == MeshReplacementSubmissionResult.Backpressure)
+                    return TerrainPublicationOutcome.Busy;
+                if (upload == MeshReplacementSubmissionResult.StaleGeneration)
+                    return TerrainPublicationOutcome.Stale;
+                if (upload == MeshReplacementSubmissionResult.InvalidRegion)
+                    return TerrainPublicationOutcome.Rejected;
+            }
             RequireMesh(upload);
             await WaitAsync(renderer, () => renderer.IsVolumeTerrainReady(work.Generation), token).ConfigureAwait(false);
             await BeginAsync(token).ConfigureAwait(false);
@@ -629,7 +642,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             if (edit is not null)
             {
                 Finish(commit);
-                return false;
+                // The renderer can report StaleGeneration for any rejected Core preparation.
+                return preparation == MeshReplacementSubmissionResult.Backpressure
+                    ? TerrainPublicationOutcome.Busy : TerrainPublicationOutcome.Rejected;
             }
             throw new InvalidOperationException($"Terrain publication was rejected ({preparation}).");
         }
@@ -666,7 +681,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         else
             await FinishR09Async(timing, terrain, work.Generation, sequence, view, submitted, presented, handoffStarted, token)
                 .ConfigureAwait(false);
-        return true;
+        return TerrainPublicationOutcome.Presented;
     }
 
     private void VerifyPropCollisionCuts(PlanetVector position)

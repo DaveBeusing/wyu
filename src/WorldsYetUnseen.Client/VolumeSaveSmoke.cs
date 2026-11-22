@@ -62,7 +62,7 @@ internal sealed partial class VolumeExploration
             state = await CommitInitialSmokePoseAsync(terrain, state, token).ConfigureAwait(false);
             var before = _published;
             if (await EditAsync(terrain, renderer, state, new(1000, 4103, 32), VolumeBrushOperation.Remove, 0, token)
-                .ConfigureAwait(false) || _published != before)
+                .ConfigureAwait(false) == TerrainPublicationOutcome.Presented || _published != before)
                 throw new InvalidOperationException("An edit outside admitted coverage changed the terrain.");
             await RequireSmokeEditAsync(terrain, renderer, state, new(16, 4103, 32), VolumeBrushOperation.Remove, token)
                 .ConfigureAwait(false);
@@ -140,8 +140,8 @@ internal sealed partial class VolumeExploration
     private async Task RequireSmokeEditAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
         PlanetWalkState state, LatticeCoordinate center, VolumeBrushOperation operation, CancellationToken token)
     {
-        if (!await EditAsync(terrain, renderer, state, center, operation,
-                (ushort)ReferenceTerrainMaterial.OchreStone, token).ConfigureAwait(false))
+        if (await EditAsync(terrain, renderer, state, center, operation,
+                (ushort)ReferenceTerrainMaterial.OchreStone, token).ConfigureAwait(false) != TerrainPublicationOutcome.Presented)
             throw new InvalidOperationException($"Smoke brush {operation} at {center} did not publish.");
     }
 

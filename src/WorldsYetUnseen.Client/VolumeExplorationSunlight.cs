@@ -75,7 +75,8 @@ internal sealed partial class VolumeExploration
         await Present(nightFrame, _published.Generation).ConfigureAwait(false);
         if (!terrain.View.Frame.TryRebase(Add(state.Position, Scale(forward, 24)), out var shifted))
             throw new InvalidOperationException("WP15 rebase fixture stayed within the origin cell.");
-        if (!await LoadAsync(terrain, renderer, state.Position, state.Heading, shifted, token).ConfigureAwait(false) ||
+        if (await LoadAsync(terrain, renderer, state.Position, state.Heading, shifted, token).ConfigureAwait(false) !=
+            TerrainPublicationOutcome.Presented ||
             terrain.View.Frame != shifted)
             throw new InvalidOperationException("WP15 terrain did not publish at the shifted origin.");
         var afterRebase = ApplyNearEnvironment(origin with { View = terrain.View }, low, 0);
@@ -88,8 +89,8 @@ internal sealed partial class VolumeExploration
         try
         {
             _environmentTick = low;
-            if (!await EditAsync(terrain, renderer, state, editPoint, VolumeBrushOperation.Add, 1, token).ConfigureAwait(false)
-                || _published.TerrainRevision != revision + 1)
+            if (await EditAsync(terrain, renderer, state, editPoint, VolumeBrushOperation.Add, 1, token).ConfigureAwait(false) !=
+                TerrainPublicationOutcome.Presented || _published.TerrainRevision != revision + 1)
                 throw new InvalidOperationException("WP15 terrain edit did not reach first presentation.");
         }
         finally
