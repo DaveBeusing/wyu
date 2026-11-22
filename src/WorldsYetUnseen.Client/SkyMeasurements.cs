@@ -124,8 +124,7 @@ internal sealed partial class SkyMeasurements
 
     private void Initialize(object device)
     {
-        if (GpuPassBreakdownEnabled)
-            SkyHandoffDiagnostics.Mark("gpu-device-initialized");
+        SkyHandoffDiagnostics.Mark("gpu-device-initialized");
         var requested = Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE") == "1";
         var enabled = device.GetType().GetProperty("SkyLookupPrototypeEnabledForTests",
             BindingFlags.NonPublic | BindingFlags.Instance);
