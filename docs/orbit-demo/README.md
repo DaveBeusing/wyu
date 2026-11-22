@@ -12,7 +12,7 @@ The boulder substitutes the existing rock archetype while preserving placement, 
 
 ## Remaining work for #67
 
-The Orbit Demo binds Rock 01 to basalt and Rocks Ground 05 to ochre stone on the surface and the orbital proxy. The PBR provider is pinned to the [immutable Groundwork package archive](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.44510519303.1-immutable-complete) built from Groundwork master `067bb61`. Surface textures begin at mip 2 and can promote to mip 0. The orbital proxy stays at mip 2. If geometry exceeds the existing appearance budget, the surface keeps its biome-color fallback.
+The Orbit Demo binds Rock 01 to basalt and Rocks Ground 05 to ochre stone on the surface and the orbital proxy. The original Orbit PBR qualification used the [immutable Groundwork package archive](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.44510519303.1-immutable-complete) built from Groundwork master `067bb61`. Surface textures begin at mip 2 and can promote to mip 0. The orbital proxy stays at mip 2. If geometry exceeds the existing appearance budget, the surface keeps its biome-color fallback.
 
 If a bundled terrain texture fails validation, the Orbit Demo reports the affected asset and opens with base colors. A scripted PBR measurement stops on the same validation error so its results identify a valid textured run.
 
