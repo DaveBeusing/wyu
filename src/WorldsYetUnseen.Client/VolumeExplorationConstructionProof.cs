@@ -65,7 +65,7 @@ internal sealed partial class VolumeExploration
         var changedOrigin = priorOrigin.TryRebase(Add(state.Position, Scale(frame.XAxis, 24)), out var rebased);
         CheckConstructionProof(changedOrigin && rebased.Revision > priorOrigin.Revision, "fixture must force a new render origin");
         var loaded = await LoadAsync(terrain, renderHost.Active, state.Position, state.Heading, rebased, token).ConfigureAwait(false);
-        CheckConstructionProof(loaded && terrain.View.Frame.Origin != priorOrigin.Origin &&
+        CheckConstructionProof(loaded == TerrainPublicationOutcome.Presented && terrain.View.Frame.Origin != priorOrigin.Origin &&
             terrain.View.Frame.Revision == rebased.Revision, "terrain uses the rebased frame");
         var secondPresent = await PresentConstructionProofAsync(terrain, renderHost, state, token).ConfigureAwait(false);
         var retained = ReadInventory();

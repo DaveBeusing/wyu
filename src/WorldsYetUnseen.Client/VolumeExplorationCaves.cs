@@ -77,9 +77,10 @@ internal sealed partial class VolumeExploration
         if (below && now >= _nextCaveAim)
         {
             _nextCaveAim = now + 200;
-            _caveAim = Aim(terrain, state, VolumeBrushOperation.Remove, out var material) is null
+            var aim = AimTerrainEdit(terrain, state, VolumeBrushOperation.Remove);
+            _caveAim = aim.Status != TerrainEditAimStatus.Target
                 ? "Aim at terrain 3.5–10 m away"
-                : material switch
+                : aim.Material switch
                 {
                     CavePlanet.Ore => "Target: Ember ore",
                     CavePlanet.MiddleRock => "Target: Slate",
@@ -158,7 +159,8 @@ internal sealed partial class VolumeExploration
             RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, aimSequence,
                 Camera(terrain.View, state.Position, state.Heading)));
             await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= aimSequence, token).ConfigureAwait(false);
-            if (!await EditAsync(terrain, renderer, state, target, VolumeBrushOperation.Remove, 0, token).ConfigureAwait(false) ||
+            if (await EditAsync(terrain, renderer, state, target, VolumeBrushOperation.Remove, 0, token).ConfigureAwait(false) !=
+                TerrainPublicationOutcome.Presented ||
                 CaveOre <= 0)
                 throw new InvalidOperationException("The visible cave deposit did not award ore.");
             RequireSmokeSave(await SaveAsync(terrain, token).ConfigureAwait(false), 1);
@@ -337,8 +339,8 @@ internal sealed partial class VolumeExploration
         {
             _yaw = direction * MathF.Tau / 24;
             _pitch = pitch;
-            if (Aim(terrain, state, VolumeBrushOperation.Remove, out var material) is { } target &&
-                material == CavePlanet.Ore && IncludesNaturalOre(target))
+            var aim = AimTerrainEdit(terrain, state, VolumeBrushOperation.Remove);
+            if (aim is { Status: TerrainEditAimStatus.Target, Material: CavePlanet.Ore, Center: var target } && IncludesNaturalOre(target))
                 return target;
         }
         throw new InvalidOperationException("The cave route reached no visible ore within mining range.");

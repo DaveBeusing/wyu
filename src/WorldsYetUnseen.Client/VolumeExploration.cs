@@ -33,6 +33,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private readonly ReferenceWeather? _weather = reference is null ||
         Environment.GetEnvironmentVariable("WYU_PACKAGE_E") == "off" ? null : new(reference);
     internal ReferenceProps? Props { get; set; }
+    internal string? ConsolePresetDirectory { get; init; }
     internal ProceduralRenderHost? OrbitMaterialHost { get; init; }
     internal string? OrbitMaterialFallbackNotice { get; init; }
     private int _propPeakDraws;
@@ -40,6 +41,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private ulong _sequence;
     private float _yaw, _pitch = orbitDemo ? OrbitDemoPreset.Pitch : -0.2f;
     private bool _debug;
+    private ConsoleTelemetry? _consoleTelemetry;
     private bool _testMenu;
     private int _testAction;
     private bool? _testFog;
@@ -47,6 +49,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
     private readonly string? _testBuild = freeTestWorld ? ClientBuild : null;
     private VolumeStreamingSelection? _selection;
+    private VolumeResources _streamingBudget;
     private VolumePublicationInfo _published;
     private int _transitions, _views, _windows, _fineBricks;
 
@@ -63,7 +66,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var baseline = unit.Retained + unit.Retained;
         baseline = baseline with { LeaseSlots = baseline.LeaseSlots + 16, CpuBytes = baseline.CpuBytes + 32L * OverlayLimit };
         var movement = diagnostics?.LimitPlanetStreaming == true ? unit with { CpuBytes = unit.CpuBytes - 1 } : unit;
-        var limits = new VolumeStreamingLimits(baseline + unit + unit + unit + unit,
+        _streamingBudget = baseline + unit + unit + unit + unit;
+        var limits = new VolumeStreamingLimits(_streamingBudget,
             baseline, movement, unit, unit, unit, 12, 12, 256);
         var terrain = restore && slot?.Checkpoint is { } checkpoint
             ? checkpoint.RestoreTerrain(world, Field, limits, OverlayLimit,
@@ -138,7 +142,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     }
 
     internal async Task ExploreAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost, bool scripted,
-        CancellationToken token, bool constructionContinue = false, bool constructionMotion = false, bool constructionMeasure = false)
+        CancellationToken token, bool constructionContinue = false, bool constructionMotion = false, bool constructionMeasure = false,
+        TerrainEditFeedbackMode terrainEditProof = TerrainEditFeedbackMode.None)
     {
         var placementGate = scripted && Props is not null
             ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) : null;
@@ -177,6 +182,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var restoredState = ReadInventory();
         diagnostics?.Write(slot?.Checkpoint is null ? "spawn" : "continue", FormattableString.Invariant(
             $"seed={Descriptor.Seed} generator={Descriptor.GeneratorVersion} revision={_published.TerrainRevision} generation={slot?.Checkpoint?.Generation ?? 0} blocks={restoredState?.Construction.Blocks.Length ?? 0} anchors={restoredState?.Construction.Anchors.Length ?? 0} ore={restoredState?.Ore ?? 0}"));
+        if (terrainEditProof != TerrainEditFeedbackMode.None)
+        {
+            await VerifyTerrainEditFeedbackAsync(terrain, renderHost.Active, state, terrainEditProof, token).ConfigureAwait(false);
+            return;
+        }
         if (constructionContinue)
         {
             while (UpdateConstructionPresentation(terrain, renderHost.Active, state, requireEmpty: true))
@@ -196,15 +206,15 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         {
             ConfirmRestoredLanding(terrain, restored);
             diagnostics?.Write("touchdown-restored", FormattableString.Invariant($"flightTick={restored.FlightTick} revision={restored.Revision}"));
-            Notice(slot.ReadOnly ? "Verified touchdown opened read-only." : "Continued from a verified touchdown.");
+            Notice(slot.ReadOnly ? "Verified touchdown opened read-only.\nEsc to exit without saving." : "Continued from a verified touchdown.");
         }
         else if (slot?.ReadOnly == true)
-            Notice("Recovered checkpoint opened read-only.");
+            Notice("Recovered checkpoint opened read-only.\nEsc to exit without saving.");
         else if (cave is not null)
             Notice("WASD to explore | E mine | Q fill\nF5 save | F10 save and quit");
         else if (slot is not null)
             Notice("E remove | Q add | 1/2 material\nF5 save | F6 flight | F10 save and quit");
-        if (freeTestWorld)
+        if (freeTestWorld && slot?.ReadOnly != true)
             Notice($"{PlanetName} | F1 diagnostics | F2 test actions | F3 console\nE remove | Q fill | F5 save | F6 flight");
         else if (!scripted && overlay is not null)
             Notice(CurrentNotice is { } controls ? $"{controls}\nF1 diagnostics · F3 console" : "F1 diagnostics · F3 console");
@@ -227,16 +237,25 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var exercisedWindow = false;
         var previousFrame = Stopwatch.GetTimestamp();
         using var cadence = new PeriodicTimer(TimeSpan.FromSeconds(1d / 60));
-        var profile = !scripted && overlay is not null
-            ? new ConsoleFrameProfile(TimeProvider.System, () => ReadProfileContext(state.Position)) : null;
-        var terminal = profile is null ? null : CreateConsole(() => state.Position, profile, overlay!.TryCopyReport);
-        void ReportProfile(string? result)
+        (PlanetWalkState Pose, ulong LiveTick)? comparisonView = null;
+        using var profile = !scripted && overlay is not null
+            ? new ConsoleFrameProfile(TimeProvider.System,
+                () => ReadProfileContext((comparisonView?.Pose ?? state).Position, comparisonView?.LiveTick)) : null;
+        var telemetry = _consoleTelemetry = profile is not null ? new ConsoleTelemetry(TimeProvider.System) : null;
+        var pinned = profile is not null && ConsolePresetDirectory is { } directory
+            ? new ConsolePinnedPresets(directory, ReadPinnedPresetName) : null;
+        var terminal = profile is null || overlay is null ? null : CreateConsole(() => state.Position, profile, overlay.TryCopyText,
+            overlay.ReadPresetText, () => InspectAim(terrain, state), () => ReadStreamStatus(terrain), telemetry!, pinned,
+            () => ReadLookDirection(state));
+        void ReportConsole(string command, string? result)
         {
             if (result is null || terminal is null)
                 return;
-            terminal.Report("profile", result);
+            terminal.Report(command, result);
             overlay!.Console = terminal.View;
         }
+
+        void ReportProfile(string? result) => ReportConsole("profile", result);
 
         while (await cadence.WaitForNextTickAsync(token).ConfigureAwait(false))
         {
@@ -250,6 +269,15 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             {
                 overlay!.Console = terminal!.View;
                 input = input with { Events = [], HeldControls = [] };
+            }
+            if (profile?.IsComparing == true)
+            {
+                if (terminal?.View is null)
+                    ReportProfile(profile.Interrupt("Profile cancelled."));
+                else if (ReadInventory()?.Construction is { } construction && NeedsConstructionPresentation(construction))
+                    ReportProfile(profile.Interrupt("Profile stopped for building."));
+                else
+                    comparisonView ??= (state, _environmentTick);
             }
             if (freeTestWorld && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.F2))
             {
@@ -269,6 +297,16 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 return;
             var drawable = RequireHealthyRenderer(rendered).Surface == RenderSurfaceState.Drawable;
             ReportProfile(profile?.Observe(renderer, rendered, drawable && focused && !_testMenu && !_inventoryOpen));
+            if (telemetry is { IsActive: true })
+            {
+                var command = telemetry.IsTracing ? "profile trace" : "stream watch";
+                var result = drawable && focused && !_testMenu && !_inventoryOpen && !_constructionOpen
+                    ? telemetry.Observe(renderer, terrain.Statistics, rendered)
+                    : telemetry.Interrupt();
+                ReportConsole(command, result);
+            }
+            if (profile?.IsComparing != true)
+                comparisonView = null;
             mouse?.Update(drawable && focused && !_testMenu && !_inventoryOpen && _buildRefund is null && !consoleInput,
                 ref _yaw, ref _pitch);
             if (!drawable || (!scripted && !focused))
@@ -299,6 +337,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var next = terrain.View.Frame;
             if (next.TryRebase(state.Position, out var rebased))
             {
+                if (profile?.IsComparing == true)
+                    ReportProfile(profile.Interrupt("Profile render origin changed."));
                 var crossingStarted = scripted && orbitDemo && OrbitPbrMeasurements.Enabled
                     ? Stopwatch.GetTimestamp() : 0;
                 await LoadAsync(terrain, renderer, state.Position, state.Heading, rebased, token).ConfigureAwait(false);
@@ -323,6 +363,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 }
                 mouse?.Update(false, ref _yaw, ref _pitch);
                 ReportProfile(profile?.Interrupt("Profile stopped for flight."));
+                if (telemetry is { IsActive: true })
+                    ReportConsole(telemetry.IsTracing ? "profile trace" : "stream watch", telemetry.Interrupt());
                 var result = await FlyAsync(terrain, renderHost, state, null, false, token).ConfigureAwait(false);
                 if (result.Quit)
                     return;
@@ -405,8 +447,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             if (scripted)
                 _yaw = steps is >= 60 and <= 80 ? (steps - 60) * (MathF.Tau / 20) : 0;
             var fraction = Math.Clamp(Stopwatch.GetElapsedTime(now).TotalSeconds * 60, 0, 1);
-            var camera = Camera(terrain.View, state.Position, state.Heading,
-                prepared is not null && outcome.Status == BarrierStatus.Committed && cave is null
+            var cameraPose = comparisonView?.Pose ?? state;
+            var camera = Camera(terrain.View, cameraPose.Position, cameraPose.Heading,
+                comparisonView is { } fixedView ? (fixedView.LiveTick, 0d)
+                : prepared is not null && outcome.Status == BarrierStatus.Committed && cave is null
                     ? (_environmentTick - 1, fraction) : null);
             Props?.Pump();
             if (!scripted && ConstructionRenderer is { } buildVisuals && ReadInventory()?.Construction is { } renderConstruction)
@@ -482,7 +526,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
     }
 
-    private async Task<bool> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
+    private async Task<TerrainPublicationOutcome> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
         Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null,
@@ -542,7 +586,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             if (result != VolumeAdmission.Accepted || work is null)
             {
                 if (edit is not null)
-                    return false;
+                    return EditAdmissionOutcome(result);
                 throw TerrainAdmissionFailure(result);
             }
         }
@@ -575,7 +619,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         {
             token.ThrowIfCancellationRequested();
             if (edit is not null)
-                return false;
+                return TerrainPublicationOutcome.Rejected;
             throw new InvalidOperationException("Terrain generation did not complete.");
         }
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
@@ -586,8 +630,15 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var packSample = BiomeMeasurements.StartBuild();
             var upload = renderer.TryStageVolumeTerrain(work.Generation);
             BiomeMeasurements.WriteBuild("near-pack", packSample);
-            if (edit is not null && upload is MeshReplacementSubmissionResult.Backpressure or MeshReplacementSubmissionResult.InvalidRegion)
-                return false;
+            if (edit is not null)
+            {
+                if (upload == MeshReplacementSubmissionResult.Backpressure)
+                    return TerrainPublicationOutcome.Busy;
+                if (upload == MeshReplacementSubmissionResult.StaleGeneration)
+                    return TerrainPublicationOutcome.Stale;
+                if (upload == MeshReplacementSubmissionResult.InvalidRegion)
+                    return TerrainPublicationOutcome.Rejected;
+            }
             RequireMesh(upload);
             await WaitAsync(renderer, () => renderer.IsVolumeTerrainReady(work.Generation), token).ConfigureAwait(false);
             await BeginAsync(token).ConfigureAwait(false);
@@ -606,7 +657,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             if (edit is not null)
             {
                 Finish(commit);
-                return false;
+                // The renderer can report StaleGeneration for any rejected Core preparation.
+                return preparation == MeshReplacementSubmissionResult.Backpressure
+                    ? TerrainPublicationOutcome.Busy : TerrainPublicationOutcome.Rejected;
             }
             throw new InvalidOperationException($"Terrain publication was rejected ({preparation}).");
         }
@@ -644,7 +697,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         else
             await FinishR09Async(timing, terrain, work.Generation, sequence, view, submitted, presented, handoffStarted, token)
                 .ConfigureAwait(false);
-        return true;
+        return TerrainPublicationOutcome.Presented;
     }
 
     private void VerifyPropCollisionCuts(PlanetVector position)
@@ -765,16 +818,27 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private VolumeCamera Camera(VolumeViewIdentity view, PlanetVector foot, PlanetVector heading,
         (ulong Tick, double Fraction)? interpolation = null)
     {
-        var up = Vector3.Normalize(new((float)foot.X, (float)foot.Y, (float)foot.Z));
-        var tangent = new Vector3((float)heading.X, (float)heading.Y, (float)heading.Z);
-        tangent = Vector3.Normalize(tangent - up * Vector3.Dot(up, tangent));
-        var direction = MathF.Cos(_yaw) * tangent + MathF.Sin(_yaw) * Vector3.Cross(tangent, up);
-        direction = MathF.Cos(_pitch) * direction + MathF.Sin(_pitch) * up;
+        var (direction, up) = WalkingView(foot, heading);
         var eye = WalkingEye(foot);
         var (tick, fraction) = _previewTime is { } preview
             ? (preview, 0d)
             : interpolation ?? (_environmentTick, 0);
         return ApplyNearEnvironment(new(view, eye, direction, up, _fieldOfView, 0.08f, 150, Vector4.One, Sky), tick, fraction);
+    }
+
+    private (Vector3 Direction, Vector3 Up) WalkingView(PlanetVector foot, PlanetVector heading)
+    {
+        var up = Vector3.Normalize(new((float)foot.X, (float)foot.Y, (float)foot.Z));
+        var tangent = new Vector3((float)heading.X, (float)heading.Y, (float)heading.Z);
+        tangent = Vector3.Normalize(tangent - up * Vector3.Dot(up, tangent));
+        var direction = MathF.Cos(_yaw) * tangent + MathF.Sin(_yaw) * Vector3.Cross(tangent, up);
+        return (MathF.Cos(_pitch) * direction + MathF.Sin(_pitch) * up, up);
+    }
+
+    private PlanetVector ReadLookDirection(PlanetWalkState state)
+    {
+        var (direction, _) = WalkingView(state.Position, state.Heading);
+        return new(direction.X, direction.Y, direction.Z);
     }
 
     private static PlanetVector WalkingEye(PlanetVector foot) => Add(foot, Scale(Unit(foot), 1.65));
@@ -962,9 +1026,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private static int Axis(InputSnapshot input, InputControl positive, InputControl negative) =>
         (input.HeldControls.Contains(positive) ? 1 : 0) - (input.HeldControls.Contains(negative) ? 1 : 0);
 
-    private static void Drain(VolumeStreamingCoordinator terrain)
+    private void Drain(VolumeStreamingCoordinator terrain)
     {
-        while (terrain.TryReadEvent(out _)) { }
+        var trace = _consoleTelemetry is { IsTracing: true } active ? active : null;
+        while (terrain.TryReadEvent(out var entry))
+            trace?.RecordTerrainEvent(entry.Kind);
     }
 
     private async Task WaitAsync(D3D12Renderer renderer, Func<bool> ready, CancellationToken token,

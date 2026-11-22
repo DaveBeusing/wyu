@@ -7,13 +7,13 @@ internal sealed partial class AlphaOverlay
     private const uint MoveableMemory = 0x0002;
     private const uint UnicodeText = 13;
 
-    internal bool TryCopyReport(string report)
+    internal bool TryCopyText(string text)
     {
         if (GetForegroundWindow() != _owner)
             return false;
 
-        var text = (report.ReplaceLineEndings("\r\n") + '\0').ToCharArray();
-        var memory = GlobalAlloc(MoveableMemory, (nuint)text.Length * sizeof(char));
+        var characters = (text.ReplaceLineEndings("\r\n") + '\0').ToCharArray();
+        var memory = GlobalAlloc(MoveableMemory, (nuint)characters.Length * sizeof(char));
         if (memory == 0)
             return false;
 
@@ -24,7 +24,7 @@ internal sealed partial class AlphaOverlay
                 return false;
             try
             {
-                Marshal.Copy(text, 0, address, text.Length);
+                Marshal.Copy(characters, 0, address, characters.Length);
             }
             finally
             {
@@ -54,6 +54,42 @@ internal sealed partial class AlphaOverlay
         }
     }
 
+    internal string? ReadPresetText()
+    {
+        const int Limit = 80;
+        if (GetForegroundWindow() != _owner || OpenClipboard(_owner) == 0)
+            return null;
+
+        try
+        {
+            var memory = GetClipboardData(UnicodeText);
+            if (memory == 0)
+                return null;
+            var count = (int)Math.Min(GlobalSize(memory) / sizeof(char), (nuint)(Limit + 1));
+            var address = GlobalLock(memory);
+            if (address == 0)
+                return null;
+
+            try
+            {
+                for (var i = 0; i < count; i++)
+                {
+                    if (Marshal.ReadInt16(address, i * sizeof(char)) == 0)
+                        return Marshal.PtrToStringUni(address, i);
+                }
+                return null;
+            }
+            finally
+            {
+                _ = GlobalUnlock(memory);
+            }
+        }
+        finally
+        {
+            _ = CloseClipboard();
+        }
+    }
+
     [LibraryImport("kernel32.dll")]
     private static partial nint GlobalAlloc(uint flags, nuint bytes);
     [LibraryImport("kernel32.dll")]
@@ -62,12 +98,16 @@ internal sealed partial class AlphaOverlay
     private static partial int GlobalUnlock(nint memory);
     [LibraryImport("kernel32.dll")]
     private static partial nint GlobalFree(nint memory);
+    [LibraryImport("kernel32.dll")]
+    private static partial nuint GlobalSize(nint memory);
     [LibraryImport("user32.dll")]
     private static partial int OpenClipboard(nint window);
     [LibraryImport("user32.dll")]
     private static partial int EmptyClipboard();
     [LibraryImport("user32.dll")]
     private static partial nint SetClipboardData(uint format, nint memory);
+    [LibraryImport("user32.dll")]
+    private static partial nint GetClipboardData(uint format);
     [LibraryImport("user32.dll")]
     private static partial int CloseClipboard();
 }

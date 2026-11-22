@@ -15,8 +15,10 @@ internal static partial class GameHost
     internal static async Task RunExplorationAsync(ulong? smokeSeed, bool useWarp, AlphaDiagnostics? diagnostics,
         CancellationToken cancellationToken, string? settingsDirectory = null,
         string? saveRoot = null, string? saveSmoke = null, bool flightSmoke = false, string? caveSmoke = null, bool freeTestWorld = false,
-        bool constructionContinue = false, bool constructionMotion = false, bool constructionMeasure = false)
+        bool constructionContinue = false, bool constructionMotion = false, bool constructionMeasure = false,
+        TerrainEditFeedbackMode terrainEditProof = TerrainEditFeedbackMode.None)
     {
+        var terrainEditFeedback = terrainEditProof != TerrainEditFeedbackMode.None;
         var clock = TimeProvider.System;
         var timeout = TimeSpan.FromSeconds(10);
         var timing = new RuntimeTimingLimits(timeout, timeout, timeout);
@@ -30,8 +32,14 @@ internal static partial class GameHost
         var orbitSmoke = scripted && !readbackSmoke && caveSmoke is null &&
             Environment.GetEnvironmentVariable("WYU_ORBIT_DEMO_SMOKE") == "1";
         var measureSunlight = scripted && Environment.GetEnvironmentVariable("WYU_WP15_PROBE") == "measure";
-        var window = new WindowsHostModule(new WindowsHostOptions(
-            scripted ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen — New World", 960, 540, 256),
+        var title = terrainEditProof switch
+        {
+            TerrainEditFeedbackMode.Keyboard => "Worlds Yet Unseen — Terrain feedback proof",
+            TerrainEditFeedbackMode.OutcomesKeyboardE => "Worlds Yet Unseen — Terrain outcomes E",
+            TerrainEditFeedbackMode.OutcomesKeyboardQ => "Worlds Yet Unseen — Terrain outcomes Q",
+            _ => scripted ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen — New World",
+        };
+        var window = new WindowsHostModule(new WindowsHostOptions(title, 960, 540, 256),
             runtime.UiWake, runtime.RuntimeOwnership);
         using var stage = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = stage.Token;
@@ -68,14 +76,14 @@ internal static partial class GameHost
                 overlay = new AlphaOverlay(activateOwner: true);
                 AlphaWindowSize.TryApply(settings.Size);
             }
-            if (constructionContinue)
+            if (constructionContinue || terrainEditFeedback)
             {
-                if (saveRoot is null || renderHost.ConstructionVisuals is null)
-                    throw new InvalidOperationException("Construction proof needs a fixture and an active construction renderer.");
+                if (saveRoot is null || constructionContinue && renderHost.ConstructionVisuals is null)
+                    throw new InvalidOperationException("The exploration proof requires a fixture and its renderer.");
                 var selected = VolumeWorldSlot.List(saveRoot).Single();
                 slot = VolumeWorldSlot.Open(saveRoot, selected, out var loaded);
                 if (slot is null || loaded != VolumeSlotStatus.Loaded || slot.NeedsInventoryImport)
-                    throw new InvalidDataException($"Construction proof could not continue the fixture ({loaded}).");
+                    throw new InvalidDataException($"The exploration proof could not continue the fixture ({loaded}).");
             }
             else if (!scripted)
                 slot = await ChooseVolumeSlotAsync(window, overlay!, saveRoot ?? (freeTestWorld ? Path.Combine(FreeTestWorldRoot(), "v2") : DefaultVolumeRoot()),
@@ -133,6 +141,10 @@ internal static partial class GameHost
             }
             exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld, orbitDemo)
             {
+                ConsolePresetDirectory = settingsDirectory ?? (saveRoot is not null
+                    ? Path.Combine(saveRoot, "console")
+                    : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "WorldsYetUnseen", "Alpha")),
                 ConstructionRenderer = renderHost.ConstructionVisuals,
                 VerifyTerrainRetries = retrySmoke == "1",
                 R09RenderHost = measureR09 ? renderHost : null,
@@ -140,6 +152,8 @@ internal static partial class GameHost
                 OrbitMaterialFallbackNotice = orbitMaterialFallbackNotice,
                 ExhaustTerrainRetry = retrySmoke switch
                 {
+                    _ when terrainEditProof is TerrainEditFeedbackMode.Outcomes or TerrainEditFeedbackMode.OutcomesKeyboardE or
+                        TerrainEditFeedbackMode.OutcomesKeyboardQ => VolumeWorkClass.FirstEdit,
                     "Movement" => VolumeWorkClass.Movement,
                     "FirstEdit" => VolumeWorkClass.FirstEdit,
                     "Recovery" => VolumeWorkClass.Recovery,
@@ -188,7 +202,8 @@ internal static partial class GameHost
             else if (flightSmoke)
                 await exploration.RunFlightSmokeAsync(terrain, renderHost, saveSmoke!, token).ConfigureAwait(false);
             else if (saveSmoke is null)
-                await exploration.ExploreAsync(terrain, renderHost, scripted, token, constructionContinue, constructionMotion, constructionMeasure)
+                await exploration.ExploreAsync(terrain, renderHost, scripted, token, constructionContinue, constructionMotion, constructionMeasure,
+                    terrainEditProof)
                     .ConfigureAwait(false);
             else
                 await exploration.RunSaveSmokeAsync(terrain, renderer, saveSmoke, token).ConfigureAwait(false);
@@ -199,7 +214,7 @@ internal static partial class GameHost
             }
             reason = HostStopReason.ExternalCancellation;
         }
-        catch (OperationCanceledException) when (!scripted && token.IsCancellationRequested)
+        catch (OperationCanceledException) when (!scripted && !terrainEditFeedback && token.IsCancellationRequested)
         {
             reason = HostStopReason.ExternalCancellation;
         }
@@ -314,6 +329,7 @@ internal static partial class GameHost
         var optionCount = referenceOption + 1;
         ulong? replacementSeed = null;
         string? notice = null;
+        var noticeSelection = -1;
         while (true)
         {
             var label = selected == 0 ? (freeTestWorld ? $"New Test World\n{VolumeWorldSlot.ProfileName(defaultProfile)}" : "New World") :
@@ -323,7 +339,8 @@ internal static partial class GameHost
                 ? $"New Cave World\n{CavePlanet.Name} · seed {CavePlanet.Seed}" : $"Continue {selected}/{slots.Length}\n{slots[selected - 1]:N}";
             var guidance = selected == 0 ? (freeTestWorld ? "Up for Far Horizon features\n" : "Up for Far Horizon\n") : "";
             var menuTitle = freeTestWorld ? "Free Test World" : "Planet worlds";
-            overlay.Menu = $"WYU\n\n{menuTitle}\n\n> {label}\n\n{guidance}Up / Down to choose\nEnter to open\nEsc to exit\n\n{notice}";
+            var slotNotice = selected == noticeSelection ? notice : null;
+            overlay.Menu = $"WYU\n\n{menuTitle}\n\n> {label}\n\n{guidance}Up / Down to choose\nEnter to open\nEsc to exit\n\n{slotNotice}";
             await Task.Delay(16, token).ConfigureAwait(false);
             var input = window.Capture();
             if (PrototypeMenu.Pressed(input, InputControl.Escape))
@@ -366,6 +383,7 @@ internal static partial class GameHost
                 if (slot.InventoryImportError is { } importError)
                 {
                     notice = $"{importError}\nThe original slot was kept.";
+                    noticeSelection = selected;
                     slot.Dispose();
                     continue;
                 }
@@ -401,6 +419,7 @@ internal static partial class GameHost
                 VolumeSlotStatus.Busy or VolumeSlotStatus.Indeterminate => "This world is busy or still recovering. Try again.",
                 _ => $"Cannot continue: {opened.status}."
             };
+            noticeSelection = selected;
             replacementSeed = freeTestWorld && opened.status == VolumeSlotStatus.Incompatible
                 ? VolumeWorldSlot.ReadManifestSeed(root, slots[selected - 1]) : null;
             notice += replacementSeed is { } originalSeed

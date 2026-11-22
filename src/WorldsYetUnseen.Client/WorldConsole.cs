@@ -1,3 +1,4 @@
+using System.Globalization;
 using Groundwork.Core;
 
 namespace WorldsYetUnseen.Client;
@@ -11,12 +12,14 @@ internal sealed record ConsoleCommand(string Name, string Usage, string Descript
     internal Func<string, IEnumerable<string>>? CompleteValue { get; init; }
 }
 
-internal sealed record ConsoleView(string Prompt, string? Suggestions, string[] Lines, bool ShowingHelp);
+internal sealed record ConsoleView(string Prompt, string? Suggestions, string[] Lines, bool ShowingHelp,
+    bool SearchingHistory = false, int RequiredRows = 0);
 
 internal sealed class WorldConsole(ConsoleCommand[] commands)
 {
     private const int LineLimit = 80;
     private const int HistoryLimit = 32;
+    private const int CatalogPageSize = 10;
     private static readonly string[] BuiltIns = ["help", "clear"];
     private readonly List<string> _history = [];
     private readonly Queue<(string Command, string Result)> _output = new();
@@ -27,6 +30,11 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
     private string[]? _completions;
     private int _completionIndex;
     private bool _showHelp = true;
+    private int _helpPage;
+
+    private int HelpPages => Math.Max(1, (commands.Length + CatalogPageSize - 1) / CatalogPageSize);
+    private string? _searchQuery;
+    private int _searchIndex = -1;
 
     private bool IsOpen { get; set; }
     internal ConsoleView? View { get; private set; }
@@ -38,30 +46,150 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
     {
         if (!fits && IsOpen)
         {
-            IsOpen = false;
-            View = null;
+            Close();
             return true;
         }
         if (!fits || !focused || input.TransitionLoss)
             return IsOpen;
 
-        if (PrototypeMenu.Pressed(input, InputControl.F3) ||
-            IsOpen && PrototypeMenu.Pressed(input, InputControl.Escape))
+        if (PrototypeMenu.Pressed(input, InputControl.F3))
         {
-            IsOpen = !IsOpen;
-            View = IsOpen ? CreateView() : null;
+            if (IsOpen)
+                Close();
+            else
+            {
+                IsOpen = true;
+                View = CreateView();
+            }
             return true;
         }
 
         if (!IsOpen)
             return false;
 
+        var leftControl = HeldAtStart(input, InputControl.LeftControl);
+        var rightControl = HeldAtStart(input, InputControl.RightControl);
         foreach (var entry in input.Events)
         {
-            if (entry is { Kind: InputEventKind.Pressed, Device: InputDevice.Keyboard } && Edit(entry.Control))
+            if (entry.Kind == InputEventKind.FocusCleared)
+            {
+                leftControl = rightControl = false;
+                continue;
+            }
+            if (entry.Device != InputDevice.Keyboard)
+                continue;
+            switch (entry.Control)
+            {
+                case InputControl.LeftControl:
+                    leftControl = entry.Kind == InputEventKind.Pressed;
+                    continue;
+                case InputControl.RightControl:
+                    rightControl = entry.Kind == InputEventKind.Pressed;
+                    continue;
+            }
+            if (entry.Kind != InputEventKind.Pressed)
+                continue;
+
+            if (entry.Control == InputControl.Escape)
+            {
+                if (_searchQuery is null)
+                    Close();
+                else
+                {
+                    _searchQuery = null;
+                    View = CreateView();
+                }
+                return true;
+            }
+
+            if (entry.Control == InputControl.R && (leftControl || rightControl))
+            {
+                SearchHistory();
+                View = CreateView();
+            }
+            else if (_searchQuery is not null)
+            {
+                if (entry.Control is InputControl.Enter or InputControl.NumpadEnter)
+                {
+                    AcceptSearchMatch();
+                    View = CreateView();
+                    return true;
+                }
+                if (EditSearch(entry.Control))
+                    View = CreateView();
+            }
+            else if (Edit(entry.Control))
                 View = CreateView();
         }
         return true;
+    }
+
+    private static bool HeldAtStart(InputSnapshot input, InputControl control)
+    {
+        // HeldControls reflects the end of the capture. The first transition also records
+        // whether the modifier was down before a short chord or release in this batch.
+        foreach (var entry in input.Events)
+        {
+            if (entry.Kind == InputEventKind.FocusCleared)
+                return false;
+            if (entry.Device == InputDevice.Keyboard && entry.Control == control)
+                return entry.Kind == InputEventKind.Released;
+        }
+        return input.HeldControls.Contains(control);
+    }
+
+    private void Close()
+    {
+        _searchQuery = null;
+        IsOpen = false;
+        View = null;
+    }
+
+    private void SearchHistory()
+    {
+        _completions = null;
+        if (_searchQuery is null)
+        {
+            _searchQuery = "";
+            _searchIndex = FindSearchMatch(_history.Count - 1);
+            return;
+        }
+
+        var older = FindSearchMatch(_searchIndex - 1);
+        _searchIndex = older >= 0 ? older : FindSearchMatch(_history.Count - 1);
+    }
+
+    private bool EditSearch(InputControl control)
+    {
+        var query = _searchQuery!;
+        if (control == InputControl.Backspace && query.Length > 0)
+            _searchQuery = query[..^1];
+        else if (query.Length < LineLimit && Character(control) is { } character)
+            _searchQuery = query + character;
+        else
+            return false;
+        _searchIndex = FindSearchMatch(_history.Count - 1);
+        return true;
+    }
+
+    private int FindSearchMatch(int start)
+    {
+        for (var i = start; i >= 0; i--)
+        {
+            if (_history[i].Contains(_searchQuery!, StringComparison.Ordinal))
+                return i;
+        }
+        return -1;
+    }
+
+    private void AcceptSearchMatch()
+    {
+        if (_searchIndex < 0)
+            return;
+        SetLine(_history[_searchIndex]);
+        _historyOffset = 0;
+        _draft = "";
+        _searchQuery = null;
     }
 
     private bool Edit(InputControl control)
@@ -136,8 +264,12 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
         _draft = "";
         SetLine("");
 
-        if (line == "help")
+        var (name, value) = Split(line);
+        var page = 1;
+        if (name == "help" && (value.Length == 0 || int.TryParse(value, NumberStyles.None,
+            CultureInfo.InvariantCulture, out page) && page >= 1 && page <= HelpPages))
         {
+            _helpPage = page - 1;
             _showHelp = true;
             return;
         }
@@ -149,7 +281,6 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
             return;
         }
 
-        var (name, value) = Split(line);
         var command = Find(name);
         var result = name switch
         {
@@ -178,7 +309,7 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
     private string Describe(string name)
     {
         if (name == "help")
-            return "Usage: help [command]\nList commands or show details.\nExample: help fov";
+            return "Usage: help [command|page]\nList commands or show details.\nExample: help fov";
         if (name == "clear")
             return "Usage: clear\nClear console output.";
         if (Find(name) is not { } command)
@@ -227,22 +358,41 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
             return CommandNames().Where(candidate => candidate.StartsWith(name, StringComparison.Ordinal))
                 .Select(candidate => candidate + (candidate == "help" || Find(candidate)?.Values.Length > 0 ? " " : "")).ToArray();
         var command = Find(name);
-        var values = name == "help" ? CommandNames()
+        var values = name == "help" ? CommandNames().Concat(Enumerable.Range(1, HelpPages)
+            .Select(page => page.ToString(CultureInfo.InvariantCulture)))
             : command?.CompleteValue?.Invoke(line[(name.Length + 1)..].TrimStart()) ?? command?.Values ?? [];
         return values.Where(candidate => candidate.StartsWith(value, StringComparison.Ordinal))
-            .Select(candidate => $"{name} {candidate}").ToArray();
+            .Select(candidate => $"{name} {candidate}")
+            .Where(candidate => candidate.Length <= LineLimit).ToArray();
     }
 
     private ConsoleView CreateView()
     {
+        var lines = _showHelp
+            ? Catalog()
+            : _output.SelectMany(entry => entry.Result.Split('\n').Prepend($"> {entry.Command}")).ToArray();
+        var requiredRows = _showHelp ? lines.Length
+            : _output.LastOrDefault().Result is { } result ? 2 + result.Count(character => character == '\n') : 0;
+
+        if (_searchQuery is { } query)
+        {
+            var match = _searchIndex < 0 ? "No history match." : $"Match: {_history[_searchIndex]}";
+            return new(query + "▏", match, lines, _showHelp, SearchingHistory: true, RequiredRows: requiredRows);
+        }
+
         var matches = _completions ?? Matches();
         var suggestions = _line.Length == 0 || matches.Length == 0 ? null
             : string.Join("  ·  ", matches.Select(match => match.TrimEnd()));
-        var lines = _showHelp
-            ? commands.Select(command => $"{command.Usage,-20} {command.Description}")
-                .ToArray()
-            : _output.SelectMany(entry => entry.Result.Split('\n').Prepend($"> {entry.Command}")).ToArray();
-        return new(_line.Insert(_cursor, "▏"), suggestions, lines, _showHelp);
+        return new(_line.Insert(_cursor, "▏"), suggestions, lines, _showHelp, RequiredRows: requiredRows);
+    }
+
+    private string[] Catalog()
+    {
+        var rows = commands.Skip(_helpPage * CatalogPageSize).Take(CatalogPageSize)
+            .Select(command => $"{command.Usage,-20} {command.Description}");
+        if (HelpPages > 1)
+            rows = rows.Append(FormattableString.Invariant($"Page {_helpPage + 1}/{HelpPages} · help {(_helpPage + 1) % HelpPages + 1}"));
+        return rows.ToArray();
     }
 
     private ConsoleCommand? Find(string name) => Array.Find(commands, command => command.Name == name);
