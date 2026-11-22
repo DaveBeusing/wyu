@@ -4,8 +4,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+$seeds = @(& (Join-Path $PSScriptRoot 'Get-FarHorizonTestSeeds.ps1'))
 $client = (Resolve-Path -LiteralPath $Assembly).Path
-foreach ($seed in @('42', '20261111')) {
+foreach ($seed in $seeds) {
     $reference = $null
     foreach ($adapter in @('warp', 'hardware')) {
         Write-Host "Exploration seed $seed on $adapter"
@@ -34,7 +35,7 @@ Write-Host 'PASS: Both WP11 seed routes matched across fresh WARP and NVIDIA pro
 $priorWalk = $env:WYU_PACKAGE_E_WALK
 try {
     $env:WYU_PACKAGE_E_WALK = '1'
-    foreach ($seed in '42','20261111') {
+    foreach ($seed in $seeds) {
         $expected = $null
         foreach ($adapter in 'warp','hardware') {
             $output = @(& dotnet $client --volume-smoke $seed $adapter)
