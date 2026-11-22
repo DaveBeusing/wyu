@@ -3,11 +3,12 @@ using Groundwork.Rendering;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> describeStart)
+internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> describeStart) : IDisposable
 {
     internal const string Usage = "profile [n|cancel]";
     internal const string ComparisonUsage = "profile keep <a|b>\nprofile compare";
     private const double SlowPollMilliseconds = 33;
+    private const double WarmupSeconds = 1;
     private const double FinalPollGraceSeconds = 0.25;
     private int _seconds;
     private object? _renderer;
@@ -22,6 +23,18 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
     private Measurement? _last;
     private Measurement? _a;
     private Measurement? _b;
+    private Comparison? _comparison;
+
+    private sealed class Comparison(Func<ulong> applyB, Action restore)
+    {
+        internal Func<ulong> ApplyB { get; } = applyB;
+        internal Action Restore { get; } = restore;
+        internal Measurement? First { get; set; }
+        internal long AppliedAt { get; set; }
+        internal ulong MinimumSequence { get; set; }
+        internal long? WarmupStarted { get; set; }
+        internal bool Warming { get; set; } = true;
+    }
 
     private readonly record struct Measurement(double Seconds, int Presents, double MaxGap, int SlowPolls,
         ulong Replaced, ulong Skipped, string StartContext)
@@ -32,7 +45,11 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
             $"Profile {Seconds:0.0} s\nObserved FPS: {ObservedFps:0.0}\nMax poll gap: {MaxGap:0.0} ms\nPolls >33 ms: {SlowPolls}\nReplaced: {Replaced}\nSkipped: {Skipped}");
     }
 
-    internal string State() => _seconds == 0 ? "Profile idle." : "Profile running.";
+    internal bool IsComparing => _comparison is not null;
+
+    internal string State() => _comparison is { } comparison
+        ? $"A/B {(comparison.Warming ? "warmup" : "sampling")} {(comparison.First.HasValue ? "B" : "A")}."
+        : _seconds == 0 ? "Profile idle." : "Profile running.";
 
     internal string Handle(string value)
     {
@@ -56,8 +73,40 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
         return FormattableString.Invariant($"Profiling for {seconds} s.\nEsc to move.");
     }
 
+    internal string StartComparison(int seconds, Func<ulong> applyA, Func<ulong> applyB, Action restore)
+    {
+        if (_seconds != 0)
+            return State();
+        if (seconds is not (>= 1 and <= 30))
+            return "A/B duration: 1–30 s.";
+
+        var comparison = new Comparison(applyB, restore);
+        _comparison = comparison;
+        _seconds = seconds;
+        ApplyComparisonSettings(comparison, applyA);
+        return FormattableString.Invariant($"A/B sampling {seconds} s each.\nKeep console open.\nEsc cancels.");
+    }
+
+    private void ApplyComparisonSettings(Comparison comparison, Func<ulong> apply)
+    {
+        comparison.Warming = true;
+        comparison.AppliedAt = clock.GetTimestamp();
+        comparison.WarmupStarted = null;
+        try
+        {
+            comparison.MinimumSequence = apply();
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
+    }
+
     private string Keep(ref Measurement? slot, string name)
     {
+        if (IsComparing)
+            return State();
         if (_last is not { } result)
             return "Complete a profile first.";
 
@@ -93,19 +142,48 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
         var now = clock.GetTimestamp();
         if (_renderer is null)
         {
-            _startContext = describeStart();
             _renderer = renderer;
             _baseline = _previous = snapshot;
-            _started = _lastPoll = now;
-            _observedPresents = _slowPolls = 0;
-            _maxPollGap = 0;
-            return null;
+            if (!IsComparing)
+            {
+                BeginMeasurement(now, snapshot);
+                return null;
+            }
         }
-        if (!ReferenceEquals(_renderer, renderer) ||
+        else if (!ReferenceEquals(_renderer, renderer) ||
             snapshot.AppliedWidth != _baseline.AppliedWidth || snapshot.AppliedHeight != _baseline.AppliedHeight ||
             snapshot.LastPresentedSequence < _previous.LastPresentedSequence ||
             snapshot.ReplacedFrames < _previous.ReplacedFrames || snapshot.SkippedFrames < _previous.SkippedFrames)
             return Interrupt("Profile surface changed.");
+
+        if (_comparison is { Warming: true } warmup)
+        {
+            _previous = snapshot;
+            if (warmup.WarmupStarted is not { } warmupStarted)
+            {
+                if (clock.GetElapsedTime(warmup.AppliedAt, now).TotalSeconds > WarmupSeconds + FinalPollGraceSeconds)
+                    return Interrupt("A/B frame not acknowledged.");
+                if (snapshot.LastPresentedSequence >= warmup.MinimumSequence)
+                {
+                    warmup.WarmupStarted = now;
+                    _baseline = snapshot;
+                }
+                return null;
+            }
+
+            var warmupElapsed = clock.GetElapsedTime(warmupStarted, now).TotalSeconds;
+            if (warmupElapsed > WarmupSeconds + FinalPollGraceSeconds)
+                return Interrupt("A/B warmup deadline missed.");
+
+            if (warmupElapsed < WarmupSeconds)
+                return null;
+            if (snapshot.LastPresentedSequence == _baseline.LastPresentedSequence)
+                return Interrupt("A/B warmup stopped.\nNo observed presents.");
+
+            warmup.Warming = false;
+            BeginMeasurement(now, snapshot);
+            return null;
+        }
 
         var elapsed = clock.GetElapsedTime(_started, now).TotalSeconds;
         if (elapsed > _seconds + FinalPollGraceSeconds)
@@ -128,8 +206,34 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
         var replaced = snapshot.ReplacedFrames - _baseline.ReplacedFrames;
         var skipped = snapshot.SkippedFrames - _baseline.SkippedFrames;
         var measurement = new Measurement(elapsed, _observedPresents, _maxPollGap, _slowPolls, replaced, skipped, _startContext!);
-        _last = measurement;
-        return Interrupt(measurement.Describe());
+        if (_comparison is not { } comparison)
+        {
+            _last = measurement;
+            return Interrupt(measurement.Describe());
+        }
+        if (_observedPresents == 0)
+            return Interrupt("A/B sample stopped.\nNo observed presents.");
+
+        if (comparison.First is { } first)
+        {
+            var result = DescribeComparison(first, measurement);
+            Interrupt(result);
+            (_a, _b, _last) = (first, measurement, measurement);
+            return result;
+        }
+
+        comparison.First = measurement;
+        ApplyComparisonSettings(comparison, comparison.ApplyB);
+        return null;
+    }
+
+    private void BeginMeasurement(long now, RendererSnapshot snapshot)
+    {
+        _startContext = describeStart();
+        _baseline = _previous = snapshot;
+        _started = _lastPoll = now;
+        _observedPresents = _slowPolls = 0;
+        _maxPollGap = 0;
     }
 
     internal string? Interrupt(string message)
@@ -137,9 +241,14 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
         if (_seconds == 0)
             return null;
 
+        var comparison = _comparison;
+        _comparison = null;
         _seconds = 0;
         _renderer = null;
         _startContext = null;
+        comparison?.Restore();
         return message;
     }
+
+    public void Dispose() => Interrupt("Profile cancelled.");
 }

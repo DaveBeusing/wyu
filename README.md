@@ -49,7 +49,9 @@ biomes, vegetation, sky, and terrain shadows.
 
 In the world console, type a command and press **Enter**. **Tab** completes
 commands and supported values, **Up/Down** recalls earlier input, and **Esc**
-returns control to the game. Type **help** for the commands available in the
+returns control to the game. **Ctrl+R** searches earlier commands. Press it
+again for an older match, **Enter** to edit the match, or **Esc** to return to
+your draft. Type **help** for the commands available in the
 current world. **help <command>** shows usage, an example and the current value
 where available. **status** shows the world, seed, generator, position and
 presentation settings. **reset** restores the default field of view, live time
@@ -57,6 +59,13 @@ and automatic fog where available. Use **fov** to adjust the vertical field of v
 toggle F1 diagnostics, and **time** and **fog** where the world supports weather.
 Use **time live** to return to the world clock. Console overrides apply during
 the current exploration session and are left out of the save.
+
+**preset save <name>** stores the three presentation settings for this session.
+Use **preset show <name>** to read them, **preset diff <a> <b>** to see their
+differences, and **preset load <name>** to apply them. **preset list** shows
+the names and **preset delete <name>** removes one. **inspect** shows the local
+biome, altitude, and regional fog where available. **pos copy** copies the world,
+seed, and coordinates to the Windows clipboard.
 
 **profile 10** targets a ten-second sample of the on-foot view. The report gives
 the actual sampled span. If the final poll is more than 250 ms late, the run
@@ -71,6 +80,14 @@ measurement into that session's slot. A new measurement leaves the two slots
 available. **profile compare** shows both measured durations and rates side by
 side. The count-based metrics are shown per second, including poll gaps over
 33 ms, so you can compare samples of different lengths.
+
+**profile run <a> <b> [sec]** measures two saved presets from the same camera
+position and direction. Keep the console open. Each preset has a one-second
+warmup after its first presented frame, then a 1–30 second sample (5 seconds by
+default). Presets with live time use the same lighting and weather tick for
+comparison. A successful run fills both slots and restores your earlier settings.
+**profile cancel** or closing the console restores your settings and preserves
+the previous results.
 
 **report copy** copies the A/B comparison to the Windows clipboard. It includes
 the client build and the world, seed, generator, position and presentation

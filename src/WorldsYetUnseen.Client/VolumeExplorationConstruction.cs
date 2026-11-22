@@ -46,9 +46,7 @@ internal sealed partial class VolumeExploration
     private bool UpdateConstructionPresentation(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetWalkState player,
         bool requireEmpty = false, bool dropSubmissionForProof = false)
     {
-        if (ReadInventory()?.Construction is not { } state ||
-            _presentedConstruction is null && state.Blocks.IsEmpty && !requireEmpty ||
-            ReferenceEquals(_presentedConstruction, state) && _presentedConstructionTerrain == _published)
+        if (ReadInventory()?.Construction is not { } state || !NeedsConstructionPresentation(state, requireEmpty))
             return false;
 
         if (ConstructionRenderer is not { } visuals)
@@ -93,6 +91,10 @@ internal sealed partial class VolumeExploration
             overlay.Menu = "Movement held\nPresenting the confirmed construction revision…";
         return true;
     }
+
+    private bool NeedsConstructionPresentation(ConstructionState state, bool requireEmpty = false) =>
+        (_presentedConstruction is not null || !state.Blocks.IsEmpty || requireEmpty) &&
+        (!ReferenceEquals(_presentedConstruction, state) || _presentedConstructionTerrain != _published);
 
     private async Task<bool> HandleConstructionAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
         PlanetWalkState player, InputSnapshot input, CancellationToken token)

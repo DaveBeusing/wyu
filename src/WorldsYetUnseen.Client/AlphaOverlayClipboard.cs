@@ -7,13 +7,13 @@ internal sealed partial class AlphaOverlay
     private const uint MoveableMemory = 0x0002;
     private const uint UnicodeText = 13;
 
-    internal bool TryCopyReport(string report)
+    internal bool TryCopyText(string text)
     {
         if (GetForegroundWindow() != _owner)
             return false;
 
-        var text = (report.ReplaceLineEndings("\r\n") + '\0').ToCharArray();
-        var memory = GlobalAlloc(MoveableMemory, (nuint)text.Length * sizeof(char));
+        var characters = (text.ReplaceLineEndings("\r\n") + '\0').ToCharArray();
+        var memory = GlobalAlloc(MoveableMemory, (nuint)characters.Length * sizeof(char));
         if (memory == 0)
             return false;
 
@@ -24,7 +24,7 @@ internal sealed partial class AlphaOverlay
                 return false;
             try
             {
-                Marshal.Copy(text, 0, address, text.Length);
+                Marshal.Copy(characters, 0, address, characters.Length);
             }
             finally
             {
