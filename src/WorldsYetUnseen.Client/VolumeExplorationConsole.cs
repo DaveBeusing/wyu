@@ -29,8 +29,11 @@ internal sealed partial class VolumeExploration
         commands.Add(new("status", "status", "World and settings",
             value => value.Length == 0 ? ReadConsoleStatus(position()) : "Usage: status") { Example = "status" });
         commands.Add(new("reset", "reset", "Reset FOV, time and fog", ResetPresentation) { Example = "reset" });
-        commands.Add(new("profile", "profile [n|cancel]", "Sample 1–30 seconds", profile.Handle, "5", "10", "30", "cancel")
-            { CurrentValue = profile.State, Example = "profile 10" });
+        commands.Add(new("profile", ConsoleFrameProfile.Usage, "Sample 1–30 seconds", profile.Handle,
+            "5", "10", "30", "cancel", "keep a", "keep b", "compare")
+        {
+            CurrentValue = profile.State, Example = "profile 10", UsageDetails = ConsoleFrameProfile.ComparisonUsage,
+        });
         return new(commands.ToArray());
     }
 
