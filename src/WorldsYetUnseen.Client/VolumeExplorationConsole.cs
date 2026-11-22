@@ -9,7 +9,7 @@ internal sealed partial class VolumeExploration
     private const float DefaultFieldOfView = 1f;
     private const int PresetLimit = 16;
     private const int PresetsPerPage = 7; // Leave room for the command and page heading in the smallest console.
-    private const string PresetUsage = "save / load <name>\nlist [page] / delete <name>\nshow <name> / diff <a> <b>\ncopy <name>\nimport [data]\nimport confirm / import cancel";
+    private const string PresetUsage = "save / load <name>\nlist [page] / delete <name>\nshow <name> / diff <a> <b>\ncopy <name>\nimport [data]\nimport confirm / import cancel\npin / unpin <name>";
     private const string ProfileRunUsage = "profile run <a> <b> [sec]";
     private const string ProfileRunTiming = "1–30 s per preset\nDefault: 5 s";
     private const string ProfileRepeatUsage = "profile repeat <a> <b> [n]";
@@ -22,14 +22,25 @@ internal sealed partial class VolumeExploration
     private readonly record struct PresentationPreset(float FieldOfView, bool? Fog, ulong? Time);
 
     private WorldConsole CreateConsole(Func<PlanetVector> position, ConsoleFrameProfile profile, Func<string, bool> copyText,
-        Func<string?> readPresetText, Func<string> inspectAim, Func<string> streamStatus)
+        Func<string?> readPresetText, Func<string> inspectAim, Func<string> streamStatus, ConsoleTelemetry telemetry,
+        ConsolePinnedPresets? pinnedStore, Func<PlanetVector> forward)
     {
         var presets = new Dictionary<string, PresentationPreset>(StringComparer.Ordinal);
-        var marks = new WorldConsoleMarks(() => PlanetName, () => Descriptor.Seed, position);
+        var pinnedNames = new HashSet<string>(StringComparer.Ordinal);
+        string[] storedEntries = [];
+        var pinsReadable = pinnedStore is not null && pinnedStore.TryRead(out storedEntries);
+        if (pinsReadable)
+            foreach (var entry in storedEntries)
+                if (TryDecodePreset(entry, out var restored))
+                {
+                    presets.Add(restored.Name, restored.Preset);
+                    pinnedNames.Add(restored.Name);
+                }
+        var marks = new WorldConsoleMarks(() => PlanetName, () => Descriptor.Seed, position, forward);
         PresentationPreset? undo = null;
         (string Name, PresentationPreset Preset, PresentationPreset? Prior)? pendingImport = null;
-        string[] presetVerbs = ["save", "load", "list", "delete", "show", "diff", "copy", "import", "import confirm", "import cancel"];
-        string[] profileValues = ["5", "10", "30", "cancel", "keep a", "keep b", "compare", "run", "repeat"];
+        string[] presetVerbs = ["save", "load", "list", "delete", "show", "diff", "copy", "import", "import confirm", "import cancel", "pin", "unpin"];
+        string[] profileValues = ["5", "10", "30", "cancel", "keep a", "keep b", "compare", "run", "repeat", "trace", "trace cancel"];
         var commands = new List<ConsoleCommand>
         {
             new("fov", "fov [50..100|reset]", "Vertical camera angle (deg)", value => TrackPresentation(value, SetFieldOfView), "reset")
@@ -50,13 +61,16 @@ internal sealed partial class VolumeExploration
         commands.Add(new("profile", ConsoleFrameProfile.Usage, "Measure performance", RunProfile, profileValues)
         {
             CurrentValue = profile.State,
-            UsageDetails = $"{ConsoleFrameProfile.ComparisonUsage}\n{ProfileRunUsage}\n{ProfileRunTiming}\n{ProfileRepeatUsage}\n{ProfileRepeatTiming}",
+            UsageDetails = $"{ConsoleFrameProfile.ComparisonUsage}\n{ProfileRunUsage}\n{ProfileRepeatUsage}\n{ProfileRepeatTiming}\nprofile trace [sec]\nprofile trace cancel",
             CompleteValue = value => value.StartsWith("run ", StringComparison.Ordinal) ||
                 value.StartsWith("repeat ", StringComparison.Ordinal)
                 ? CompletePresetNames(value, 2)
                 : profileValues,
         });
-        commands.Add(new("report", "report copy", "Copy A/B report", value => CopyComparison(value, profile, copyText), "copy"));
+        commands.Add(new("report", "report <copy|here>", "Copy diagnostics", Report, "copy", "here")
+        {
+            UsageDetails = "report copy · A/B results\nreport here · this location",
+        });
         commands.Add(new("preset", "preset <command>", "Session presets", ApplyPreset, presetVerbs)
         {
             UsageDetails = $"{PresetUsage}\n{PresetNameUsage}",
@@ -67,17 +81,41 @@ internal sealed partial class VolumeExploration
             value => value != "copy" ? "Usage: pos copy"
                 : copyText(ReadPosition(position())) ? "Position copied." : "Clipboard unavailable.\nTry pos copy again.", "copy"));
         commands.Add(new("undo", "undo", "Restore last view edit", value => OutsideComparison(value, UndoPresentation)));
-        commands.Add(new("stream", "stream status", "Terrain streaming", value => OutsideComparison(value,
-            argument => argument == "status" ? streamStatus() : "Usage: stream status"), "status"));
-        commands.Add(new("mark", "mark <command>", "Session locations", marks.Handle, "save", "list", "show")
+        commands.Add(new("stream", "stream <status|watch>", "Terrain streaming", Stream, "status", "watch", "watch cancel")
         {
-            UsageDetails = "mark save <name>\nmark list [page]\nmark show <name>",
+            UsageDetails = "stream watch [sec]\nstream watch cancel",
+        });
+        commands.Add(new("mark", "mark <command>", "Session locations", marks.Handle, "save", "list", "show", "locate")
+        {
+            UsageDetails = WorldConsoleMarks.Usage,
             CompleteValue = marks.CompleteValue,
         });
         return new(commands.ToArray());
 
         string OutsideComparison(string value, Func<string, string> execute) =>
             profile.IsComparing ? "A/B profile running." : execute(value);
+
+        string Report(string value)
+        {
+            if (value == "copy")
+                return CopyComparison(value, profile, copyText);
+            if (value != "here")
+                return "Usage: report copy or here";
+            if (profile.IsActive || telemetry.IsActive)
+                return "Finish measuring first.";
+            var report = FormattableString.Invariant(
+                $"WYU location report\nBuild {ClientBuild}\n{ReadPosition(position())}\nGenerator {Descriptor.GeneratorVersion}\nFOV {FieldOfViewDegrees:0.###}°\nFog {(_weather is null ? "n/a" : FogMode)} · Time {(_weather is null ? "n/a" : TimeMode)}\n\nTerrain aim\n{inspectAim()}\n\nStreaming\n{streamStatus()}");
+            return copyText(report) ? "Location report copied." : "Clipboard unavailable.";
+        }
+
+        string Stream(string value)
+        {
+            if (value == "status")
+                return profile.IsComparing ? "A/B profile running." : streamStatus();
+            if (value != "watch" && !value.StartsWith("watch ", StringComparison.Ordinal))
+                return "Usage: stream status\nstream watch [sec]";
+            return profile.IsActive ? "Profile already running." : telemetry.HandleWatch(value[5..].TrimStart());
+        }
 
         string InspectPosition(string value) => value switch
         {
@@ -115,23 +153,28 @@ internal sealed partial class VolumeExploration
             var separator = value.IndexOf(' ');
             return separator < 0 ? presetVerbs : value[..separator] switch
             {
-                "load" or "delete" or "show" or "copy" => CompletePresetNames(value, 1),
+                "load" or "delete" or "show" or "copy" or "pin" => CompletePresetNames(value, 1),
+                "unpin" => CompletePresetNames(value, 1, pinnedNames.Order(StringComparer.Ordinal)),
                 "diff" => CompletePresetNames(value, 2),
                 _ => presetVerbs,
             };
         }
 
-        IEnumerable<string> CompletePresetNames(string value, int nameCount)
+        IEnumerable<string> CompletePresetNames(string value, int nameCount, IEnumerable<string>? names = null)
         {
             var prefix = value[..(value.LastIndexOf(' ') + 1)];
             var tokens = prefix.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             if (tokens.Length > nameCount || tokens.Length == 2 && !presets.ContainsKey(tokens[1]))
                 return [];
-            return PresetNames().Select(name => prefix + name);
+            return (names ?? PresetNames()).Select(name => prefix + name);
         }
 
         string RunProfile(string value)
         {
+            if (value == "trace" || value.StartsWith("trace ", StringComparison.Ordinal))
+                return profile.IsActive ? "Profile already running." : telemetry.HandleTrace(value[5..].TrimStart());
+            if (telemetry.IsActive)
+                return "Diagnostic capture running.";
             var parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length == 0 || parts[0] is not ("run" or "repeat"))
                 return profile.Handle(value);
@@ -185,7 +228,7 @@ internal sealed partial class VolumeExploration
                 return ComparePresets(name);
             if (verb == "import")
                 return OutsideComparison(name, ImportPreset);
-            if (separator < 0 || verb is not ("save" or "load" or "delete" or "show" or "copy"))
+            if (separator < 0 || verb is not ("save" or "load" or "delete" or "show" or "copy" or "pin" or "unpin"))
                 return PresetUsage;
 
             if (!ValidPresetName(name))
@@ -195,6 +238,9 @@ internal sealed partial class VolumeExploration
                 return presets.TryGetValue(name, out var stored) ? DescribePreset(name, stored) : MissingPreset(name);
             if (profile.IsComparing)
                 return "A/B profile running.";
+
+            if (verb is "pin" or "unpin")
+                return ChangePin(verb, name);
 
             if (verb == "copy")
                 return presets.TryGetValue(name, out var copied)
@@ -222,6 +268,47 @@ internal sealed partial class VolumeExploration
                 return $"Preset limit: {PresetLimit}.";
             presets[name] = ReadPresentation();
             return exists ? $"Preset replaced.\n{name}" : $"Preset saved.\n{name}";
+        }
+
+        string ChangePin(string verb, string name)
+        {
+            if (profile.IsActive || telemetry.IsActive)
+                return "Finish measuring first.";
+            if (pinnedStore is null)
+                return "Pinned presets unavailable.";
+            var result = ConsolePresetPinResult.NotFound;
+            if (verb == "unpin")
+                result = pinnedStore.Unpin(name);
+            else if (presets.TryGetValue(name, out var preset))
+                result = pinnedStore.Pin(EncodePreset(name, preset));
+            else
+                return MissingPreset(name);
+
+            if (result is ConsolePresetPinResult.Pinned or ConsolePresetPinResult.Unpinned or ConsolePresetPinResult.NotFound)
+            {
+                pinsReadable = pinnedStore.TryRead(out var entries);
+                if (pinsReadable)
+                {
+                    pinnedNames.Clear();
+                    foreach (var entry in entries)
+                        if (ReadPinnedPresetName(entry) is { } pinnedName)
+                            pinnedNames.Add(pinnedName);
+                }
+                else
+                {
+                    pinnedNames.Remove(name);
+                    if (result == ConsolePresetPinResult.Pinned && pinnedNames.Count < PresetLimit)
+                        pinnedNames.Add(name);
+                }
+            }
+            return result switch
+            {
+                ConsolePresetPinResult.Pinned => $"Preset pinned.\n{name}",
+                ConsolePresetPinResult.Unpinned => $"Preset unpinned.\n{name}",
+                ConsolePresetPinResult.NotFound => $"Preset is not pinned.\n{name}",
+                ConsolePresetPinResult.LimitReached => $"Pinned limit: {PresetLimit}.",
+                _ => "Pinned presets unavailable.",
+            };
         }
 
         string ImportPreset(string argument)
@@ -296,15 +383,20 @@ internal sealed partial class VolumeExploration
                  page < 1 || page > pages))
                 return pages == 1 ? "Usage: preset list" : $"Preset page: 1–{pages}.";
             if (presets.Count == 0)
-                return "No presets saved.";
+                return pinsReadable || pinnedStore is null ? "No presets saved." : "Pinned presets unreadable.";
 
             var heading = $"Presets {page}/{pages}";
             if (page < pages)
                 heading += $" · preset list {page + 1}";
-            var names = PresetNames().Skip((page - 1) * PresetsPerPage).Take(PresetsPerPage);
+            var names = PresetNames().Skip((page - 1) * PresetsPerPage).Take(PresetsPerPage)
+                .Select(name => pinnedNames.Contains(name) ? $"{name} *" : name);
             return string.Join('\n', names.Prepend(heading));
         }
     }
+
+    private static string? ReadPinnedPresetName(string encoded) =>
+        TryDecodePreset(encoded, out var preset) &&
+        string.Equals(encoded, EncodePreset(preset.Name, preset.Preset), StringComparison.Ordinal) ? preset.Name : null;
 
     private static string EncodePreset(string name, PresentationPreset preset) => FormattableString.Invariant(
         $"wyu1 {name} {preset.FieldOfView:R} {FormatFogMode(preset.Fog)} {FormatTimeMode(preset.Time)}");

@@ -33,6 +33,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private readonly ReferenceWeather? _weather = reference is null ||
         Environment.GetEnvironmentVariable("WYU_PACKAGE_E") == "off" ? null : new(reference);
     internal ReferenceProps? Props { get; set; }
+    internal string? ConsolePresetDirectory { get; init; }
     internal ProceduralRenderHost? OrbitMaterialHost { get; init; }
     internal string? OrbitMaterialFallbackNotice { get; init; }
     private int _propPeakDraws;
@@ -40,6 +41,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private ulong _sequence;
     private float _yaw, _pitch = orbitDemo ? OrbitDemoPreset.Pitch : -0.2f;
     private bool _debug;
+    private ConsoleTelemetry? _consoleTelemetry;
     private bool _testMenu;
     private int _testAction;
     private bool? _testFog;
@@ -221,15 +223,21 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         using var profile = !scripted && overlay is not null
             ? new ConsoleFrameProfile(TimeProvider.System,
                 () => ReadProfileContext((comparisonView?.Pose ?? state).Position, comparisonView?.LiveTick)) : null;
+        var telemetry = _consoleTelemetry = profile is not null ? new ConsoleTelemetry(TimeProvider.System) : null;
+        var pinned = profile is not null && ConsolePresetDirectory is { } directory
+            ? new ConsolePinnedPresets(directory, ReadPinnedPresetName) : null;
         var terminal = profile is null || overlay is null ? null : CreateConsole(() => state.Position, profile, overlay.TryCopyText,
-            overlay.ReadPresetText, () => InspectAim(terrain, state), () => ReadStreamStatus(terrain));
-        void ReportProfile(string? result)
+            overlay.ReadPresetText, () => InspectAim(terrain, state), () => ReadStreamStatus(terrain), telemetry!, pinned,
+            () => ReadLookDirection(state));
+        void ReportConsole(string command, string? result)
         {
             if (result is null || terminal is null)
                 return;
-            terminal.Report("profile", result);
+            terminal.Report(command, result);
             overlay!.Console = terminal.View;
         }
+
+        void ReportProfile(string? result) => ReportConsole("profile", result);
 
         while (await cadence.WaitForNextTickAsync(token).ConfigureAwait(false))
         {
@@ -271,6 +279,14 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 return;
             var drawable = RequireHealthyRenderer(rendered).Surface == RenderSurfaceState.Drawable;
             ReportProfile(profile?.Observe(renderer, rendered, drawable && focused && !_testMenu && !_inventoryOpen));
+            if (telemetry is { IsActive: true })
+            {
+                var command = telemetry.IsTracing ? "profile trace" : "stream watch";
+                var result = drawable && focused && !_testMenu && !_inventoryOpen && !_constructionOpen
+                    ? telemetry.Observe(renderer, terrain.Statistics, rendered)
+                    : telemetry.Interrupt();
+                ReportConsole(command, result);
+            }
             if (profile?.IsComparing != true)
                 comparisonView = null;
             mouse?.Update(drawable && focused && !_testMenu && !_inventoryOpen && _buildRefund is null && !consoleInput,
@@ -329,6 +345,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 }
                 mouse?.Update(false, ref _yaw, ref _pitch);
                 ReportProfile(profile?.Interrupt("Profile stopped for flight."));
+                if (telemetry is { IsActive: true })
+                    ReportConsole(telemetry.IsTracing ? "profile trace" : "stream watch", telemetry.Interrupt());
                 var result = await FlyAsync(terrain, renderHost, state, null, false, token).ConfigureAwait(false);
                 if (result.Quit)
                     return;
@@ -768,16 +786,27 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private VolumeCamera Camera(VolumeViewIdentity view, PlanetVector foot, PlanetVector heading,
         (ulong Tick, double Fraction)? interpolation = null)
     {
-        var up = Vector3.Normalize(new((float)foot.X, (float)foot.Y, (float)foot.Z));
-        var tangent = new Vector3((float)heading.X, (float)heading.Y, (float)heading.Z);
-        tangent = Vector3.Normalize(tangent - up * Vector3.Dot(up, tangent));
-        var direction = MathF.Cos(_yaw) * tangent + MathF.Sin(_yaw) * Vector3.Cross(tangent, up);
-        direction = MathF.Cos(_pitch) * direction + MathF.Sin(_pitch) * up;
+        var (direction, up) = WalkingView(foot, heading);
         var eye = WalkingEye(foot);
         var (tick, fraction) = _previewTime is { } preview
             ? (preview, 0d)
             : interpolation ?? (_environmentTick, 0);
         return ApplyNearEnvironment(new(view, eye, direction, up, _fieldOfView, 0.08f, 150, Vector4.One, Sky), tick, fraction);
+    }
+
+    private (Vector3 Direction, Vector3 Up) WalkingView(PlanetVector foot, PlanetVector heading)
+    {
+        var up = Vector3.Normalize(new((float)foot.X, (float)foot.Y, (float)foot.Z));
+        var tangent = new Vector3((float)heading.X, (float)heading.Y, (float)heading.Z);
+        tangent = Vector3.Normalize(tangent - up * Vector3.Dot(up, tangent));
+        var direction = MathF.Cos(_yaw) * tangent + MathF.Sin(_yaw) * Vector3.Cross(tangent, up);
+        return (MathF.Cos(_pitch) * direction + MathF.Sin(_pitch) * up, up);
+    }
+
+    private PlanetVector ReadLookDirection(PlanetWalkState state)
+    {
+        var (direction, _) = WalkingView(state.Position, state.Heading);
+        return new(direction.X, direction.Y, direction.Z);
     }
 
     private static PlanetVector WalkingEye(PlanetVector foot) => Add(foot, Scale(Unit(foot), 1.65));
@@ -964,9 +993,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private static int Axis(InputSnapshot input, InputControl positive, InputControl negative) =>
         (input.HeldControls.Contains(positive) ? 1 : 0) - (input.HeldControls.Contains(negative) ? 1 : 0);
 
-    private static void Drain(VolumeStreamingCoordinator terrain)
+    private void Drain(VolumeStreamingCoordinator terrain)
     {
-        while (terrain.TryReadEvent(out _)) { }
+        var trace = _consoleTelemetry is { IsTracing: true } active ? active : null;
+        while (terrain.TryReadEvent(out var entry))
+            trace?.RecordTerrainEvent(entry.Kind);
     }
 
     private async Task WaitAsync(D3D12Renderer renderer, Func<bool> ready, CancellationToken token,
