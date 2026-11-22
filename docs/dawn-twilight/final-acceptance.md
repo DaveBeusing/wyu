@@ -2,8 +2,8 @@
 
 ## Integrated inputs
 
-PR #83 integrates WYU master `904489845830a1a73b1527aca6138df3e441906d`,
-including static construction #90 and console changes through #92.
+PR #83 integrates WYU master `9472032a464346c43b29f1c6a1fe74734c03097f`,
+including static construction #90, console changes and terrain edit feedback #98.
 Groundwork #193 integrates the complete #186 head
 `b40c11b14e64bff9b446d6eab18e8755916f66ec`: owner wake, presentation waiting,
 acknowledged-frame arbitration and texture-refinement fairness. It also
@@ -16,10 +16,13 @@ additional warm multiplier. PBR textures, boulders, fallback, prop warm-up and
 save/profile metadata remain present. TW1–TW3 remain approved. Weather density,
 the accepted clock and save payloads are not migrated.
 
-All ten WYU engine modules use the immutable baseline approved in WYU
-#90, `0.1.0-dev.45005277801.1`, source
-`751a1e022d703c6dfd582c6521cd1cc4f9c6a2eb`, manifest SHA-256
-`8E76DE5FE00E38755AC46F68693CEE75164078AC919B321E50ABBDB37FFA63C6`.
+All ten WYU engine modules use the immutable baseline from WYU master,
+`0.1.0-dev.45047410961.1`, source
+`07ed4c82c2c77841bd02174194fdcf5dc25dec1b`, manifest SHA-256
+`944680A0CA588814827FE713B5ECAD242635C3C0DFEA24731D3508EE04711F19`.
+The X11D run started at 22:28 on 22 November pins Groundwork `d67d8d6` and
+WYU `0b194e3` with the prior immutable baseline `0.1.0-dev.45005277801.1`.
+Its results apply to those inputs.
 The archived 09:31 and 11:58 runs used baseline `0.1.0-dev.44510519303.1`
 with both rendering DLLs staged together as a diagnostic overlay.
 Preserve the master-only producer, archive and locked-restore checks when
