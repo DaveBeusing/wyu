@@ -7,11 +7,17 @@ namespace WorldsYetUnseen.Client;
 internal sealed partial class VolumeExploration
 {
     private const float DefaultFieldOfView = 1f;
+    private const int PresetLimit = 16;
+    private const string PresetSaveUsage = "preset save <name>";
+    private const string PresetLoadUsage = "preset load <name>";
     private float _fieldOfView = DefaultFieldOfView;
     private ulong? _previewTime;
 
+    private readonly record struct PresentationPreset(float FieldOfView, bool? Fog, ulong? Time);
+
     private WorldConsole CreateConsole(Func<PlanetVector> position, ConsoleFrameProfile profile, Func<string, bool> copyReport)
     {
+        var presets = new Dictionary<string, PresentationPreset>(StringComparer.Ordinal);
         var commands = new List<ConsoleCommand>
         {
             new("fov", "fov [50..100|reset]", "Vertical camera angle (deg)", SetFieldOfView, "reset")
@@ -35,7 +41,39 @@ internal sealed partial class VolumeExploration
             CurrentValue = profile.State, Example = "profile 10", UsageDetails = ConsoleFrameProfile.ComparisonUsage,
         });
         commands.Add(new("report", "report copy", "Copy A/B report", value => CopyComparison(value, profile, copyReport), "copy"));
+        commands.Add(new("preset", "preset <save|load>", "Session presets", ApplyPreset, "save", "load")
+        {
+            UsageDetails = $"{PresetSaveUsage}\n{PresetLoadUsage}\nName: 1–24 a-z, 0-9, hyphen",
+            CompleteValue = value => value.StartsWith("load ", StringComparison.Ordinal)
+                ? presets.Keys.Order(StringComparer.Ordinal).Select(name => $"load {name}")
+                : ["save", "load"],
+        });
         return new(commands.ToArray());
+
+        string ApplyPreset(string value)
+        {
+            var separator = value.IndexOf(' ');
+            if (separator < 0 || value[..separator] is not ("save" or "load"))
+                return $"{PresetSaveUsage}\n{PresetLoadUsage}";
+
+            var name = value[(separator + 1)..].TrimStart();
+            if (name.Length is < 1 or > 24 || name.Any(c => c is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '-')))
+                return "Name: 1–24 a-z, 0-9, hyphen";
+
+            if (value[..separator] == "load")
+            {
+                if (!presets.TryGetValue(name, out var preset))
+                    return $"Preset not found.\n{name}";
+                (_fieldOfView, _testFog, _previewTime) = (preset.FieldOfView, preset.Fog, preset.Time);
+                return $"Preset loaded.\n{name}";
+            }
+
+            var exists = presets.ContainsKey(name);
+            if (!exists && presets.Count >= PresetLimit)
+                return $"Preset limit: {PresetLimit}.";
+            presets[name] = new(_fieldOfView, _testFog, _previewTime);
+            return exists ? $"Preset replaced.\n{name}" : $"Preset saved.\n{name}";
+        }
     }
 
     private static string CopyComparison(string value, ConsoleFrameProfile profile, Func<string, bool> copyReport)
