@@ -15,7 +15,9 @@ internal static class Program
             return await RunCaveSmokeAsync(args[1], args[2]).ConfigureAwait(false);
 
         if (args is ["--new-world"] or ["--free-test-world", _] or ["--construction-continue-proof", _] or
-            ["--construction-motion-proof", _] or ["--construction-measure-proof", _] ||
+            ["--construction-motion-proof", _] or ["--construction-measure-proof", _] or
+            ["--terrain-edit-feedback-proof", _] or ["--terrain-edit-feedback-proof", _, "keyboard" or "outcomes"] or
+            ["--terrain-edit-feedback-proof", _, "outcomes-keyboard", "E" or "Q"] ||
             args is ["--planet-playtest", _] or ["--planet-playtest", _, "graphics" or "budget"] ||
             args is ["--volume-smoke", _, "warp" or "hardware"] ||
             args is ["--volume-save-smoke", "init" or "restore" or "interrupt" or "verify" or "protected", _] ||
@@ -138,7 +140,17 @@ internal static class Program
         var constructionMotion = args[0] == "--construction-motion-proof";
         var constructionMeasure = args[0] == "--construction-measure-proof";
         var constructionContinue = args[0] == "--construction-continue-proof" || constructionMotion || constructionMeasure;
-        var freeTestWorld = args[0] == "--free-test-world" || constructionContinue;
+        var terrainEditProof = args switch
+        {
+            ["--terrain-edit-feedback-proof", _, "keyboard"] => TerrainEditFeedbackMode.Keyboard,
+            ["--terrain-edit-feedback-proof", _, "outcomes"] => TerrainEditFeedbackMode.Outcomes,
+            ["--terrain-edit-feedback-proof", _, "outcomes-keyboard", "E"] => TerrainEditFeedbackMode.OutcomesKeyboardE,
+            ["--terrain-edit-feedback-proof", _, "outcomes-keyboard", "Q"] => TerrainEditFeedbackMode.OutcomesKeyboardQ,
+            ["--terrain-edit-feedback-proof", _] => TerrainEditFeedbackMode.Automated,
+            _ => TerrainEditFeedbackMode.None,
+        };
+        var terrainEditFeedback = terrainEditProof != TerrainEditFeedbackMode.None;
+        var freeTestWorld = args[0] == "--free-test-world" || constructionContinue || terrainEditFeedback;
         var playtest = args[0] == "--planet-playtest" || freeTestWorld;
         var scripted = !playtest && args.Length >= 3;
         ulong? seed = null;
@@ -153,15 +165,18 @@ internal static class Program
         }
 
         using var stop = new CancellationTokenSource();
-        if (scripted || constructionContinue)
-            stop.CancelAfter(TimeSpan.FromMinutes(constructionMeasure ? 10 :
+        if (scripted || constructionContinue || terrainEditFeedback)
+            stop.CancelAfter(TimeSpan.FromMinutes(constructionMeasure || terrainEditProof is TerrainEditFeedbackMode.Keyboard or
+                    TerrainEditFeedbackMode.OutcomesKeyboardE or TerrainEditFeedbackMode.OutcomesKeyboardQ ? 10 :
                 Environment.GetEnvironmentVariable("WYU_PACKAGE_E_TIMESTAMP_PAIRS") == "1" ? 6 : 3));
         var fixture = playtest ? Path.GetFullPath(args[1]) : null;
         if (fixture is not null && !File.Exists(Path.Combine(fixture, "wyu-planet-playtest.fixture")))
             return 2;
+        if (terrainEditFeedback && !File.Exists(Path.Combine(fixture!, "wyu-terrain-edit-feedback.fixture")))
+            return 2;
         var logDirectory = fixture ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "WorldsYetUnseen", "Logs");
-        var diagnostics = scripted ? null : new AlphaDiagnostics(logDirectory, playtest && args.Length == 3 ? args[2] : null);
+        var diagnostics = scripted ? null : new AlphaDiagnostics(logDirectory, playtest && !terrainEditFeedback && args.Length == 3 ? args[2] : null);
         Console.CancelKeyPress += Cancel;
         try
         {
@@ -177,11 +192,12 @@ internal static class Program
                     return 2;
                 seed = flightSeed;
             }
-            var warp = constructionContinue || saveSmoke || scripted && (flightSmoke ? args[3] : args[^1]) == "warp";
+            var warp = constructionContinue || terrainEditFeedback || saveSmoke || scripted && (flightSmoke ? args[3] : args[^1]) == "warp";
             await GameHost.RunExplorationAsync(seed, warp, diagnostics, stop.Token,
                 saveRoot: fixture is not null ? freeTestWorld ? Path.Combine(fixture, "test-worlds", "v2") : Path.Combine(fixture, "v2") : saveSmoke || flightSmoke ? args[2] : null,
                 saveSmoke: saveSmoke || flightSmoke ? args[1] : null, flightSmoke: flightSmoke, freeTestWorld: freeTestWorld,
-                constructionContinue: constructionContinue, constructionMotion: constructionMotion, constructionMeasure: constructionMeasure)
+                constructionContinue: constructionContinue, constructionMotion: constructionMotion, constructionMeasure: constructionMeasure,
+                terrainEditProof: terrainEditProof)
                 .ConfigureAwait(false);
             diagnostics?.Write("exit");
             return 0;
@@ -189,7 +205,10 @@ internal static class Program
         catch (Exception error)
         {
             Console.Error.WriteLine(error);
-            diagnostics?.Report(error);
+            if (terrainEditFeedback)
+                diagnostics?.Write("fault", error.ToString());
+            else
+                diagnostics?.Report(error);
             return 1;
         }
         finally
