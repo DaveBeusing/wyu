@@ -10,7 +10,7 @@ internal sealed partial class VolumeExploration
     private float _fieldOfView = DefaultFieldOfView;
     private ulong? _previewTime;
 
-    private WorldConsole CreateConsole(Func<PlanetVector> position, ConsoleFrameProfile profile)
+    private WorldConsole CreateConsole(Func<PlanetVector> position, ConsoleFrameProfile profile, Func<string, bool> copyReport)
     {
         var commands = new List<ConsoleCommand>
         {
@@ -34,8 +34,22 @@ internal sealed partial class VolumeExploration
         {
             CurrentValue = profile.State, Example = "profile 10", UsageDetails = ConsoleFrameProfile.ComparisonUsage,
         });
+        commands.Add(new("report", "report copy", "Copy A/B report", value => CopyComparison(value, profile, copyReport), "copy"));
         return new(commands.ToArray());
     }
+
+    private static string CopyComparison(string value, ConsoleFrameProfile profile, Func<string, bool> copyReport)
+    {
+        if (value != "copy")
+            return "Usage: report copy";
+        if (profile.ReadComparisonReport(ClientBuild) is not { } report)
+            return "Keep profiles in A and B.";
+
+        return copyReport(report) ? "A/B report copied." : "Clipboard unavailable.\nTry report copy again.";
+    }
+
+    private string ReadProfileContext(PlanetVector position) => FormattableString.Invariant(
+        $"{ReadConsoleStatus(position)}\nTime tick {_environmentTick}\n{ReadDiagnostics()}");
 
     private string FogMode => _testFog switch { true => "on", false => "off", null => "auto" };
 
