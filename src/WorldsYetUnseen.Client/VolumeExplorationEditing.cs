@@ -9,6 +9,7 @@ namespace WorldsYetUnseen.Client;
 internal sealed partial class VolumeExploration
 {
     private bool _quitAfterSave;
+    private ManualSaveAttempt? _lastManualSave;
     private ReferenceTerrainMaterial _material = ReferenceTerrainMaterial.Basalt;
     private string? _notice;
     private long _noticeUntil;
@@ -23,6 +24,37 @@ internal sealed partial class VolumeExploration
         _noticeUntil = Environment.TickCount64 + 4500;
         if (overlay is not null)
             overlay.Menu = message;
+    }
+
+    private string ReadSaveStatus()
+    {
+        var mode = slot switch
+        {
+            null => "Save unavailable (no slot)",
+            { ReadOnly: true } => "Save slot read-only",
+            { NeedsInventoryImport: true } => "Save slot needs import",
+            _ => "Save slot writable",
+        };
+        var generation = slot?.Checkpoint?.Generation is { } current
+            ? FormattableString.Invariant($"Slot generation {current}") : "No committed generation";
+        var pending = slot?.HasPendingWrite == true ? "Write pending · F5/F10 retry" : "No pending write";
+        var summary = $"{mode}\n{generation}\n{pending}";
+        if (_lastManualSave is not { } last)
+            return $"{summary}\nNo F5/F10 attempt yet.";
+
+        var key = last.SaveAndQuit ? "F10" : "F5";
+        var retry = last.Retry ? " retry" : "";
+        var result = last.Status switch
+        {
+            VolumeSlotStatus.AlreadyCommitted => "Already committed",
+            VolumeSlotStatus.ReadOnlyRecovery => slot is null ? "No save slot" : "Read-only recovery",
+            VolumeSlotStatus.InvalidCheckpoint => "Invalid checkpoint",
+            VolumeSlotStatus.StorageError => "Storage error",
+            _ => last.Status.ToString(),
+        };
+        summary += $"\nLast {key}{retry}\nResult: {result}";
+        return last.Generation is { } saved
+            ? FormattableString.Invariant($"{summary}\nSaved generation {saved}") : summary;
     }
 
     private async Task<bool> HandleWorldCommandsAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
@@ -44,6 +76,7 @@ internal sealed partial class VolumeExploration
             var settling = slot?.HasPendingWrite == true;
             var result = await SaveAsync(terrain, token).ConfigureAwait(false);
             var saved = result.Status is VolumeSlotStatus.Committed or VolumeSlotStatus.AlreadyCommitted;
+            _lastManualSave = new(result.Status, saved ? result.Checkpoint?.Generation : null, saveAndQuit, settling);
             _quitAfterSave = saveAndQuit && saved && !settling;
             diagnostics?.Write(saved ? "save" : "save-held", $"status={result.Status} generation={result.Checkpoint?.Generation ?? 0} revision={_published.TerrainRevision}");
             if (result.Error is { } error)
@@ -215,5 +248,6 @@ internal sealed partial class VolumeExploration
         return await Task.Run(() => slot.Save(cut, environmentTick, token)).ConfigureAwait(false);
     }
 
+    private readonly record struct ManualSaveAttempt(VolumeSlotStatus Status, ulong? Generation, bool SaveAndQuit, bool Retry);
     private readonly record struct OrePreview(LatticeCoordinate Center, ulong TerrainRevision, ulong InventoryRevision, int Deposits);
 }

@@ -5,10 +5,11 @@ using Groundwork.Voxels;
 
 namespace WorldsYetUnseen.Client;
 
-internal sealed class ConsoleTelemetry(TimeProvider clock)
+internal sealed class ConsoleTelemetry(TimeProvider clock, Func<string>? traceContext = null)
 {
     private const int DefaultSeconds = 5;
-    private const int EventLimit = 4;
+    private const int ConsoleEventLimit = 4;
+    private const int RetainedEventLimit = 128;
     private const double SlowObservationMilliseconds = 33;
 
     private enum CaptureKind { None, Watch, Trace }
@@ -16,7 +17,7 @@ internal sealed class ConsoleTelemetry(TimeProvider clock)
     private readonly record struct TraceEvent(double Seconds, VolumeEventKind? TerrainKind = null,
         double ObservationGap = 0, ulong Replaced = 0, ulong Skipped = 0);
 
-    private readonly TraceEvent[] _events = new TraceEvent[EventLimit];
+    private readonly TraceEvent[] _events = new TraceEvent[RetainedEventLimit];
     private CaptureKind _capture;
     private int _seconds;
     private object? _renderer;
@@ -32,7 +33,9 @@ internal sealed class ConsoleTelemetry(TimeProvider clock)
     private double _maxPollGap;
     private VolumeResources _samplePeak;
     private int _eventCount;
+    private string? _traceStartContext;
 
+    internal string? LastTraceReport { get; private set; }
     internal bool IsActive => _capture != CaptureKind.None;
     internal bool IsTracing => _capture == CaptureKind.Trace;
 
@@ -70,6 +73,8 @@ internal sealed class ConsoleTelemetry(TimeProvider clock)
         var now = clock.GetTimestamp();
         if (_renderer is null)
         {
+            if (IsTracing)
+                _traceStartContext = traceContext?.Invoke();
             _renderer = renderer;
             _baseline = _previous = snapshot;
             _started = _lastPoll = _lastAdvance = now;
@@ -99,7 +104,7 @@ internal sealed class ConsoleTelemetry(TimeProvider clock)
         if (!complete)
             return null;
 
-        return End(IsTracing ? DescribeTrace(elapsed, snapshot) : DescribeWatch(elapsed));
+        return End(IsTracing ? CompleteTrace(elapsed, snapshot) : DescribeWatch(elapsed));
     }
 
     private void ObserveTrace(long now, double elapsed, RendererSnapshot snapshot, bool complete)
@@ -142,7 +147,7 @@ internal sealed class ConsoleTelemetry(TimeProvider clock)
 
     private void AddEvent(TraceEvent entry)
     {
-        _events[_eventCount % EventLimit] = entry;
+        _events[_eventCount % RetainedEventLimit] = entry;
         _eventCount++;
     }
 
@@ -153,14 +158,27 @@ internal sealed class ConsoleTelemetry(TimeProvider clock)
             $"Stream watch {elapsed:0.0} s\n{_polls} samples · peak charges\nCPU {_samplePeak.CpuBytes / MiB:0.0} MiB\nGPU {_samplePeak.NativeBytes / MiB:0.0} MiB\nQueue {_samplePeak.QueueSlots}\nDensity {_samplePeak.DensityJobs}\nMesh {_samplePeak.MeshJobs}");
     }
 
-    private string DescribeTrace(double elapsed, RendererSnapshot snapshot)
+    private string CompleteTrace(double elapsed, RendererSnapshot snapshot)
     {
-        var shown = Math.Min(_eventCount, EventLimit);
-        var text = new StringBuilder(FormattableString.Invariant(
-            $"Trace {elapsed:0.0} s · {_polls} polls\nObserved advances {_observedAdvances}\nPoll gap max {_maxPollGap:0.0} ms\nObs max {_maxObservationGap:0.#}ms @{_maxObservationGapAt:0.0#}s\nReplaced {snapshot.ReplacedFrames - _baseline.ReplacedFrames} / skipped {snapshot.SkippedFrames - _baseline.SkippedFrames}\nEvents shown {shown}/{_eventCount}"));
+        var summary = FormattableString.Invariant(
+            $"Trace {elapsed:0.0} s · {_polls} polls\nObserved advances {_observedAdvances}\nPoll gap max {_maxPollGap:0.0} ms\nObs max {_maxObservationGap:0.#}ms @{_maxObservationGapAt:0.0#}s\nReplaced {snapshot.ReplacedFrames - _baseline.ReplacedFrames} / skipped {snapshot.SkippedFrames - _baseline.SkippedFrames}");
+        var transcript = DescribeTrace(summary, ConsoleEventLimit, "shown");
+        var report = new StringBuilder("WYU profile trace\n");
+        if (!string.IsNullOrEmpty(_traceStartContext))
+            report.Append("\nAt start\n").Append(_traceStartContext).Append('\n');
+        report.Append('\n').Append(DescribeTrace(summary, RetainedEventLimit, "retained"));
+        LastTraceReport = report.ToString();
+        return transcript;
+    }
+
+    private string DescribeTrace(string summary, int eventLimit, string eventLabel)
+    {
+        var shown = Math.Min(_eventCount, eventLimit);
+        var text = new StringBuilder(summary);
+        text.Append('\n').Append(FormattableString.Invariant($"Events {eventLabel} {shown}/{_eventCount}"));
         for (var i = _eventCount - shown; i < _eventCount; i++)
         {
-            var entry = _events[i % EventLimit];
+            var entry = _events[i % RetainedEventLimit];
             text.Append('\n').Append(DescribeEvent(entry));
         }
         return text.ToString();
@@ -183,6 +201,7 @@ internal sealed class ConsoleTelemetry(TimeProvider clock)
     {
         _capture = CaptureKind.None;
         _renderer = null;
+        _traceStartContext = null;
         return result;
     }
 

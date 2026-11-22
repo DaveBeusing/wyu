@@ -5,9 +5,9 @@ using static WorldsYetUnseen.Client.FlightVector;
 namespace WorldsYetUnseen.Client;
 
 internal sealed class WorldConsoleMarks(Func<string> world, Func<ulong> seed, Func<PlanetVector> position,
-    Func<PlanetVector>? forward = null)
+    Func<PlanetVector>? forward = null, Func<string, bool>? copyText = null)
 {
-    internal const string Usage = "mark save <name>\nmark list [page]\nmark show <name>\nmark locate <name>";
+    internal const string Usage = "mark save <name>\nmark list [page]\nmark show <name>\nmark locate <name>\nmark copy <name>";
     private const int MarkLimit = 16;
     private const int MarksPerPage = 2;
     private const double LocationTolerance = 0.05;
@@ -23,7 +23,7 @@ internal sealed class WorldConsoleMarks(Func<string> world, Func<ulong> seed, Fu
         var argument = separator < 0 ? "" : value[(separator + 1)..].TrimStart();
         if (verb == "list")
             return List(argument);
-        if (verb is not ("save" or "show" or "locate"))
+        if (verb is not ("save" or "show" or "locate" or "copy"))
             return Usage;
         if (argument.Length is < 1 or > 24 ||
             argument.Any(character => character is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '-')))
@@ -32,16 +32,16 @@ internal sealed class WorldConsoleMarks(Func<string> world, Func<ulong> seed, Fu
         return verb switch
         {
             "save" => Save(argument),
-            "show" => Show(argument),
-            _ => Locate(argument),
+            "locate" => Locate(argument),
+            _ => Show(argument, verb == "copy"),
         };
     }
 
     internal IEnumerable<string> CompleteValue(string value)
     {
         var separator = value.IndexOf(' ');
-        if (separator < 0 || value[..separator] is not ("show" or "locate"))
-            return ["save", "list", "show", "locate"];
+        if (separator < 0 || value[..separator] is not ("show" or "locate" or "copy"))
+            return ["save", "list", "show", "locate", "copy"];
 
         var nameStart = separator + 1;
         while (nameStart < value.Length && value[nameStart] == ' ')
@@ -60,14 +60,17 @@ internal sealed class WorldConsoleMarks(Func<string> world, Func<ulong> seed, Fu
         return exists ? $"Mark replaced.\n{name}" : $"Mark saved.\n{name}";
     }
 
-    private string Show(string name)
+    private string Show(string name, bool copy)
     {
         if (!_marks.TryGetValue(name, out var mark))
             return $"Mark not found.\n{name}";
 
         var location = mark.Position;
-        return FormattableString.Invariant(
+        var text = FormattableString.Invariant(
             $"Mark\n{name}\nWorld {mark.World}\nSeed {mark.Seed}\nX {location.X:R}\nY {location.Y:R}\nZ {location.Z:R}");
+        if (!copy)
+            return text;
+        return copyText?.Invoke(text) == true ? "Mark copied." : "Clipboard unavailable.";
     }
 
     private string Locate(string name)

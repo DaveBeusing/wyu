@@ -9,7 +9,7 @@ internal sealed partial class VolumeExploration
     private const float DefaultFieldOfView = 1f;
     private const int PresetLimit = 16;
     private const int PresetsPerPage = 7; // Leave room for the command and page heading in the smallest console.
-    private const string PresetUsage = "save / load <name>\nlist [page] / delete <name>\nshow <name> / diff <a> <b>\ncopy <name>\nimport [data]\nimport confirm / import cancel\npin / unpin <name>";
+    private const string PresetUsage = "save / load <name>\nlist [page] / delete <name>\nshow / copy <name>\ndiff <a|live> <b>\ndiff saved <a> <b>\nimport [data|confirm|cancel]\npin / unpin <name>";
     private const string ProfileRunUsage = "profile run <a> <b> [sec]";
     private const string ProfileRunTiming = "1–30 s per preset\nDefault: 5 s";
     private const string ProfileRepeatUsage = "profile repeat <a> <b> [n]";
@@ -22,7 +22,7 @@ internal sealed partial class VolumeExploration
     private readonly record struct PresentationPreset(float FieldOfView, bool? Fog, ulong? Time);
 
     private WorldConsole CreateConsole(Func<PlanetVector> position, ConsoleFrameProfile profile, Func<string, bool> copyText,
-        Func<string?> readPresetText, Func<string> inspectAim, Func<string> streamStatus, ConsoleTelemetry telemetry,
+        Func<string?> readPresetText, Func<string> inspectAim, Func<string> streamStatus, Func<string> streamWhy, ConsoleTelemetry telemetry,
         ConsolePinnedPresets? pinnedStore, Func<PlanetVector> forward)
     {
         var presets = new Dictionary<string, PresentationPreset>(StringComparer.Ordinal);
@@ -36,7 +36,7 @@ internal sealed partial class VolumeExploration
                     presets.Add(restored.Name, restored.Preset);
                     pinnedNames.Add(restored.Name);
                 }
-        var marks = new WorldConsoleMarks(() => PlanetName, () => Descriptor.Seed, position, forward);
+        var marks = new WorldConsoleMarks(() => PlanetName, () => Descriptor.Seed, position, forward, copyText);
         PresentationPreset? undo = null;
         (string Name, PresentationPreset Preset, PresentationPreset? Prior)? pendingImport = null;
         string[] presetVerbs = ["save", "load", "list", "delete", "show", "diff", "copy", "import", "import confirm", "import cancel", "pin", "unpin"];
@@ -67,9 +67,9 @@ internal sealed partial class VolumeExploration
                 ? CompletePresetNames(value, 2)
                 : profileValues,
         });
-        commands.Add(new("report", "report <copy|here>", "Copy diagnostics", Report, "copy", "here")
+        commands.Add(new("report", "report <command>", "Copy diagnostics", Report, "copy", "here", "trace")
         {
-            UsageDetails = "report copy · A/B results\nreport here · this location",
+            UsageDetails = "report copy · A/B results\nreport here · this location\nreport trace · last trace",
         });
         commands.Add(new("preset", "preset <command>", "Session presets", ApplyPreset, presetVerbs)
         {
@@ -81,15 +81,17 @@ internal sealed partial class VolumeExploration
             value => value != "copy" ? "Usage: pos copy"
                 : copyText(ReadPosition(position())) ? "Position copied." : "Clipboard unavailable.\nTry pos copy again.", "copy"));
         commands.Add(new("undo", "undo", "Restore last view edit", value => OutsideComparison(value, UndoPresentation)));
-        commands.Add(new("stream", "stream <status|watch>", "Terrain streaming", Stream, "status", "watch", "watch cancel")
+        commands.Add(new("stream", "stream <command>", "Terrain streaming", Stream, "status", "watch", "watch cancel", "why")
         {
-            UsageDetails = "stream watch [sec]\nstream watch cancel",
+            UsageDetails = "stream status\nstream why\nstream watch [sec]\nstream watch cancel",
         });
-        commands.Add(new("mark", "mark <command>", "Session locations", marks.Handle, "save", "list", "show", "locate")
+        commands.Add(new("mark", "mark <command>", "Session locations", marks.Handle, "save", "list", "show", "locate", "copy")
         {
             UsageDetails = WorldConsoleMarks.Usage,
             CompleteValue = marks.CompleteValue,
         });
+        commands.Add(new("save", "save status", "Checkpoint status", value =>
+            value == "status" ? ReadSaveStatus() : "Usage: save status", "status"));
         return new(commands.ToArray());
 
         string OutsideComparison(string value, Func<string, string> execute) =>
@@ -99,8 +101,12 @@ internal sealed partial class VolumeExploration
         {
             if (value == "copy")
                 return CopyComparison(value, profile, copyText);
+            if (value == "trace")
+                return telemetry.LastTraceReport is { } trace
+                    ? copyText(trace) ? "Trace report copied." : "Clipboard unavailable."
+                    : "No completed trace.";
             if (value != "here")
-                return "Usage: report copy or here";
+                return "report copy / here / trace";
             if (profile.IsActive || telemetry.IsActive)
                 return "Finish measuring first.";
             var report = FormattableString.Invariant(
@@ -112,8 +118,10 @@ internal sealed partial class VolumeExploration
         {
             if (value == "status")
                 return profile.IsComparing ? "A/B profile running." : streamStatus();
+            if (value == "why")
+                return streamWhy();
             if (value != "watch" && !value.StartsWith("watch ", StringComparison.Ordinal))
-                return "Usage: stream status\nstream watch [sec]";
+                return "Usage: stream status / why\nstream watch [sec]";
             return profile.IsActive ? "Profile already running." : telemetry.HandleWatch(value[5..].TrimStart());
         }
 
@@ -155,9 +163,23 @@ internal sealed partial class VolumeExploration
             {
                 "load" or "delete" or "show" or "copy" or "pin" => CompletePresetNames(value, 1),
                 "unpin" => CompletePresetNames(value, 1, pinnedNames.Order(StringComparer.Ordinal)),
-                "diff" => CompletePresetNames(value, 2),
+                "diff" => CompletePresetDiff(value),
                 _ => presetVerbs,
             };
+        }
+
+        IEnumerable<string> CompletePresetDiff(string value)
+        {
+            var prefix = value[..(value.LastIndexOf(' ') + 1)];
+            var tokens = prefix.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            IEnumerable<string> names = tokens.Length switch
+            {
+                1 => PresetNames().Prepend("saved").Prepend("live").Distinct(StringComparer.Ordinal),
+                2 when tokens[1] is "live" or "saved" || presets.ContainsKey(tokens[1]) => PresetNames(),
+                3 when tokens[1] == "saved" && presets.ContainsKey(tokens[2]) => PresetNames(),
+                _ => [],
+            };
+            return names.Select(name => prefix + name);
         }
 
         IEnumerable<string> CompletePresetNames(string value, int nameCount, IEnumerable<string>? names = null)
@@ -350,14 +372,19 @@ internal sealed partial class VolumeExploration
         string ComparePresets(string argument)
         {
             var names = argument.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (names.Length != 2)
-                return "Usage: preset diff <a> <b>";
-            if (!ValidPresetName(names[0]) || !ValidPresetName(names[1]))
+            var namedOnly = names.Length == 3 && names[0] == "saved";
+            if (names.Length != 2 && !namedOnly)
+                return "preset diff <a|live> <b>\npreset diff saved <a> <b>";
+            var left = names[^2];
+            var right = names[^1];
+            var live = !namedOnly && left == "live";
+            if (!ValidPresetName(left) || !ValidPresetName(right))
                 return PresetNameUsage;
-            if (!presets.TryGetValue(names[0], out var a))
-                return MissingPreset(names[0]);
-            if (!presets.TryGetValue(names[1], out var b))
-                return MissingPreset(names[1]);
+            var first = live ? ReadPresentation() : FindPreset(left);
+            if (first is not { } a)
+                return MissingPreset(left);
+            if (!presets.TryGetValue(right, out var b))
+                return MissingPreset(right);
 
             var differences = new List<string>();
             if (a.FieldOfView != b.FieldOfView)
@@ -370,8 +397,9 @@ internal sealed partial class VolumeExploration
                 differences.Add($"Fog {FormatFogMode(a.Fog)} | {FormatFogMode(b.Fog)}");
             if (a.Time != b.Time)
                 differences.Add($"Time {FormatTimeMode(a.Time)} | {FormatTimeMode(b.Time)}");
-            return differences.Count == 0 ? "Presets match."
-                : $"A {names[0]}\nB {names[1]}\n{string.Join('\n', differences)}";
+            var hint = live && presets.ContainsKey("live") ? "\nStored live: diff saved" : "";
+            return differences.Count == 0 ? live ? $"Current view matches.{hint}" : "Presets match."
+                : $"{(live ? "A current view" : $"A {left}")}\nB {right}{hint}\n{string.Join('\n', differences)}";
         }
 
         string ListPresets(string argument)
@@ -442,6 +470,9 @@ internal sealed partial class VolumeExploration
 
     private string ReadPosition(PlanetVector position) => FormattableString.Invariant(
         $"World {PlanetName}\nSeed {Descriptor.Seed}\nX {position.X:R}\nY {position.Y:R}\nZ {position.Z:R}");
+
+    private string ReadTraceContext(PlanetVector position) => FormattableString.Invariant(
+        $"Build {ClientBuild}\n{ReadPosition(position)}\nGenerator {Descriptor.GeneratorVersion}");
 
     private string Inspect(PlanetVector position)
     {
