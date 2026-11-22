@@ -31,6 +31,14 @@ try {
         $frames = @($lines | Where-Object { $_ -cmatch '^TWILIGHT FRAME ' } |
             ForEach-Object { $_.Substring(15) | ConvertFrom-Json } | Where-Object phase -ceq $phase)
         if ($frames.Count -ne 7) { throw "Missing $phase checkpoints." }
+        if (@($frames | Where-Object { $_.composition -cne $Composition }).Count -ne 0) {
+            throw "Unexpected composition for $phase."
+        }
+        if ($Composition -ceq 'orbit-combined' -and
+            ($frames[0].propInstances -lt 1 -or
+                @($frames | Where-Object { $_.propInstances -ne $frames[0].propInstances }).Count -ne 0)) {
+            throw "Orbit prop instances must be present and stable throughout $phase."
+        }
         if ($OutputDirectory) {
             foreach ($frame in $frames) {
                 $path = Join-Path $OutputDirectory ('{0}-{1:D3}.bmp' -f $phase, [int]$frame.frame)

@@ -29,6 +29,19 @@ internal sealed partial class VolumeExploration
         var maximum = Math.Min(0.50, 0.95 * latitude);
         var originalTick = _environmentTick;
         var publication = _published;
+        var twilightProps = orbitDemo
+            ? Props ?? throw new InvalidOperationException("Orbit twilight requires its prop stream.")
+            : null;
+        if (twilightProps is not null)
+        {
+            await WaitAsync(renderer, () =>
+            {
+                twilightProps.Pump();
+                return !twilightProps.PlacementActive;
+            }, token).ConfigureAwait(false);
+            if (twilightProps.Staged == 0 || twilightProps.Failed != 0)
+                throw new InvalidOperationException("Orbit twilight prop placement did not stage successfully.");
+        }
         var output = Environment.GetEnvironmentVariable("WYU_DAWN_CAPTURE_DIR");
         if (output is not null && !Directory.Exists(output))
             throw new InvalidOperationException("Create the twilight capture directory before running the route.");
@@ -41,6 +54,25 @@ internal sealed partial class VolumeExploration
                 : ReferenceWeather.SunDirection(horizon.Tick, horizon.Fraction);
             var horizontal = Vector3.Normalize(horizonSun - radial * Vector3.Dot(horizonSun, radial));
             var fixedView = origin with { Forward = Vector3.Normalize(horizontal + 0.10f * radial), Up = radial };
+            var expectedPropInstances = 0;
+            if (twilightProps is not null)
+            {
+                var firstSample = SampleTick(dawn ? minimum : maximum, dawn);
+                var firstCamera = ApplyNearEnvironment(fixedView, firstSample.Tick, firstSample.Fraction);
+                const int maxPropWarmupFrames = 120;
+                for (var warmup = 0; warmup < maxPropWarmupFrames; warmup++)
+                {
+                    await PresentAsync(firstCamera, phase, -1).ConfigureAwait(false);
+                    var props = twilightProps.Read();
+                    if (props is { Instances: > 0, DeferredCells: 0, PayloadBytes: 0 })
+                    {
+                        expectedPropInstances = props.Instances;
+                        break;
+                    }
+                }
+                if (expectedPropInstances == 0)
+                    throw new InvalidOperationException($"Orbit twilight {phase} props did not settle before capture.");
+            }
             for (var frame = 0; frame <= 144; frame++)
             {
                 var elevation = dawn ? minimum + (maximum - minimum) * frame / 144
@@ -51,24 +83,13 @@ internal sealed partial class VolumeExploration
                     throw new InvalidOperationException("Twilight sun/sky inputs disagree.");
                 if (Math.Abs(Vector3.Dot(radial, sky.SunDirection) - elevation) > 0.00001)
                     throw new InvalidOperationException("Twilight sampling disagrees with the preset's actual solar elevation.");
-                // Retire bounded renderer receipts through the normal empty engine
-                // barriers. This does not advance the accepted environment clock.
-                var begin = await BeginAsync(token).ConfigureAwait(false);
-                terrain.BeginTick(begin);
-                Finish(await SealAsync(Groundwork.Core.BarrierKind.CommitResults, token).ConfigureAwait(false));
-                var sequence = ++_sequence;
-                OrbitMaterialHost?.RetryMaterials(renderer, sequence);
-                Props?.Pump();
-                RequireFrame(renderer.TrySubmitVolumeCamera(publication.Generation, sequence, camera));
-                try
+                await PresentAsync(camera, phase, frame).ConfigureAwait(false);
+                if (twilightProps is not null)
                 {
-                    await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence == sequence, token).ConfigureAwait(false);
+                    var props = twilightProps.Read();
+                    if (props.Instances != expectedPropInstances || props.DeferredCells != 0 || props.PayloadBytes != 0)
+                        throw new InvalidOperationException($"Orbit twilight {phase}/{frame} changed the captured prop composition.");
                 }
-                catch (TimeoutException error)
-                {
-                    throw new TimeoutException($"Twilight {phase}/{frame}, sequence {sequence}, renderer {renderer.Read()}, diagnostics {renderer.ReadDiagnostics()}.", error);
-                }
-                Drain(terrain);
                 if (frame % 24 == 0)
                 {
                     SkyPixels? capture = null;
@@ -90,6 +111,7 @@ internal sealed partial class VolumeExploration
                         daylight = ReferenceDaylight.ProfileId, weather = ReferenceWeather.RecipeId,
                         haze = camera.Fog?.MaxOpacity, wp15 = orbitDemo ? ReferenceSunlight.OrbitEnabled : ReferenceSunlight.Enabled,
                         composition = orbitDemo ? "orbit-combined" : "far-horizon",
+                        propInstances = expectedPropInstances,
                         renderWidth = size.AppliedWidth, renderHeight = size.AppliedHeight,
                         captureWidth = capture?.Width, captureHeight = capture?.Height,
                         captureRegion = output is null ? null : "full-physical-client",
@@ -107,6 +129,27 @@ internal sealed partial class VolumeExploration
         if (_environmentTick != originalTick || _published != publication)
             throw new InvalidOperationException("The presentation-only twilight route changed the environment or terrain.");
         Console.WriteLine("PASS: WYU animated sunrise/sunset with unchanged clock and terrain publication.");
+
+        async Task PresentAsync(VolumeCamera camera, string phase, int frame)
+        {
+            // Retire renderer receipts through empty engine barriers without advancing the environment clock.
+            var begin = await BeginAsync(token).ConfigureAwait(false);
+            terrain.BeginTick(begin);
+            Finish(await SealAsync(Groundwork.Core.BarrierKind.CommitResults, token).ConfigureAwait(false));
+            var sequence = ++_sequence;
+            OrbitMaterialHost?.RetryMaterials(renderer, sequence);
+            Props?.Pump();
+            RequireFrame(renderer.TrySubmitVolumeCamera(publication.Generation, sequence, camera));
+            try
+            {
+                await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence == sequence, token).ConfigureAwait(false);
+            }
+            catch (TimeoutException error)
+            {
+                throw new TimeoutException($"Twilight {phase}/{frame}, sequence {sequence}, renderer {renderer.Read()}, diagnostics {renderer.ReadDiagnostics()}.", error);
+            }
+            Drain(terrain);
+        }
 
         (ulong Tick, double Fraction) SampleTick(double elevation, bool dawn)
         {
