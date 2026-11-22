@@ -85,8 +85,12 @@ shows active terrain LODs and streaming resource use. **mark save <name>**
 stores the current location for this session. **mark list** lists saved names
 and coordinates, and **mark show <name>** shows the full location details.
 **mark locate <name>** shows the straight-line distance, radial height
-difference, and direction relative to the camera. **report here** copies the
-build, location, view settings, terrain hit and streaming state.
+difference, and direction relative to the camera. **mark copy <name>** copies
+the saved location, including its world and seed. **report here** copies the
+build, location, view settings, terrain hit and streaming state. **stream why**
+shows the reason for a terrain hold when the client can identify it.
+**save status** shows checkpoint availability, pending work and the latest
+F5 or F10 result.
 
 **stream watch [sec]** shows peak sampled CPU and GPU charges, queue slots and
 jobs. **profile trace [sec]** summarizes observed frame gaps and shows recent
@@ -95,6 +99,14 @@ them. Both target 1–30 seconds and report the actual span. They default to fiv
 seconds. Close F3 to move during capture and reopen it for the result. Use
 **stream watch cancel** or **profile trace cancel** to stop the corresponding
 capture.
+
+**report trace** copies the last completed trace, including the starting build,
+world, seed and position, with up to 128 recent events. The console displays
+up to four events. Interrupted captures leave the previous report available.
+
+**preset diff live <name>** compares the current presentation to a saved preset.
+Use **preset diff saved <a> <b>** to compare two saved presets when the first is
+literally named `live`.
 
 **profile 10** targets a ten-second sample of the on-foot view. The report gives
 the actual sampled span. If the final poll is more than 250 ms late, the run

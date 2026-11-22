@@ -2,8 +2,8 @@
 
 ## Integrated inputs
 
-PR #83 integrates WYU master `9472032a464346c43b29f1c6a1fe74734c03097f`,
-including static construction #90, console changes and terrain edit feedback #98.
+PR #83 integrates WYU master `cf2a68abf3e25b01d8e2a9d1e28ab388cdb5dbd2`,
+including static construction #90, terrain edit feedback #98 and console status #99.
 Groundwork #193 integrates the complete #186 head
 `b40c11b14e64bff9b446d6eab18e8755916f66ec`: owner wake, presentation waiting,
 acknowledged-frame arbitration and texture-refinement fairness. It also
