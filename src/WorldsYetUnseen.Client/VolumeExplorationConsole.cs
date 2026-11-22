@@ -18,12 +18,14 @@ internal sealed partial class VolumeExploration
     private float _fieldOfView = DefaultFieldOfView;
     private ulong? _previewTime;
     private string? _comparisonPresetName;
+    private WorldConsoleMarks? _consoleMarks;
 
     private readonly record struct PresentationPreset(float FieldOfView, bool? Fog, ulong? Time);
 
     private WorldConsole CreateConsole(Func<PlanetVector> position, ConsoleFrameProfile profile, Func<string, bool> copyText,
         Func<string?> readPresetText, Func<string> inspectAim, Func<string> streamStatus, Func<string> streamWhy, ConsoleTelemetry telemetry,
-        ConsolePinnedPresets? pinnedStore, Func<PlanetVector> forward)
+        ConsolePinnedPresets? pinnedStore, Func<PlanetVector> forward, Func<PlanetVector, string> inspectAt,
+        Func<string, bool, string> setSpectate)
     {
         var presets = new Dictionary<string, PresentationPreset>(StringComparer.Ordinal);
         var pinnedNames = new HashSet<string>(StringComparer.Ordinal);
@@ -36,7 +38,7 @@ internal sealed partial class VolumeExploration
                     presets.Add(restored.Name, restored.Preset);
                     pinnedNames.Add(restored.Name);
                 }
-        var marks = new WorldConsoleMarks(() => PlanetName, () => Descriptor.Seed, position, forward, copyText);
+        var marks = _consoleMarks = new WorldConsoleMarks(() => PlanetName, () => Descriptor.Seed, position, forward, copyText);
         PresentationPreset? undo = null;
         (string Name, PresentationPreset Preset, PresentationPreset? Prior)? pendingImport = null;
         string[] presetVerbs = ["save", "load", "list", "delete", "show", "diff", "copy", "import", "import confirm", "import cancel", "pin", "unpin"];
@@ -67,16 +69,19 @@ internal sealed partial class VolumeExploration
                 ? CompletePresetNames(value, 2)
                 : profileValues,
         });
-        commands.Add(new("report", "report <command>", "Copy diagnostics", Report, "copy", "here", "trace")
+        commands.Add(new("report", "report <command>", "Copy or export diagnostics", Report, "copy", "here", "trace", "export")
         {
-            UsageDetails = "report copy · A/B results\nreport here · this location\nreport trace · last trace",
+            UsageDetails = "report copy · A/B results\nreport here · this location\nreport trace · last trace\nreport export · Reports folder",
         });
         commands.Add(new("preset", "preset <command>", "Session presets", ApplyPreset, presetVerbs)
         {
             UsageDetails = $"{PresetUsage}\n{PresetNameUsage}",
             CompleteValue = CompletePresetValue,
         });
-        commands.Add(new("inspect", "inspect [aim]", "Local conditions or hit", value => OutsideComparison(value, InspectPosition), "aim"));
+        commands.Add(new("inspect", "inspect <command>", "Inspect local terrain", value => OutsideComparison(value, InspectPosition), "aim", "at")
+        {
+            UsageDetails = "inspect · current location\ninspect aim · terrain hit\ninspect at <x> <y> <z>",
+        });
         commands.Add(new("pos", "pos copy", "Copy world, seed and XYZ",
             value => value != "copy" ? "Usage: pos copy"
                 : copyText(ReadPosition(position())) ? "Position copied." : "Clipboard unavailable.\nTry pos copy again.", "copy"));
@@ -85,14 +90,24 @@ internal sealed partial class VolumeExploration
         {
             UsageDetails = "stream status\nstream why\nstream watch [sec]\nstream watch cancel",
         });
-        commands.Add(new("mark", "mark <command>", "Session locations", marks.Handle, "save", "list", "show", "locate", "copy")
+        commands.Add(new("mark", "mark <command>", "Session locations", marks.Handle, "save", "list", "show", "locate", "copy", "rename", "delete", "track", "track off")
         {
             UsageDetails = WorldConsoleMarks.Usage,
             CompleteValue = marks.CompleteValue,
         });
         commands.Add(new("save", "save status", "Checkpoint status", value =>
             value == "status" ? ReadSaveStatus() : "Usage: save status", "status"));
+        commands.Add(new("trace", "trace mark <label>", "Tag the running trace", value =>
+            value.StartsWith("mark ", StringComparison.Ordinal) ? telemetry.AddTraceMark(value[5..].TrimStart()) : "Usage: trace mark <label>", "mark"));
+        if (freeTestWorld)
+        {
+            commands.Add(new("spectate", "spectate [on|off]", "Free camera",
+                value => setSpectate(value, Measuring() || _queuedConsoleOre is not null), "on", "off"));
+            commands.Add(new("give", "give ore <1–64>", "Grant construction ore", value => QueueGive(value, Measuring()), "ore"));
+        }
         return new(commands.ToArray());
+
+        bool Measuring() => profile.IsActive || telemetry.IsActive;
 
         string OutsideComparison(string value, Func<string, string> execute) =>
             profile.IsComparing ? "A/B profile running." : execute(value);
@@ -105,12 +120,16 @@ internal sealed partial class VolumeExploration
                 return telemetry.LastTraceReport is { } trace
                     ? copyText(trace) ? "Trace report copied." : "Clipboard unavailable."
                     : "No completed trace.";
-            if (value != "here")
-                return "report copy / here / trace";
-            if (profile.IsActive || telemetry.IsActive)
+            if (value is not ("here" or "export"))
+                return "report copy / here / trace\nreport export";
+            if (IsSpectating)
+                return "Exit spectate first.";
+            if (Measuring())
                 return "Finish measuring first.";
             var report = FormattableString.Invariant(
-                $"WYU location report\nBuild {ClientBuild}\n{ReadPosition(position())}\nGenerator {Descriptor.GeneratorVersion}\nFOV {FieldOfViewDegrees:0.###}°\nFog {(_weather is null ? "n/a" : FogMode)} · Time {(_weather is null ? "n/a" : TimeMode)}\n\nTerrain aim\n{inspectAim()}\n\nStreaming\n{streamStatus()}");
+                $"WYU location report\nBuild {ClientBuild}\n{ReadPosition(position())}\nCaptured UTC {DateTimeOffset.UtcNow:O}\nGenerator {Descriptor.GeneratorVersion}\nFOV {FieldOfViewDegrees:0.###}°\nFog {(_weather is null ? "n/a" : FogMode)} · Time {(_weather is null ? "n/a" : TimeMode)}\n\nTerrain aim\n{inspectAim()}\n\nStreaming\n{streamStatus()}");
+            if (value == "export")
+                return ExportConsoleReport(report, telemetry.LastTraceReport);
             return copyText(report) ? "Location report copied." : "Clipboard unavailable.";
         }
 
@@ -122,15 +141,20 @@ internal sealed partial class VolumeExploration
                 return streamWhy();
             if (value != "watch" && !value.StartsWith("watch ", StringComparison.Ordinal))
                 return "Usage: stream status / why\nstream watch [sec]";
-            return profile.IsActive ? "Profile already running." : telemetry.HandleWatch(value[5..].TrimStart());
+            return profile.IsActive || IsSpectating || _queuedConsoleOre is not null
+                ? "Finish the active action first." : telemetry.HandleWatch(value[5..].TrimStart());
         }
 
-        string InspectPosition(string value) => value switch
+        string InspectPosition(string value)
         {
-            "" => Inspect(position()),
-            "aim" => inspectAim(),
-            _ => "Usage: inspect [aim]",
-        };
+            if (value.Length == 0)
+                return Inspect(position());
+            if (value == "aim")
+                return IsSpectating ? "Exit spectate for avatar aim." : inspectAim();
+            if (value.StartsWith("at ", StringComparison.Ordinal) && TryReadConsolePoint(value[3..], out var point))
+                return inspectAt(point);
+            return "inspect / inspect aim\ninspect at <x> <y> <z>";
+        }
 
         string TrackPresentation(string value, Func<string, string> execute)
         {
@@ -193,6 +217,8 @@ internal sealed partial class VolumeExploration
 
         string RunProfile(string value)
         {
+            if (IsSpectating || _queuedConsoleOre is not null)
+                return "Finish the active action first.";
             if (value == "trace" || value.StartsWith("trace ", StringComparison.Ordinal))
                 return profile.IsActive ? "Profile already running." : telemetry.HandleTrace(value[5..].TrimStart());
             if (telemetry.IsActive)
@@ -472,7 +498,7 @@ internal sealed partial class VolumeExploration
         $"World {PlanetName}\nSeed {Descriptor.Seed}\nX {position.X:R}\nY {position.Y:R}\nZ {position.Z:R}");
 
     private string ReadTraceContext(PlanetVector position) => FormattableString.Invariant(
-        $"Build {ClientBuild}\n{ReadPosition(position)}\nGenerator {Descriptor.GeneratorVersion}");
+        $"Build {ClientBuild}\n{ReadPosition(position)}\nGenerator {Descriptor.GeneratorVersion}\nCaptured UTC {DateTimeOffset.UtcNow:O}");
 
     private string Inspect(PlanetVector position)
     {

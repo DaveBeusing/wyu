@@ -103,6 +103,22 @@ capture.
 **report trace** copies the last completed trace, including the starting build,
 world, seed and position, with up to 128 recent events. The console displays
 up to four events. Interrupted captures leave the previous report available.
+Use **trace mark <label>** while a trace is running to add a timestamped
+note. **report export** writes the current location and the last completed
+trace, when available, to a text file in the local profile's `Reports` folder.
+Each section identifies when it was captured.
+
+**inspect at <x> <y> <z>** looks for a surface within two meters along the
+local vertical, using the loaded terrain. **mark rename <old> <new>** and
+**mark delete <name>** manage session marks. **mark track <name>** shows
+a direction and distance in the HUD while walking. Use **mark track off**
+to clear the HUD hint. Use **mark track name off** to track a mark literally
+named `off`.
+
+In Free Test World, **spectate on** switches to a free camera in the loaded
+terrain. Use WASD, mouse look, E to rise, and Q to descend. **spectate off**
+or Esc returns to the avatar. **give ore <1–64>** adds construction ore
+through the existing inventory rules.
 
 **preset diff live <name>** compares the current presentation to a saved preset.
 Use **preset diff saved <a> <b>** to compare two saved presets when the first is

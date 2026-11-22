@@ -235,7 +235,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             ? new ConsolePinnedPresets(directory, ReadPinnedPresetName) : null;
         var terminal = profile is null || overlay is null ? null : CreateConsole(() => state.Position, profile, overlay.TryCopyText,
             overlay.ReadPresetText, () => InspectAim(terrain, state), () => ReadStreamStatus(terrain), () => ReadStreamWhy(terrain), telemetry!, pinned,
-            () => ReadLookDirection(state));
+            () => ReadLookDirection(state), point => InspectAt(terrain, point),
+            (value, blocked) => SetSpectate(value, terrain, state, blocked || _caveExitWaypoint >= 0 ||
+                ReadInventory()?.Construction is { } construction && NeedsConstructionPresentation(construction)));
         void ReportConsole(string command, string? result)
         {
             if (result is null || terminal is null)
@@ -268,12 +270,18 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 else
                     comparisonView ??= (state, _environmentTick);
             }
-            if (freeTestWorld && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.F2))
+            if (freeTestWorld && !IsSpectating && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.F2))
             {
                 _testMenu = !_testMenu;
                 if (!_testMenu && overlay is not null)
                     overlay.Menu = null;
                 previousFrame = Stopwatch.GetTimestamp();
+            }
+            var stopSpectate = IsSpectating && PrototypeMenu.Pressed(input, InputControl.Escape);
+            if (stopSpectate)
+            {
+                StopSpectating();
+                input = input with { Events = [], HeldControls = [] };
             }
             if (!scripted && !_testMenu && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.Escape))
                 return;
@@ -296,7 +304,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             }
             if (profile?.IsComparing != true)
                 comparisonView = null;
-            mouse?.Update(drawable && focused && !_testMenu && !_inventoryOpen && _buildRefund is null && !consoleInput,
+            mouse?.Update(drawable && focused && !_testMenu && !_inventoryOpen && _buildRefund is null && !consoleInput && !stopSpectate,
                 ref _yaw, ref _pitch);
             if (!drawable || (!scripted && !focused))
                 continue;
@@ -310,8 +318,19 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var now = Stopwatch.GetTimestamp();
             var frameTime = Stopwatch.GetElapsedTime(previousFrame, now);
             previousFrame = now;
-            if (!scripted && UpdateConstructionPresentation(terrain, renderer, state))
+            if (!scripted && !IsSpectating && UpdateConstructionPresentation(terrain, renderer, state))
                 continue;
+            if (_queuedConsoleOre is { } count)
+            {
+                _queuedConsoleOre = null;
+                ReportConsole("give", await GiveConsoleOreAsync(count, token).ConfigureAwait(false));
+                continue;
+            }
+            if (IsSpectating)
+            {
+                RenderSpectate(terrain, renderer, state, input, frameTime, !consoleInput);
+                continue;
+            }
             if (!scripted && !_inventoryOpen && await HandleConstructionAsync(terrain, renderer, state, input, token).ConfigureAwait(false))
                 continue;
             if (!scripted && !_constructionOpen && await HandleInventoryAsync(terrain, state, input, token).ConfigureAwait(false))
@@ -488,8 +507,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             }
             if (overlay is not null)
             {
-                overlay.Menu = (_constructionOpen ? _buildPanel : null) ?? CurrentNotice ?? (loadHeld ? "Movement held by carried load\nI inventory" :
+                var sidebar = (_constructionOpen ? _buildPanel : null) ?? CurrentNotice ?? (loadHeld ? "Movement held by carried load\nI inventory" :
                     ActiveCaveClimbHint ?? (prepared is null ? $"Movement held\n{status}" : cave is null ? null : CaveHint(terrain, state)));
+                var tracked = _consoleMarks?.ReadTrackedHint();
+                overlay.Menu = tracked is null ? sidebar : sidebar is null ? tracked : $"{sidebar}\n\n{tracked}";
                 var statistics = terrain.Statistics;
                 overlay.Performance = _debug ? FormattableString.Invariant(
                     $"{(_testBuild is null ? "" : $"Test World | {PlanetName}\nBuild {_testBuild}\nF2 test actions\n")}Seed {Descriptor.Seed} / gen {Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions / LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} / GPU {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms / {status}\nX {state.Position.X:F1} Y {state.Position.Y:F1} Z {state.Position.Z:F1} / origin {_published.View.Frame.Revision}") : null;
