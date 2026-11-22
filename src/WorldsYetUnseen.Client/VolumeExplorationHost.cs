@@ -132,6 +132,10 @@ internal static partial class GameHost
             }
             exploration = new VolumeExploration(world, planet, window, overlay, mouse, slot, diagnostics, freeTestWorld, orbitDemo)
             {
+                ConsolePresetDirectory = settingsDirectory ?? (saveRoot is not null
+                    ? Path.Combine(saveRoot, "console")
+                    : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "WorldsYetUnseen", "Alpha")),
                 ConstructionRenderer = renderHost.ConstructionVisuals,
                 VerifyTerrainRetries = retrySmoke == "1",
                 R09RenderHost = measureR09 ? renderHost : null,

@@ -75,10 +75,26 @@ the imported settings. Fog and time overrides require a world that supports them
 **undo** restores the presentation before the last
 console edit, including a reset or preset load.
 
+**preset pin <name>** saves a snapshot as a local preset for future sessions.
+`preset list` marks pinned names with an asterisk. Pin again to update the
+saved snapshot. **preset unpin <name>** removes it from future sessions while
+keeping the current session's preset.
+
 **inspect aim** reports the terrain hit along the camera ray. **stream status**
 shows active terrain LODs and streaming resource use. **mark save <name>**
 stores the current location for this session. **mark list** lists saved names
 and coordinates, and **mark show <name>** shows the full location details.
+**mark locate <name>** shows the straight-line distance, radial height
+difference, and direction relative to the camera. **report here** copies the
+build, location, view settings, terrain hit and streaming state.
+
+**stream watch [sec]** shows peak sampled CPU and GPU charges, queue slots and
+jobs. **profile trace [sec]** summarizes observed frame gaps and shows recent
+renderer and terrain events with times relative to when the client observed
+them. Both target 1–30 seconds and report the actual span. They default to five
+seconds. Close F3 to move during capture and reopen it for the result. Use
+**stream watch cancel** or **profile trace cancel** to stop the corresponding
+capture.
 
 **profile 10** targets a ten-second sample of the on-foot view. The report gives
 the actual sampled span. If the final poll is more than 250 ms late, the run

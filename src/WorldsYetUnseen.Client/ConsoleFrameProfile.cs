@@ -58,6 +58,7 @@ internal sealed class ConsoleFrameProfile(TimeProvider clock, Func<string> descr
             $"Profile {Seconds:0.0} s\nObserved FPS: {ObservedFps:0.0}\nMax poll gap: {MaxGap:0.0} ms\nPolls >33 ms: {SlowPolls}\nReplaced: {Replaced}\nSkipped: {Skipped}");
     }
 
+    internal bool IsActive => _seconds != 0;
     internal bool IsComparing => _comparison is not null;
 
     internal string State()
