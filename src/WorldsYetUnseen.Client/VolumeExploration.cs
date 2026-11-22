@@ -229,11 +229,12 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         using var profile = !scripted && overlay is not null
             ? new ConsoleFrameProfile(TimeProvider.System,
                 () => ReadProfileContext((comparisonView?.Pose ?? state).Position, comparisonView?.LiveTick)) : null;
-        var telemetry = _consoleTelemetry = profile is not null ? new ConsoleTelemetry(TimeProvider.System) : null;
+        var telemetry = _consoleTelemetry = profile is not null
+            ? new ConsoleTelemetry(TimeProvider.System, () => ReadTraceContext(state.Position)) : null;
         var pinned = profile is not null && ConsolePresetDirectory is { } directory
             ? new ConsolePinnedPresets(directory, ReadPinnedPresetName) : null;
         var terminal = profile is null || overlay is null ? null : CreateConsole(() => state.Position, profile, overlay.TryCopyText,
-            overlay.ReadPresetText, () => InspectAim(terrain, state), () => ReadStreamStatus(terrain), telemetry!, pinned,
+            overlay.ReadPresetText, () => InspectAim(terrain, state), () => ReadStreamStatus(terrain), () => ReadStreamWhy(terrain), telemetry!, pinned,
             () => ReadLookDirection(state));
         void ReportConsole(string command, string? result)
         {
@@ -1012,7 +1013,11 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     {
         var trace = _consoleTelemetry is { IsTracing: true } active ? active : null;
         while (terrain.TryReadEvent(out var entry))
+        {
+            if (_consoleTelemetry is not null && entry.Kind != VolumeEventKind.MovementCommit)
+                RecordStreamEvidence(terrain, entry);
             trace?.RecordTerrainEvent(entry.Kind);
+        }
     }
 
     private async Task WaitAsync(D3D12Renderer renderer, Func<bool> ready, CancellationToken token,
