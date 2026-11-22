@@ -38,7 +38,7 @@ internal sealed partial class AlphaOverlay
     }
 
     private static (int Top, int Footer, int Row) ConsoleLayout(int height) =>
-        height < 284 ? (48, 56, 18) : (59, 63, 20);
+        height < 268 ? (48, 56, 16) : height < 304 ? (48, 56, 18) : (59, 63, 20);
 
     private static ArraySegment<string> VisibleConsoleRows(ConsoleView view, int height)
     {
@@ -62,12 +62,12 @@ internal sealed partial class AlphaOverlay
                 !PaintRect(dc, 0, 0, size.Width, 2, Accent) || SetBkMode(dc, 1) == 0)
                 return false;
 
-            var font = CreateFont(-15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 4, 0, "Consolas");
+            var (top, footer, row) = ConsoleLayout(size.Height);
+            var font = CreateFont(row == 16 ? -13 : -15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 4, 0, "Consolas");
             var previous = font == 0 ? 0 : SelectObject(dc, font);
             try
             {
-                var (top, footer, row) = ConsoleLayout(size.Height);
-                var compact = row == 18;
+                var compact = row < 20;
                 DrawLine("WORLD CONSOLE", Padding, compact ? 10 : 12, Accent);
                 var controls = size.Width < 510 ? "ESC close   TAB   ↑↓"
                     : "ESC / F3 close   TAB complete   ↑↓ history   ENTER run";

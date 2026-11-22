@@ -8,6 +8,7 @@ internal sealed record ConsoleCommand(string Name, string Usage, string Descript
     internal string? Example { get; init; }
     internal string? UsageDetails { get; init; }
     internal Func<string>? CurrentValue { get; init; }
+    internal Func<string, IEnumerable<string>>? CompleteValue { get; init; }
 }
 
 internal sealed record ConsoleView(string Prompt, string? Suggestions, string[] Lines, bool ShowingHelp);
@@ -225,7 +226,9 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
         if (!line.Contains(' '))
             return CommandNames().Where(candidate => candidate.StartsWith(name, StringComparison.Ordinal))
                 .Select(candidate => candidate + (candidate == "help" || Find(candidate)?.Values.Length > 0 ? " " : "")).ToArray();
-        var values = name == "help" ? CommandNames() : Find(name)?.Values ?? [];
+        var command = Find(name);
+        var values = name == "help" ? CommandNames()
+            : command?.CompleteValue?.Invoke(line[(name.Length + 1)..].TrimStart()) ?? command?.Values ?? [];
         return values.Where(candidate => candidate.StartsWith(value, StringComparison.Ordinal))
             .Select(candidate => $"{name} {candidate}").ToArray();
     }
