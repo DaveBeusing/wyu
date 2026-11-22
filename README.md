@@ -66,6 +66,12 @@ show the last completed result or **profile cancel** to stop a run. Observed
 FPS counts at most one acknowledged sequence advance per poll. The report also
 shows poll gaps and renderer replacement and skip counter deltas.
 
+Use **profile keep a** or **profile keep b** to copy the last completed
+measurement into that session's slot. A new measurement leaves the two slots
+available. **profile compare** shows both measured durations and rates side by
+side. The count-based metrics are shown per second, including poll gaps over
+33 ms, so you can compare samples of different lengths.
+
 ## Build and verification
 
 Use Windows, the .NET 10 SDK, PowerShell 7, and GitHub CLI. The

@@ -6,6 +6,7 @@ internal sealed record ConsoleCommand(string Name, string Usage, string Descript
     Func<string, string> Execute, params string[] Values)
 {
     internal string? Example { get; init; }
+    internal string? UsageDetails { get; init; }
     internal Func<string>? CurrentValue { get; init; }
 }
 
@@ -185,6 +186,8 @@ internal sealed class WorldConsole(ConsoleCommand[] commands)
         var lines = new List<string> { $"Usage: {command.Usage}", command.Description };
         if (command.CurrentValue is { } read)
             lines.Add(read());
+        if (command.UsageDetails is { } details)
+            lines.Add(details);
         if (command.Example is { } example)
             lines.Add($"Example: {example}");
         return string.Join('\n', lines);
