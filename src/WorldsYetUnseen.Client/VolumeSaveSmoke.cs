@@ -81,6 +81,13 @@ internal sealed partial class VolumeExploration
                 .ConfigureAwait(false);
             RequireSmokeSave(await SaveAsync(terrain, token).ConfigureAwait(false), 1);
             RequireSmokeSave(await SaveAsync(terrain, token).ConfigureAwait(false), 2);
+            var queued = QueueSaveVerification(measuring: false);
+            if (queued != "Save verification queued.")
+                throw new InvalidOperationException($"Could not queue save verification: {queued}");
+            var verified = await VerifyQueuedSaveAsync(token).ConfigureAwait(false);
+            if (verified != "Save verified.\nGeneration 2 matches.")
+                throw new InvalidOperationException($"Could not verify the saved checkpoint: {verified}");
+            Console.WriteLine("PASS: save verify matched committed generation 2.");
         }
         else if (phase == "interrupt")
         {
