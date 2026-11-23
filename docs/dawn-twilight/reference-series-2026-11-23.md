@@ -69,7 +69,7 @@ terrain/cascade boundaries and a scheduling trace, so the cause of the
 remaining variation is open.
 
 On an idle X11D desktop, run the existing pinned companion in an elevated
-PowerShell 7.4+ session. Run these probes serially and retain the archive
+PowerShell 7.4+ session. Verify the local copy against the pinned digest before execution. Both commands publish their evidence to the X11D share. The runner uses WYU 5b12324 and Groundwork 8943e96. Run these probes serially and retain the archive
 from each. Check trace coverage for the affected windows before attributing
 delays. Short probes can guide a correction; qualification still requires the
 original complete protocol, installed route, pressure, memory and owner
@@ -78,13 +78,20 @@ visual evidence.
 In the slowest Lookup outbound handoff of Orbit Combined pair 1, replay 4,
 the endpoint grew from 35.852 to 40.242 ms. The interval from
 `previous-stop-begin` to `previous-renderer-disposed` grew from 19.765 to
-23.952 ms. The WYU follow-up adds opt-in `previous-props-stopped` and
+23.953 ms. The WYU follow-up adds opt-in `previous-props-stopped` and
 `previous-renderer-dispose-begin` markers within that interval. Use these
 with the existing `previous-renderer-disposed` marker to separate prop
 shutdown, the stop request and disposal. The earlier archive predates both
 markers, and the Direct return overrun still needs timing by stage.
 
 ```powershell
-pwsh -NoProfile -File "\\X11D\Share\Invoke-Groundwork112-HandoffDiagnostics.ps1" -DiagnosticProbe -DiagnosticComposition orbit-combined -GpuPassBreakdown -GpuSchedulingTrace
-pwsh -NoProfile -File "\\X11D\Share\Invoke-Groundwork112-HandoffDiagnostics.ps1" -DiagnosticProbe -DiagnosticComposition orbit-combined -LookupPrototype -ReuseLookupResources -GpuPassBreakdown -GpuSchedulingTrace
+$work = Join-Path ([IO.Path]::GetTempPath()) ("groundwork-handoff-" + [guid]::NewGuid().ToString("N"))
+$null = New-Item -ItemType Directory -Path $work
+$runner = Join-Path $work "Invoke-Groundwork112-HandoffDiagnostics.ps1"
+Copy-Item -LiteralPath "\\X11D\Share\Invoke-Groundwork112-HandoffDiagnostics.ps1" -Destination $runner
+if ((Get-FileHash -LiteralPath $runner).Hash -ne "5864F2DA68D9C21F3A0E0A4E79564BB15DA6B0B7D50D8905DCDB4033E89A80BA") {
+    throw "The handoff diagnostic runner does not match the reviewed SHA-256."
+}
+pwsh -NoProfile -File $runner -BaseDirectory "\\X11D\Share" -DiagnosticProbe -DiagnosticComposition orbit-combined -GpuPassBreakdown -GpuSchedulingTrace
+pwsh -NoProfile -File $runner -BaseDirectory "\\X11D\Share" -DiagnosticProbe -DiagnosticComposition orbit-combined -LookupPrototype -ReuseLookupResources -GpuPassBreakdown -GpuSchedulingTrace
 ```
