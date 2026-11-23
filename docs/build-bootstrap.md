@@ -180,6 +180,21 @@ From an interactive Windows desktop, run
 `eng/Test-AlphaDiagnostics.ps1 -Client <path-to-client-exe> -ExpectedCommit <build-commit>`
 to check both dialogs, rotation and native close during a controlled load.
 
+## Session menu
+
+During surface play in a Planet world or Free Test World, and during the
+rescue mission, press **Esc** to pause and release mouse look. Use **Up/Down**
+and **Enter** to select **Resume**, **Save**, **Leave**, or **Save and Leave**.
+**Leave** asks for confirmation when progress may be unsaved. **Save and Leave**
+exits after its requested checkpoint is confirmed. A failed or uncertain save
+keeps the session open and displays the available recovery action. While a save
+is in progress, **Esc** can cancel the pending decision to leave. An admitted
+write may still finish.
+
+Closing the native window ends the session through the existing shutdown flow.
+It does not request a save or show the in-game confirmation, and already-owned
+operations are settled during shutdown. Airborne controls remain separate.
+
 ## WP07 rescue beacon
 
 Launch the Windows client without arguments or use `--prototype`. The

@@ -194,16 +194,16 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         {
             ConfirmRestoredLanding(terrain, restored);
             diagnostics?.Write("touchdown-restored", FormattableString.Invariant($"flightTick={restored.FlightTick} revision={restored.Revision}"));
-            Notice(slot.ReadOnly ? "Verified touchdown opened read-only.\nEsc to exit without saving." : "Continued from a verified touchdown.");
+            Notice(slot.ReadOnly ? "Verified touchdown opened read-only.\nEsc for the session menu." : "Continued from a verified touchdown.");
         }
         else if (slot?.ReadOnly == true)
-            Notice("Recovered checkpoint opened read-only.\nEsc to exit without saving.");
+            Notice("Recovered checkpoint opened read-only.\nEsc for the session menu.");
         else if (cave is not null)
-            Notice("WASD to explore | E mine | Q fill\nF5 save | F10 save and quit");
+            Notice("WASD to explore | E mine | Q fill\nEsc session menu | F5 save | F10 save and leave");
         else if (slot is not null)
-            Notice("E remove | Q add | 1/2 material\nF5 save | F6 flight | F10 save and quit");
+            Notice("E remove | Q add | 1/2 material\nEsc session menu | F5 save | F6 flight | F10 save and leave");
         if (freeTestWorld && slot?.ReadOnly != true)
-            Notice($"{PlanetName} | F1 diagnostics | F2 test actions | F3 console\nE remove | Q fill | F5 save | F6 flight");
+            Notice($"{PlanetName} | F1 diagnostics | F2 test actions | F3 console\nE remove | Q fill | Esc session menu | F5 save | F6 flight");
         else if (!scripted && overlay is not null)
             Notice(CurrentNotice is { } controls ? $"{controls}\nF1 diagnostics · F3 console" : "F1 diagnostics · F3 console");
         if (OrbitMaterialFallbackNotice is { } materialNotice)
@@ -225,6 +225,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var exercisedWindow = false;
         var previousFrame = Stopwatch.GetTimestamp();
         using var cadence = new PeriodicTimer(TimeSpan.FromSeconds(1d / 60));
+        await using var session = new ExplorationSessionMenu(token);
         (PlanetWalkState Pose, ulong LiveTick)? comparisonView = null;
         using var profile = !scripted && overlay is not null
             ? new ConsoleFrameProfile(TimeProvider.System,
@@ -254,7 +255,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var renderer = renderHost.Active;
             var windowState = window.Read();
             var focused = windowState.Focused && !input.TransitionLoss;
-            var consoleInput = !_testMenu && !_inventoryOpen && !_constructionOpen && terminal?.Handle(input, focused,
+            var consoleInput = !session.Menu.IsOpen && !_testMenu && !_inventoryOpen && !_constructionOpen && terminal?.Handle(input, focused,
                 WorldConsole.Fits(windowState.ClientWidth, windowState.ClientHeight)) == true;
             if (consoleInput)
             {
@@ -270,7 +271,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 else
                     comparisonView ??= (state, _environmentTick);
             }
-            if (freeTestWorld && !IsSpectating && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.F2))
+            if (freeTestWorld && !session.Menu.IsOpen && !IsSpectating && !_inventoryOpen && !_constructionOpen &&
+                PrototypeMenu.Pressed(input, InputControl.F2))
             {
                 _testMenu = !_testMenu;
                 if (!_testMenu && overlay is not null)
@@ -283,9 +285,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 StopSpectating();
                 input = input with { Events = [], HeldControls = [] };
             }
-            if (!scripted && !_testMenu && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.Escape))
-                return;
-            if (PrototypeMenu.Pressed(input, InputControl.F1))
+            var sessionMenu = session.Menu.IsOpen || (!scripted && focused && !consoleInput && !stopSpectate &&
+                !_testMenu && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.Escape));
+            if (!sessionMenu && PrototypeMenu.Pressed(input, InputControl.F1))
                 _debug = !_debug;
             var rendered = renderer.Read();
             if (!scripted && rendered is { Lifecycle: RendererLifecycle.Stopping or RendererLifecycle.Stopped,
@@ -293,19 +295,26 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 (token.IsCancellationRequested || window.Read().Phase is HostWindowPhase.Closing or HostWindowPhase.Closed))
                 return;
             var drawable = RequireHealthyRenderer(rendered).Surface == RenderSurfaceState.Drawable;
-            ReportProfile(profile?.Observe(renderer, rendered, drawable && focused && !_testMenu && !_inventoryOpen));
+            ReportProfile(profile?.Observe(renderer, rendered, drawable && focused && !sessionMenu && !_testMenu && !_inventoryOpen));
             if (telemetry is { IsActive: true })
             {
                 var command = telemetry.IsTracing ? "profile trace" : "stream watch";
-                var result = drawable && focused && !_testMenu && !_inventoryOpen && !_constructionOpen
+                var result = drawable && focused && !sessionMenu && !_testMenu && !_inventoryOpen && !_constructionOpen
                     ? telemetry.Observe(renderer, terrain.Statistics, rendered)
                     : telemetry.Interrupt();
                 ReportConsole(command, result);
             }
             if (profile?.IsComparing != true)
                 comparisonView = null;
-            mouse?.Update(drawable && focused && !_testMenu && !_inventoryOpen && _buildRefund is null && !consoleInput && !stopSpectate,
+            mouse?.Update(drawable && focused && !sessionMenu && !_testMenu && !_inventoryOpen && _buildRefund is null && !consoleInput && !stopSpectate,
                 ref _yaw, ref _pitch);
+            if (sessionMenu)
+            {
+                if (await HandleSessionMenuAsync(session, terrain, input, drawable && focused, token).ConfigureAwait(false))
+                    return;
+                previousFrame = Stopwatch.GetTimestamp();
+                continue;
+            }
             if (!drawable || (!scripted && !focused))
                 continue;
 
