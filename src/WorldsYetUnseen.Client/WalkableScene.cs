@@ -105,7 +105,8 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
         _renderer is not null &&
         _renderer.ReadMeshReplacement().LastPresentedGeneration == RendererGeneration(_region.DesiredGeneration);
 
-    internal void Advance(int deltaX, int deltaZ, ulong tick, WalkableRouteSmoke? route = null, bool drawable = true)
+    internal void Advance(int deltaX, int deltaZ, ulong tick, WalkableRouteSmoke? route = null, bool drawable = true,
+        bool pauseMotion = false)
     {
         if (_stopped)
             return;
@@ -120,8 +121,9 @@ internal sealed class WalkableScene(IRuntimeOwnership ownership, VoxelPose? init
 
         var status = renderer.ReadMeshReplacement();
         RetainCoverage(status);
-        using (var read = ReadPublishedRegion())
+        if (!pauseMotion)
         {
+            using var read = ReadPublishedRegion();
             var ready = drawable && read.Anchor == _region.DesiredAnchor &&
                 RendererGeneration(read.Generation) == status.LastPresentedGeneration;
             if (route is not null)

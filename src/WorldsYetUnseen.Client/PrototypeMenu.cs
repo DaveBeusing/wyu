@@ -5,80 +5,99 @@ namespace WorldsYetUnseen.Client;
 
 internal sealed class PrototypeMenu(PrototypeSave save)
 {
-    private int _selection;
-    private bool _confirmQuit;
+    private readonly SessionMenu _menu = new();
+    private PendingLeave? _pendingLeave;
     private string? _notice;
 
     internal bool QuitRequested { get; private set; }
 
-    internal string Caption
-    {
-        get
-        {
-            if (_confirmQuit)
-                return "WYU | Unsaved progress | Enter quits | Esc cancels";
-            var status = save.IsSaving ? "Saving…"
-                : save.RetryPending ? "Save uncertain | Select Save to retry the original checkpoint"
-                : _notice ?? (save.LastSave?.Status switch
-                {
-                    SaveSlotStatus.Committed or SaveSlotStatus.AlreadyCommitted => $"Saved generation {save.Generation}",
-                    { } failed => $"Save failed: {failed}",
-                    _ => save.Generation > 0 ? $"Checkpoint {save.Generation}" : "No checkpoint yet"
-                });
-            return $"WYU paused | {Option(0, "Resume")} | {Option(1, "Save")} | {Option(2, "Quit")} | {status}";
-        }
-    }
+    internal string Caption => _menu.Caption(save.IsSaving
+        ? _pendingLeave is null ? "Saving…" : "Saving before leaving… | Esc cancels leaving"
+        : _notice ?? SaveStatus());
 
     internal void Handle(InputSnapshot input, PrototypeSession session, PrototypeCheckpoint checkpoint)
     {
-        if (_confirmQuit)
+        // An Escape on the completion tick must still be able to cancel the leave.
+        var action = _menu.Handle(input, !session.Ready || save.Checkpoint != checkpoint || save.RetryPending,
+            save.IsSaving || _pendingLeave is not null, _pendingLeave is not null);
+        session.Paused = _menu.IsOpen;
+        switch (action)
         {
-            if (Pressed(input, InputControl.Escape))
-                _confirmQuit = false;
-            else if (Pressed(input, InputControl.Enter))
-                QuitRequested = true;
-            return;
-        }
-        if (Pressed(input, InputControl.Escape))
-        {
-            session.Paused = !session.Paused;
-            _selection = 0;
-            _notice = null;
-            return;
-        }
-        if (!session.Paused)
-            return;
-        _selection = Select(input, _selection);
-        if (!Pressed(input, InputControl.Enter))
-            return;
-        switch (_selection)
-        {
-            case 0:
-                session.Paused = false;
+            case SessionMenuAction.Resume:
                 _notice = null;
                 break;
-            case 1:
-                _notice = !session.Ready ? "Wait for terrain"
-                    : save.IsSaving ? "Save already in progress"
-                    : save.RequestSave(checkpoint) ? null
-                    : "Save unavailable";
+            case SessionMenuAction.Save:
+                StartSave(session, checkpoint, leave: false);
                 break;
-            case 2:
-                _confirmQuit = save.IsSaving || save.Checkpoint != checkpoint;
-                QuitRequested = !_confirmQuit;
+            case SessionMenuAction.SaveAndLeave:
+                StartSave(session, checkpoint, leave: true);
                 break;
+            case SessionMenuAction.Leave:
+                QuitRequested = true;
+                break;
+            case SessionMenuAction.CancelPendingLeave:
+                _pendingLeave = null;
+                _notice = "Leave canceled";
+                break;
+        }
+
+        if (_pendingLeave is not { } pending || save.IsSaving)
+            return;
+
+        _pendingLeave = null;
+        if (save.HasConfirmedSave(pending.Identity, pending.Checkpoint))
+        {
+            if (session.Ready && checkpoint == pending.Checkpoint)
+                QuitRequested = true;
+            else
+                _notice = "Progress changed. Save again before leaving.";
+        }
+        else if (save.LastSave?.Status is SaveSlotStatus.Committed or SaveSlotStatus.AlreadyCommitted)
+        {
+            _notice = "The requested checkpoint was not confirmed. Select Save again.";
         }
     }
 
-    private string Option(int index, string text) => _selection == index ? $"> {text}" : text;
+    private void StartSave(PrototypeSession session, PrototypeCheckpoint checkpoint, bool leave)
+    {
+        if (!save.IsWritable)
+        {
+            _notice = "Read-only recovery. You can resume or leave without saving.";
+            return;
+        }
+        if (!session.Ready)
+        {
+            _notice = "Wait for terrain, then select Save again.";
+            return;
+        }
+        if (leave && save.RequestSaveForLeave(checkpoint, out var identity))
+        {
+            _pendingLeave = new(identity, checkpoint);
+            _notice = null;
+        }
+        else if (!leave && save.RequestSave(checkpoint))
+        {
+            _notice = null;
+        }
+        else
+        {
+            _notice = save.RetryPending
+                ? "Select Save to retry the original checkpoint before leaving."
+                : "Save unavailable. Resume or try again.";
+        }
+    }
+
+    private string SaveStatus() => save.RetryPending
+        ? "Save uncertain. Select Save to retry the original checkpoint."
+        : save.LastSave?.Status switch
+        {
+            SaveSlotStatus.Committed or SaveSlotStatus.AlreadyCommitted => $"Saved generation {save.Generation}",
+            { } failed => $"Save failed: {failed}. Resume or select Save to retry.",
+            _ => save.Generation > 0 ? $"Checkpoint {save.Generation}" : "No checkpoint yet"
+        };
 
     internal static bool Pressed(InputSnapshot input, InputControl control) => !input.TransitionLoss &&
         input.Events.Any(e => e.Kind == InputEventKind.Pressed && e.Device == InputDevice.Keyboard && e.Control == control);
 
-    private static int Select(InputSnapshot input, int selected)
-    {
-        if (Pressed(input, InputControl.Up))
-            return (selected + 2) % 3;
-        return Pressed(input, InputControl.Down) ? (selected + 1) % 3 : selected;
-    }
+    private readonly record struct PendingLeave(SaveFrameIdentity Identity, PrototypeCheckpoint Checkpoint);
 }

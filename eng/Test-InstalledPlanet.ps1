@@ -264,7 +264,10 @@ try {
     Screenshot 'orbit'
     Wait-Panel '*Touchdown confirmed*' 140
     Screenshot 'touchdown'
-    Press 121
+    Press 27
+    Wait-Panel '*WYU paused*'
+    Press 38
+    Press 13
     Wait-Exit
     $process = $null
 
@@ -275,6 +278,29 @@ try {
     Wait-Panel '*Continued from a verified touchdown*'
     Screenshot 'touchdown-resumed'
     Press 27
+    Wait-Panel '*WYU paused*'
+    $lock = [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    try {
+        Press 38
+        Press 13
+        Wait-Panel '*WYU paused*Save busy*'
+        Screenshot 'session-save-and-leave-busy'
+        if (($beforeResume -join ',') -cne (@($members | Get-FileHash | ForEach-Object Hash) -join ',')) {
+            throw 'Blocked Save and Leave altered the committed checkpoints.'
+        }
+    } finally { $lock.Dispose() }
+    Press 27
+    Press 27
+    Wait-Panel '*WYU paused*'
+    Press 40
+    Press 40
+    Press 13
+    Wait-Panel '*Leave without saving?*'
+    Press 27
+    Wait-Panel '*WYU paused*Save and Leave*'
+    Press 13
+    Wait-Panel '*Leave without saving?*'
+    Press 13
     Wait-Exit
     $process = $null
     $afterResume = @($members | Get-FileHash | ForEach-Object Hash)

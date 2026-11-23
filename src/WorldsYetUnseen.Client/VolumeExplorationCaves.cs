@@ -89,7 +89,7 @@ internal sealed partial class VolumeExploration
                 };
         }
         return below
-            ? FormattableString.Invariant($"{PlanetName} | Ore {CaveOre}\n{_caveAim}\nE mine | Q fill\nF5 save | F10 save and quit\n{CaveExitHint(state)}")
+            ? FormattableString.Invariant($"{PlanetName} | Ore {CaveOre}\n{_caveAim}\nE mine | Q fill\nEsc session menu | F5 save | F10 save and leave\n{CaveExitHint(state)}")
             : FormattableString.Invariant($"{PlanetName} | Ore {CaveOre}\nCave mouth {Length(Subtract(CavePlanet.Entrance, state.Position)):F1} m\nFollow the ramp ahead | W to walk");
     }
 

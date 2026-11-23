@@ -40,9 +40,8 @@ internal sealed partial class VolumeExploration
         var pending = slot?.HasPendingWrite == true ? "Write pending · F5/F10 retry" : "No pending write";
         var summary = $"{mode}\n{generation}\n{pending}";
         if (_lastManualSave is not { } last)
-            return $"{summary}\nNo F5/F10 attempt yet.";
+            return $"{summary}\nNo manual save attempt yet.";
 
-        var key = last.SaveAndQuit ? "F10" : "F5";
         var retry = last.Retry ? " retry" : "";
         var result = last.Status switch
         {
@@ -54,7 +53,7 @@ internal sealed partial class VolumeExploration
             VolumeSlotStatus.StorageError => "Storage error",
             _ => last.Status.ToString(),
         };
-        summary += $"\nLast {key}{retry}\nResult: {result}";
+        summary += $"\nLast {last.Command}{retry}\nResult: {result}";
         return last.Generation is { } saved
             ? FormattableString.Invariant($"{summary}\nSaved generation {saved}") : summary;
     }
@@ -75,19 +74,9 @@ internal sealed partial class VolumeExploration
         var saveAndQuit = PrototypeMenu.Pressed(input, InputControl.F10);
         if (saveAndQuit || PrototypeMenu.Pressed(input, InputControl.F5))
         {
-            var settling = slot?.HasPendingWrite == true;
-            var result = await SaveAsync(terrain, token).ConfigureAwait(false);
-            var confirmed = result.Status is VolumeSlotStatus.Committed or VolumeSlotStatus.AlreadyCommitted
-                ? result.Checkpoint : null;
-            _lastManualSave = new(result.Status, confirmed?.Generation, saveAndQuit, settling);
-            _quitAfterSave = saveAndQuit && confirmed is not null && !settling;
-            diagnostics?.Write(confirmed is not null ? "save" : "save-held",
-                $"status={result.Status} generation={result.Checkpoint?.Generation ?? 0} revision={_published.TerrainRevision}");
-            if (result.Error is { } error)
-                diagnostics?.Write("save-error", $"{error.GetType().Name} 0x{error.HResult:X8} {error.Message}");
-            Notice(confirmed is null ? SaveFailureNotice(result.Status) : settling
-                ? $"Previous save confirmed (generation {confirmed.Generation}).\nF5 to save current state · F10 to save and quit"
-                : $"Saved generation {confirmed.Generation}");
+            var completion = await RequestManualSaveAsync(terrain, token).ConfigureAwait(false);
+            _quitAfterSave = saveAndQuit && completion.CanLeave;
+            Notice(ManualSaveNotice(completion, saveAndQuit ? "F10" : "F5"));
             return true;
         }
 
@@ -280,13 +269,44 @@ internal sealed partial class VolumeExploration
         _ => TerrainPublicationOutcome.Rejected,
     };
 
-    private static string SaveFailureNotice(VolumeSlotStatus status) => status switch
+    private async Task<ManualSaveCompletion> RequestManualSaveAsync(VolumeStreamingCoordinator terrain, CancellationToken token)
     {
-        VolumeSlotStatus.ReadOnlyRecovery => "This recovered world is read-only.\nEsc to exit without saving.",
+        var settling = slot?.HasPendingWrite == true;
+        var result = await SaveAsync(terrain, token).ConfigureAwait(false);
+        return new(result, settling);
+    }
+
+    private string ManualSaveNotice(ManualSaveCompletion completion, string command, bool sessionMenu = false)
+    {
+        var result = completion.Result;
+        var confirmed = completion.Confirmed;
+        _lastManualSave = new(result.Status, confirmed?.Generation, command, completion.Settling);
+        diagnostics?.Write(confirmed is not null ? "save" : "save-held",
+            $"status={result.Status} generation={result.Checkpoint?.Generation ?? 0} revision={_published.TerrainRevision}");
+        if (result.Error is { } error)
+            diagnostics?.Write("save-error", $"{error.GetType().Name} 0x{error.HResult:X8} {error.Message}");
+        if (confirmed is null)
+            return SaveFailureNotice(result.Status, sessionMenu);
+        if (completion.Settling)
+        {
+            var next = sessionMenu ? "Select Save to save current progress or Save and Leave to leave after saving."
+                : "F5 to save current state · F10 to save and leave";
+            return $"Previous save confirmed (generation {confirmed.Generation}).\n{next}";
+        }
+        return $"Saved generation {confirmed.Generation}";
+    }
+
+    private static string SaveFailureNotice(VolumeSlotStatus status, bool sessionMenu) => status switch
+    {
+        VolumeSlotStatus.Empty => "There is no save slot for this session.",
+        VolumeSlotStatus.ReadOnlyRecovery => "This recovered world is read-only.\nSelect Leave in the session menu to exit without saving.",
         VolumeSlotStatus.Incompatible => "This save format is incompatible. The existing files were kept.\nChoose a compatible world to save.",
-        VolumeSlotStatus.Busy => "Save busy. Wait for terrain work or close any other session using this save.\nPress F5 to try again.",
-        VolumeSlotStatus.StorageError => "Save failed. Check storage access and free space, then press F5 to retry.",
-        VolumeSlotStatus.Indeterminate => "Save could not be confirmed. Wait for storage recovery, then press F5 to check again.",
+        VolumeSlotStatus.Busy => "Save busy. Wait for terrain work or close any other session using this save.\n" +
+            (sessionMenu ? "Select Save to try again." : "Press F5 to try again."),
+        VolumeSlotStatus.StorageError => "Save failed. Check storage access and free space.\n" +
+            (sessionMenu ? "Select Save to retry." : "Press F5 to retry."),
+        VolumeSlotStatus.Indeterminate => "Save could not be confirmed. Wait for storage recovery.\n" +
+            (sessionMenu ? "Select Save to verify the pending write." : "Press F5 to check again."),
         VolumeSlotStatus.Stale or VolumeSlotStatus.Conflict => "The save request is out of date or conflicts with this slot.\nReopen the world from its last checkpoint.",
         VolumeSlotStatus.Corrupt => "Save rejected. This slot has damaged checkpoint data.",
         VolumeSlotStatus.Canceled => "Save canceled.",
@@ -315,7 +335,14 @@ internal sealed partial class VolumeExploration
         return await Task.Run(() => slot.Save(cut, environmentTick, token)).ConfigureAwait(false);
     }
 
-    private readonly record struct ManualSaveAttempt(VolumeSlotStatus Status, ulong? Generation, bool SaveAndQuit, bool Retry);
+    private readonly record struct ManualSaveAttempt(VolumeSlotStatus Status, ulong? Generation, string Command, bool Retry);
+
+    private readonly record struct ManualSaveCompletion(VolumeSlotResult Result, bool Settling)
+    {
+        internal VolumeCheckpoint? Confirmed => Result.Status is VolumeSlotStatus.Committed or VolumeSlotStatus.AlreadyCommitted
+            ? Result.Checkpoint : null;
+        internal bool CanLeave => Confirmed is not null && !Settling;
+    }
 
     private enum TerrainEditAimStatus { NoTarget, CoveragePending, QueryRejected, Target }
 
