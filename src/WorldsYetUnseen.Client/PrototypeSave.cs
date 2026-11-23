@@ -15,6 +15,7 @@ internal sealed class PrototypeSave(SaveSlot slot, IRuntimeOwnership ownership, 
     internal PrototypeCheckpoint? Checkpoint { get; private set; } = ReadInitialCheckpoint(initialLoad);
     internal ulong Generation { get; private set; } = initialLoad.Checkpoint?.Identity.Generation ?? 0;
     internal Guid Lineage => _lineage;
+    internal bool IsWritable => InitialLoad.Status is SaveSlotStatus.Empty or SaveSlotStatus.Loaded;
     internal bool IsSaving => _active is not null;
     internal bool RetryPending => _retry is not null;
     internal SaveSlotResult? LastSave { get; private set; }
@@ -51,10 +52,22 @@ internal sealed class PrototypeSave(SaveSlot slot, IRuntimeOwnership ownership, 
         }
     }
 
-    internal bool RequestSave(PrototypeCheckpoint checkpoint)
+    internal bool RequestSave(PrototypeCheckpoint checkpoint) =>
+        RequestSave(checkpoint, out _, requireMatchingRetry: false);
+
+    internal bool RequestSaveForLeave(PrototypeCheckpoint checkpoint, out SaveFrameIdentity identity) =>
+        RequestSave(checkpoint, out identity, requireMatchingRetry: true);
+
+    internal bool HasConfirmedSave(SaveFrameIdentity identity, PrototypeCheckpoint checkpoint) =>
+        LastSave is { Status: SaveSlotStatus.Committed or SaveSlotStatus.AlreadyCommitted, Identity: var committed } &&
+        committed == identity && Checkpoint == checkpoint;
+
+    private bool RequestSave(PrototypeCheckpoint checkpoint, out SaveFrameIdentity identity, bool requireMatchingRetry)
     {
-        if (_stopped || IsSaving || Generation == ulong.MaxValue ||
-            InitialLoad.Status is not (SaveSlotStatus.Empty or SaveSlotStatus.Loaded))
+        identity = default;
+        // A normal Save can recover an uncertain older request. Only a matching request can authorize leaving.
+        if (_stopped || IsSaving || Generation == ulong.MaxValue || !IsWritable ||
+            requireMatchingRetry && _retry is { } retry && retry.Checkpoint != checkpoint)
             return false;
 
         var generation = Generation;
@@ -72,6 +85,7 @@ internal sealed class PrototypeSave(SaveSlot slot, IRuntimeOwnership ownership, 
                     return slot.Save(generation, request.Frame, cancellation.Token);
             });
             _active = new PendingSave(request, cancellation, work);
+            identity = request.Frame.Identity;
             LastSave = null;
             return true;
         }

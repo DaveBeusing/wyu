@@ -21,6 +21,34 @@ internal sealed partial class VolumeExploration
                 _ => "Terrain aim unavailable.",
             };
 
+        return DescribeTerrainHit(hit, FormattableString.Invariant($"Terrain hit {hit.Distance:0.##} m"));
+    }
+
+    private string InspectAt(VolumeStreamingCoordinator terrain, PlanetVector point)
+    {
+        var radius = FlightVector.Length(point);
+        if (!double.IsFinite(radius) || radius < 1 || radius > Descriptor.RadiusMeters + 1024)
+            return "Coordinates outside world.";
+        using var lease = terrain.TryRead();
+        if (lease is null || lease.Info != _published || terrain.Statistics.MovementHeld)
+            return "Terrain view unavailable.";
+
+        var up = FlightVector.Scale(point, 2 / radius);
+        Span<VolumeRayHit> hits = stackalloc VolumeRayHit[8];
+        var result = lease.Raycast(FlightVector.Add(point, up), FlightVector.Subtract(point, up), hits);
+        if (result.Status == VolumeQueryStatus.Contact && result.Count > 0)
+            return DescribeTerrainHit(hits[0], "Surface within 2 m");
+        return result.Status switch
+        {
+            VolumeQueryStatus.CoverageUnavailable => "Coordinates outside loaded view.",
+            VolumeQueryStatus.BudgetExceeded => "Terrain query budget held.",
+            VolumeQueryStatus.InitialOverlap => "Query starts inside terrain.",
+            _ => "No surface within 2 m.",
+        };
+    }
+
+    private string DescribeTerrainHit(VolumeRayHit hit, string heading)
+    {
         var material = (cave is null, hit.Material) switch
         {
             (true, (ushort)ReferenceTerrainMaterial.Basalt) => "Basalt",
@@ -37,7 +65,48 @@ internal sealed partial class VolumeExploration
         var lod = hit.IsTransition ? "LOD transition" : stride > 0 ? $"Brick LOD {stride}" : "Brick LOD n/a";
         var materialLine = material is null ? $"Material {hit.Material}" : $"Material {hit.Material} · {material}";
         return FormattableString.Invariant(
-            $"Terrain hit {hit.Distance:0.##} m\n{materialLine}\nX {hit.Position.X:0.###}\nY {hit.Position.Y:0.###}\nZ {hit.Position.Z:0.###}\n{lod}");
+            $"{heading}\n{materialLine}\nX {hit.Position.X:0.###}\nY {hit.Position.Y:0.###}\nZ {hit.Position.Z:0.###}\n{lod}");
+    }
+
+    private string ExportConsoleReport(string location, string? trace)
+    {
+        if (ConsolePresetDirectory is not { } profileDirectory)
+            return "Report directory unavailable.";
+        var directory = Path.Combine(profileDirectory, "Reports");
+        var suffix = Guid.NewGuid().ToString("N")[..12];
+        var file = FormattableString.Invariant($"wyu-{DateTimeOffset.UtcNow:yyyyMMdd}-{suffix}.txt");
+        var temporary = Path.Combine(directory, file + ".tmp");
+        var created = false;
+        try
+        {
+            Directory.CreateDirectory(directory);
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                created = true;
+                using var writer = new StreamWriter(stream);
+                writer.Write(location);
+                if (trace is not null)
+                {
+                    writer.Write("\n\n");
+                    writer.Write(trace);
+                }
+            }
+            File.Move(temporary, Path.Combine(directory, file));
+            created = false;
+            return $"Report saved in Reports.\n{file}";
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return "Report export unavailable.";
+        }
+        finally
+        {
+            if (created)
+            {
+                try { File.Delete(temporary); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            }
+        }
     }
 
     private string ReadStreamStatus(VolumeStreamingCoordinator terrain)

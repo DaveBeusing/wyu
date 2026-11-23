@@ -4,11 +4,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+$seeds = @(& (Join-Path $PSScriptRoot 'Get-FarHorizonTestSeeds.ps1'))
 $client = (Resolve-Path -LiteralPath $Assembly).Path
 $previous = $env:WYU_WP16_SMOKE
 try {
     $env:WYU_WP16_SMOKE = '1'
-    foreach ($seed in '42', '20261111') {
+    foreach ($seed in $seeds) {
         $output = @(& dotnet $client --volume-smoke $seed hardware)
         $exitCode = $LASTEXITCODE
         $output | Write-Host

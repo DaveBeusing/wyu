@@ -4,11 +4,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$seeds = @(& (Join-Path $PSScriptRoot 'Get-FarHorizonTestSeeds.ps1'))
 $client = (Resolve-Path -LiteralPath $Assembly).Path
 $prior = $env:WYU_PACKAGE_G_SMOKE
 try {
     $env:WYU_PACKAGE_G_SMOKE = '1'
-    foreach ($seed in '42','20261111') {
+    foreach ($seed in $seeds) {
         $root = Join-Path ([IO.Path]::GetTempPath()) ('wyu-sky-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $root | Out-Null
         New-Item -ItemType File -Path (Join-Path $root 'wyu-volume-smoke.fixture') | Out-Null

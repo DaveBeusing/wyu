@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "world": "far-horizon",
+  "recipeId": "wyu.reference-planet.v1",
+  "recipeParameterSha256": "b31da48cef059e05f932952229ab9fcc5e932af0fedea1089f4043a0a5b57f5d",
+  "generatorVersion": 1,
+  "terrainSchemaVersion": 1,
+  "radiusMeters": 4096,
+  "materialCatalogVersion": 1,
+  "seed": "42",
+  "spawnFallbackSeed": "20261111"
+}

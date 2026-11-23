@@ -55,6 +55,7 @@ internal sealed class PrototypeSaveSmoke(IRuntimeOwnership ownership)
                 Console.WriteLine("PASS: WP10 saved a partially built beacon.");
                 break;
             case "--prototype-save-init":
+                SessionMenuSmoke.Run();
                 Require(save.InitialLoad.Status == SaveSlotStatus.Empty, "start from an empty slot");
                 await CommitAsync(save, first, 1, ct).ConfigureAwait(false);
                 Console.WriteLine("PASS: WP07 committed the mining checkpoint.");
@@ -72,13 +73,16 @@ internal sealed class PrototypeSaveSmoke(IRuntimeOwnership ownership)
                 RequireCheckpoint(save, 2, partial);
                 await VerifyRegionAsync(partial, ct).ConfigureAwait(false);
                 armed = true;
-                Require(save.RequestSave(offline), "queue the pre-activation checkpoint");
+                Require(save.RequestSaveForLeave(offline, out var leaveIdentity), "queue the pre-activation checkpoint");
+                Require(!save.HasConfirmedSave(leaveIdentity, offline), "reject a checkpoint still being written");
                 try
                 {
                     await reached.Task.WaitAsync(ct).ConfigureAwait(false);
                     Require(offline.Progress.Activate(out var live) == ActionResult.Applied,
                         "activate while the previous checkpoint is staged");
-                    Require(live == complete.Progress && !save.RequestSave(complete), "retain the captured checkpoint and reject a second active save");
+                    Require(live == complete.Progress && !save.RequestSave(complete) &&
+                        !save.RequestSaveForLeave(complete, out _), "retain the captured checkpoint and reject another save or leave");
+                    RequireCheckpoint(save, 2, partial);
                 }
                 finally
                 {
@@ -87,6 +91,10 @@ internal sealed class PrototypeSaveSmoke(IRuntimeOwnership ownership)
                 Require((await save.WaitForSaveAsync(ct).ConfigureAwait(false)).Status == SaveSlotStatus.Committed,
                     "commit the unchanged pre-activation snapshot");
                 RequireCheckpoint(save, 3, offline);
+                Require(save.HasConfirmedSave(leaveIdentity, offline), "confirm the exact save-and-leave checkpoint");
+                Require(!save.HasConfirmedSave(leaveIdentity, complete) &&
+                    !save.HasConfirmedSave(leaveIdentity with { SaveRequestId = Guid.Empty }, offline),
+                    "reject a different snapshot or write identity for save-and-leave");
                 var reopened = await PrototypeSave.OpenAsync(directory, ownership, ct).ConfigureAwait(false);
                 RequireCheckpoint(reopened, 3, offline);
                 reopened.Stop();
@@ -169,7 +177,8 @@ internal sealed class PrototypeSaveSmoke(IRuntimeOwnership ownership)
         var newestBytes = File.ReadAllBytes(newestPath);
         var blocked = await PrototypeSave.OpenAsync(rejectedDirectory, ownership, ct).ConfigureAwait(false);
         Require(blocked.InitialLoad.Status == SaveSlotStatus.Unsupported && blocked.Checkpoint is null &&
-            !blocked.RequestSave(first) && newestBytes.AsSpan().SequenceEqual(File.ReadAllBytes(newestPath)),
+            !blocked.RequestSave(first) && !blocked.RequestSaveForLeave(first, out _) &&
+            newestBytes.AsSpan().SequenceEqual(File.ReadAllBytes(newestPath)),
             "block resume and new writes while preserving the unsupported newest checkpoint");
         blocked.Stop();
         await blocked.SettleAsync(ct).ConfigureAwait(false);

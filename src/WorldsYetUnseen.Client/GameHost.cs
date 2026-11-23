@@ -587,6 +587,10 @@ internal static partial class GameHost
         {
             var input = tick.Input;
             performance?.Handle(input);
+            var canUseMenu = drawable && (mouseLook?.Focused ?? true) && !input.TransitionLoss &&
+                !input.Events.Any(static e => e.Kind == InputEventKind.FocusCleared);
+            var menuInput = canUseMenu ? input : input with { Events = [], HeldControls = [] };
+            var escapePressed = PrototypeMenu.Pressed(menuInput, InputControl.Escape);
             var x = 0;
             var z = 0;
             var interact = false;
@@ -597,9 +601,7 @@ internal static partial class GameHost
             }
             else
             {
-                var playInput = drawable && (mouseLook?.Focused ?? true) && !prototype!.Paused && !input.TransitionLoss &&
-                    !input.Events.Any(static e => e.Kind == InputEventKind.FocusCleared) &&
-                    !PrototypeMenu.Pressed(input, InputControl.Escape);
+                var playInput = canUseMenu && !prototype!.Paused && !escapePressed;
                 mouseLook?.Update(playInput, ref yaw, ref pitch);
                 if (playInput)
                 {
@@ -611,29 +613,36 @@ internal static partial class GameHost
                     interact = PrototypeMenu.Pressed(input, InputControl.E);
                 }
             }
-            walkable!.Advance(x, z, tick.Tick, drawable: drawable);
+            walkable!.Advance(x, z, tick.Tick, drawable: drawable,
+                pauseMotion: prototype!.Paused || (menu is not null && escapePressed));
             prototype!.Advance(yaw, pitch, interact, drawable, showObjective: caption is not null || prototypeRoute is not null);
             if (menu is not null)
             {
                 prototypeSave!.Advance();
                 var checkpoint = new PrototypeCheckpoint(walkable.Pose, prototype.Progress);
-                if (launchPending && !prototypeSave.IsSaving)
-                {
+                var menuHadInput = prototype.Paused || escapePressed;
+                if (escapePressed && !prototype.Paused)
                     launchPending = false;
-                    launchFlight = prototypeSave.Checkpoint is { Progress.BeaconOnline: true };
-                    launchFailed = !launchFlight;
-                }
-                if (!prototype.Paused && prototype.Progress.BeaconOnline && !prototypeSave.IsSaving &&
-                    PrototypeMenu.Pressed(input, InputControl.Enter))
+                menu.Handle(menuInput, prototype, checkpoint);
+                if (canUseMenu && !menuHadInput && !prototype.Paused)
                 {
-                    launchFlight = prototypeSave.Checkpoint is { Progress.BeaconOnline: true };
-                    if (!launchFlight)
+                    if (launchPending && !prototypeSave.IsSaving)
                     {
-                        launchPending = prototype.Ready && prototypeSave.RequestSave(checkpoint);
-                        launchFailed = !launchPending;
+                        launchPending = false;
+                        launchFlight = prototypeSave.Checkpoint is { Progress.BeaconOnline: true };
+                        launchFailed = !launchFlight;
+                    }
+                    if (!launchFlight && prototype.Progress.BeaconOnline && !prototypeSave.IsSaving &&
+                        PrototypeMenu.Pressed(menuInput, InputControl.Enter))
+                    {
+                        launchFlight = prototypeSave.Checkpoint is { Progress.BeaconOnline: true };
+                        if (!launchFlight)
+                        {
+                            launchPending = prototype.Ready && prototypeSave.RequestSave(checkpoint);
+                            launchFailed = !launchPending;
+                        }
                     }
                 }
-                menu.Handle(input, prototype, checkpoint);
             }
             if (prototypeRoute is { Completed: true } && routeCompletionTick == 0)
                 routeCompletionTick = tick.Tick;

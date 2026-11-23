@@ -10,6 +10,7 @@ internal sealed class ConsoleTelemetry(TimeProvider clock, Func<string>? traceCo
     private const int DefaultSeconds = 5;
     private const int ConsoleEventLimit = 4;
     private const int RetainedEventLimit = 128;
+    private const int TraceMarkLimit = 16;
     private const double SlowObservationMilliseconds = 33;
 
     private enum CaptureKind { None, Watch, Trace }
@@ -18,6 +19,7 @@ internal sealed class ConsoleTelemetry(TimeProvider clock, Func<string>? traceCo
         double ObservationGap = 0, ulong Replaced = 0, ulong Skipped = 0);
 
     private readonly TraceEvent[] _events = new TraceEvent[RetainedEventLimit];
+    private readonly List<(double Seconds, string Label)> _marks = [];
     private CaptureKind _capture;
     private int _seconds;
     private object? _renderer;
@@ -59,6 +61,7 @@ internal sealed class ConsoleTelemetry(TimeProvider clock, Func<string>? traceCo
         _seconds = seconds;
         _samplePeak = default;
         _polls = _observedAdvances = _eventCount = 0;
+        _marks.Clear();
         _maxObservationGap = _maxObservationGapAt = _maxPollGap = 0;
         return FormattableString.Invariant($"{Label(kind)} for {seconds} s.\nClose console to move.");
     }
@@ -145,6 +148,20 @@ internal sealed class ConsoleTelemetry(TimeProvider clock, Func<string>? traceCo
         AddEvent(new(elapsed, TerrainKind: kind));
     }
 
+    internal string AddTraceMark(string label)
+    {
+        if (!IsTracing)
+            return "No active profile trace.";
+        if (label.Length is < 1 or > 24 || !label.All(character =>
+            character is >= 'a' and <= 'z' or >= '0' and <= '9' or ' ' or '-'))
+            return "Label: 1–24 a-z, 0-9, space or -";
+        if (_marks.Count >= TraceMarkLimit)
+            return $"Trace mark limit: {TraceMarkLimit}.";
+        var elapsed = _renderer is null ? 0 : clock.GetElapsedTime(_started, clock.GetTimestamp()).TotalSeconds;
+        _marks.Add((elapsed, label));
+        return FormattableString.Invariant($"Trace mark +{elapsed:0.00}s\n{label}");
+    }
+
     private void AddEvent(TraceEvent entry)
     {
         _events[_eventCount % RetainedEventLimit] = entry;
@@ -166,23 +183,31 @@ internal sealed class ConsoleTelemetry(TimeProvider clock, Func<string>? traceCo
         var report = new StringBuilder("WYU profile trace\n");
         if (!string.IsNullOrEmpty(_traceStartContext))
             report.Append("\nAt start\n").Append(_traceStartContext).Append('\n');
-        report.Append('\n').Append(DescribeTrace(summary, RetainedEventLimit, "retained"));
+        report.Append('\n').Append(DescribeTrace(summary, RetainedEventLimit, "retained", includeMarks: true));
         LastTraceReport = report.ToString();
         return transcript;
     }
 
-    private string DescribeTrace(string summary, int eventLimit, string eventLabel)
+    private string DescribeTrace(string summary, int eventLimit, string eventLabel, bool includeMarks = false)
     {
         var shown = Math.Min(_eventCount, eventLimit);
         var text = new StringBuilder(summary);
         text.Append('\n').Append(FormattableString.Invariant($"Events {eventLabel} {shown}/{_eventCount}"));
+        var mark = 0;
         for (var i = _eventCount - shown; i < _eventCount; i++)
         {
             var entry = _events[i % RetainedEventLimit];
+            while (includeMarks && mark < _marks.Count && _marks[mark].Seconds <= entry.Seconds)
+                AppendMark(text, _marks[mark++]);
             text.Append('\n').Append(DescribeEvent(entry));
         }
+        while (includeMarks && mark < _marks.Count)
+            AppendMark(text, _marks[mark++]);
         return text.ToString();
     }
+
+    private static void AppendMark(StringBuilder text, (double Seconds, string Label) mark) =>
+        text.Append('\n').Append(FormattableString.Invariant($"+{mark.Seconds:0.00}s [mark] {mark.Label}"));
 
     private static string DescribeEvent(TraceEvent entry)
     {

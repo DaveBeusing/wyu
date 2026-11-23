@@ -206,16 +206,16 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         {
             ConfirmRestoredLanding(terrain, restored);
             diagnostics?.Write("touchdown-restored", FormattableString.Invariant($"flightTick={restored.FlightTick} revision={restored.Revision}"));
-            Notice(slot.ReadOnly ? "Verified touchdown opened read-only.\nEsc to exit without saving." : "Continued from a verified touchdown.");
+            Notice(slot.ReadOnly ? "Verified touchdown opened read-only.\nEsc for the session menu." : "Continued from a verified touchdown.");
         }
         else if (slot?.ReadOnly == true)
-            Notice("Recovered checkpoint opened read-only.\nEsc to exit without saving.");
+            Notice("Recovered checkpoint opened read-only.\nEsc for the session menu.");
         else if (cave is not null)
-            Notice("WASD to explore | E mine | Q fill\nF5 save | F10 save and quit");
+            Notice("WASD to explore | E mine | Q fill\nEsc session menu | F5 save | F10 save and leave");
         else if (slot is not null)
-            Notice("E remove | Q add | 1/2 material\nF5 save | F6 flight | F10 save and quit");
+            Notice("E remove | Q add | 1/2 material\nEsc session menu | F5 save | F6 flight | F10 save and leave");
         if (freeTestWorld && slot?.ReadOnly != true)
-            Notice($"{PlanetName} | F1 diagnostics | F2 test actions | F3 console\nE remove | Q fill | F5 save | F6 flight");
+            Notice($"{PlanetName} | F1 diagnostics | F2 test actions | F3 console\nE remove | Q fill | Esc session menu | F5 save | F6 flight");
         else if (!scripted && overlay is not null)
             Notice(CurrentNotice is { } controls ? $"{controls}\nF1 diagnostics · F3 console" : "F1 diagnostics · F3 console");
         if (OrbitMaterialFallbackNotice is { } materialNotice)
@@ -237,6 +237,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var exercisedWindow = false;
         var previousFrame = Stopwatch.GetTimestamp();
         using var cadence = new PeriodicTimer(TimeSpan.FromSeconds(1d / 60));
+        await using var session = new ExplorationSessionMenu(token);
         (PlanetWalkState Pose, ulong LiveTick)? comparisonView = null;
         using var profile = !scripted && overlay is not null
             ? new ConsoleFrameProfile(TimeProvider.System,
@@ -247,7 +248,9 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             ? new ConsolePinnedPresets(directory, ReadPinnedPresetName) : null;
         var terminal = profile is null || overlay is null ? null : CreateConsole(() => state.Position, profile, overlay.TryCopyText,
             overlay.ReadPresetText, () => InspectAim(terrain, state), () => ReadStreamStatus(terrain), () => ReadStreamWhy(terrain), telemetry!, pinned,
-            () => ReadLookDirection(state));
+            () => ReadLookDirection(state), point => InspectAt(terrain, point),
+            (value, blocked) => SetSpectate(value, terrain, state, blocked || _caveExitWaypoint >= 0 ||
+                ReadInventory()?.Construction is { } construction && NeedsConstructionPresentation(construction)));
         void ReportConsole(string command, string? result)
         {
             if (result is null || terminal is null)
@@ -264,7 +267,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var renderer = renderHost.Active;
             var windowState = window.Read();
             var focused = windowState.Focused && !input.TransitionLoss;
-            var consoleInput = !_testMenu && !_inventoryOpen && !_constructionOpen && terminal?.Handle(input, focused,
+            var consoleInput = !session.Menu.IsOpen && !_testMenu && !_inventoryOpen && !_constructionOpen && terminal?.Handle(input, focused,
                 WorldConsole.Fits(windowState.ClientWidth, windowState.ClientHeight)) == true;
             if (consoleInput)
             {
@@ -280,16 +283,23 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 else
                     comparisonView ??= (state, _environmentTick);
             }
-            if (freeTestWorld && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.F2))
+            if (freeTestWorld && !session.Menu.IsOpen && !IsSpectating && !_inventoryOpen && !_constructionOpen &&
+                PrototypeMenu.Pressed(input, InputControl.F2))
             {
                 _testMenu = !_testMenu;
                 if (!_testMenu && overlay is not null)
                     overlay.Menu = null;
                 previousFrame = Stopwatch.GetTimestamp();
             }
-            if (!scripted && !_testMenu && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.Escape))
-                return;
-            if (PrototypeMenu.Pressed(input, InputControl.F1))
+            var stopSpectate = IsSpectating && PrototypeMenu.Pressed(input, InputControl.Escape);
+            if (stopSpectate)
+            {
+                StopSpectating();
+                input = input with { Events = [], HeldControls = [] };
+            }
+            var sessionMenu = session.Menu.IsOpen || (!scripted && focused && !consoleInput && !stopSpectate &&
+                !_testMenu && !_inventoryOpen && !_constructionOpen && PrototypeMenu.Pressed(input, InputControl.Escape));
+            if (!sessionMenu && PrototypeMenu.Pressed(input, InputControl.F1))
                 _debug = !_debug;
             var rendered = renderer.Read();
             if (!scripted && rendered is { Lifecycle: RendererLifecycle.Stopping or RendererLifecycle.Stopped,
@@ -297,19 +307,26 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 (token.IsCancellationRequested || window.Read().Phase is HostWindowPhase.Closing or HostWindowPhase.Closed))
                 return;
             var drawable = RequireHealthyRenderer(rendered).Surface == RenderSurfaceState.Drawable;
-            ReportProfile(profile?.Observe(renderer, rendered, drawable && focused && !_testMenu && !_inventoryOpen));
+            ReportProfile(profile?.Observe(renderer, rendered, drawable && focused && !sessionMenu && !_testMenu && !_inventoryOpen));
             if (telemetry is { IsActive: true })
             {
                 var command = telemetry.IsTracing ? "profile trace" : "stream watch";
-                var result = drawable && focused && !_testMenu && !_inventoryOpen && !_constructionOpen
+                var result = drawable && focused && !sessionMenu && !_testMenu && !_inventoryOpen && !_constructionOpen
                     ? telemetry.Observe(renderer, terrain.Statistics, rendered)
                     : telemetry.Interrupt();
                 ReportConsole(command, result);
             }
             if (profile?.IsComparing != true)
                 comparisonView = null;
-            mouse?.Update(drawable && focused && !_testMenu && !_inventoryOpen && _buildRefund is null && !consoleInput,
+            mouse?.Update(drawable && focused && !sessionMenu && !_testMenu && !_inventoryOpen && _buildRefund is null && !consoleInput && !stopSpectate,
                 ref _yaw, ref _pitch);
+            if (sessionMenu)
+            {
+                if (await HandleSessionMenuAsync(session, terrain, input, drawable && focused, token).ConfigureAwait(false))
+                    return;
+                previousFrame = Stopwatch.GetTimestamp();
+                continue;
+            }
             if (!drawable || (!scripted && !focused))
                 continue;
 
@@ -322,8 +339,44 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var now = Stopwatch.GetTimestamp();
             var frameTime = Stopwatch.GetElapsedTime(previousFrame, now);
             previousFrame = now;
-            if (!scripted && UpdateConstructionPresentation(terrain, renderer, state))
+            if (!scripted && !IsSpectating && UpdateConstructionPresentation(terrain, renderer, state))
                 continue;
+            if (HasQueuedSaveVerification)
+            {
+                ReportConsole("save verify", "Verifying checkpoint…");
+                ReportConsole("save verify", await VerifyQueuedSaveAsync(token).ConfigureAwait(false));
+                continue;
+            }
+            if (_queuedConsoleTeleport is { } target)
+            {
+                _queuedConsoleTeleport = null;
+                if (IsSpectating || _caveExitWaypoint >= 0 || ReadInventory()?.Items.Load.MovementHeld == true)
+                {
+                    ReportConsole("teleport", "Teleport unavailable while movement is held.");
+                    continue;
+                }
+                ReportConsole("teleport", "Teleporting…");
+                var departure = state.Position;
+                var relocated = await RelocateConsoleAsync(terrain, renderer, state, target, token).ConfigureAwait(false);
+                if (relocated.Pose is { } pose)
+                {
+                    state = pose;
+                    _lastTeleportDeparture = departure;
+                }
+                ReportConsole("teleport", relocated.Result);
+                continue;
+            }
+            if (_queuedConsoleOre is { } count)
+            {
+                _queuedConsoleOre = null;
+                ReportConsole("give", await GiveConsoleOreAsync(count, token).ConfigureAwait(false));
+                continue;
+            }
+            if (IsSpectating)
+            {
+                RenderSpectate(terrain, renderer, state, input, frameTime, !consoleInput);
+                continue;
+            }
             if (!scripted && !_inventoryOpen && await HandleConstructionAsync(terrain, renderer, state, input, token).ConfigureAwait(false))
                 continue;
             if (!scripted && !_constructionOpen && await HandleInventoryAsync(terrain, state, input, token).ConfigureAwait(false))
@@ -500,8 +553,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             }
             if (overlay is not null)
             {
-                overlay.Menu = (_constructionOpen ? _buildPanel : null) ?? CurrentNotice ?? (loadHeld ? "Movement held by carried load\nI inventory" :
+                var sidebar = (_constructionOpen ? _buildPanel : null) ?? CurrentNotice ?? (loadHeld ? "Movement held by carried load\nI inventory" :
                     ActiveCaveClimbHint ?? (prepared is null ? $"Movement held\n{status}" : cave is null ? null : CaveHint(terrain, state)));
+                var tracked = _consoleMarks?.ReadTrackedHint();
+                overlay.Menu = tracked is null ? sidebar : sidebar is null ? tracked : $"{sidebar}\n\n{tracked}";
                 var statistics = terrain.Statistics;
                 overlay.Performance = _debug ? FormattableString.Invariant(
                     $"{(_testBuild is null ? "" : $"Test World | {PlanetName}\nBuild {_testBuild}\nF2 test actions\n")}Seed {Descriptor.Seed} / gen {Descriptor.GeneratorVersion}\n{_selection!.MeshCount} regions / LOD 1/2 {_fineBricks}/{_selection.Requests.Length - _fineBricks}\nCPU {statistics.Used.CpuBytes / 1048576d:F1} / GPU {statistics.Used.NativeBytes / 1048576d:F1} MiB\nFrame {frameTime.TotalMilliseconds:F1} ms / {status}\nX {state.Position.X:F1} Y {state.Position.Y:F1} Z {state.Position.Z:F1} / origin {_published.View.Frame.Revision}") : null;
@@ -532,7 +587,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
         Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null,
         bool recovery = false, long? operationStarted = null, long handoffStarted = 0,
-        R09EarlyPrebuild? earlyPrebuild = null, FlightReturnReadback? warpReturn = null)
+        R09EarlyPrebuild? earlyPrebuild = null, FlightReturnReadback? warpReturn = null,
+        ConsoleRelocationAttempt? relocation = null)
     {
         var started = operationStarted ?? Stopwatch.GetTimestamp();
         var timing = returnTerrain?.Timing ?? StartR09(edit is not null ? VolumeWorkClass.FirstEdit :
@@ -557,6 +613,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             }
             view = terrain.ChangeView(frame, terrain.View.RendererEpoch);
         }
+        if (relocation is not null && view == relocation.Request.SourceTerrain.View)
+            return TerrainPublicationOutcome.Busy;
         if (!terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Movement remained open across a terrain view change.");
         var mask = ++_sequence;
@@ -571,7 +629,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             SkyHandoffDiagnostics.Mark("near-mask-submit", mask);
             RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, SkyMeasurements.Submit(camera).Sky));
         }
-        var selection = returnTerrain?.Selection ?? SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
+        var selection = returnTerrain?.Selection ?? relocation?.Selection ??
+            SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
         if (_selection is null || selection.Minimum != _selection.Minimum)
             _windows++;
         var revision = _published.TerrainRevision;
@@ -586,7 +645,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 started, token, timing).ConfigureAwait(false);
             if (result != VolumeAdmission.Accepted || work is null)
             {
-                if (edit is not null)
+                if (edit is not null || relocation is not null)
                     return EditAdmissionOutcome(result);
                 throw TerrainAdmissionFailure(result);
             }
@@ -619,19 +678,19 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (!await generated.ConfigureAwait(false))
         {
             token.ThrowIfCancellationRequested();
-            if (edit is not null)
+            if (edit is not null || relocation is not null)
                 return TerrainPublicationOutcome.Rejected;
             throw new InvalidOperationException("Terrain generation did not complete.");
         }
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
-            pauseWhileMinimized: true, r09Presentation: timing is null ? null :
+            pauseWhileMinimized: relocation is null, r09Presentation: timing is null ? null :
                 new(timing.Path, "mask", terrain, view, work.Generation, mask)).ConfigureAwait(false);
         if (timing is null)
         {
             var packSample = BiomeMeasurements.StartBuild();
             var upload = renderer.TryStageVolumeTerrain(work.Generation);
             BiomeMeasurements.WriteBuild("near-pack", packSample);
-            if (edit is not null)
+            if (edit is not null || relocation is not null)
             {
                 if (upload == MeshReplacementSubmissionResult.Backpressure)
                     return TerrainPublicationOutcome.Busy;
@@ -652,10 +711,23 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             await BeginAsync(token).ConfigureAwait(false);
         }
         var commit = await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false);
-        var prepared = renderer.TryPrepareVolumePublication(work.Generation, commit, [], out var preparation);
+        var preparation = MeshReplacementSubmissionResult.Accepted;
+        PlanetWalkState? relocated = null;
+        PreparedBarrierPublication? prepared;
+        if (relocation is null)
+            prepared = renderer.TryPrepareVolumePublication(work.Generation, commit, [], out preparation);
+        else
+        {
+            if (token.IsCancellationRequested)
+            {
+                Finish(commit);
+                token.ThrowIfCancellationRequested();
+            }
+            prepared = PrepareConsoleRelocation(relocation, renderer, work.Generation, commit, out relocated);
+        }
         if (prepared is null)
         {
-            if (edit is not null)
+            if (edit is not null || relocation is not null)
             {
                 Finish(commit);
                 // The renderer can report StaleGeneration for any rejected Core preparation.
@@ -665,7 +737,22 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             throw new InvalidOperationException($"Terrain publication was rejected ({preparation}).");
         }
         if (Finish(commit, prepared).Status != BarrierStatus.Committed)
+        {
+            if (relocation is not null)
+                return TerrainPublicationOutcome.Stale;
             throw new InvalidOperationException("Terrain publication did not commit.");
+        }
+        if (relocation is not null)
+        {
+            if (relocated is not { } pose ||
+                _ports.Committed.Read().Root is not VolumeWorldRoot root || root.Player != pose ||
+                root.Terrain.Generation != work.Generation || root.Terrain.View != view)
+                throw new InvalidOperationException("Terrain relocation committed without its verified pose.");
+            relocation.CommittedPose = pose;
+            position = pose.Position;
+            heading = pose.Heading;
+            camera = Camera(view, position, heading);
+        }
         using (var lease = terrain.TryRead() ?? throw new InvalidOperationException("Published terrain unavailable."))
         {
             _published = lease.Info;

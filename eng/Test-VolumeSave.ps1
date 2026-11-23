@@ -19,18 +19,24 @@ function Invoke-VolumePhase([string]$Phase) {
         $output -cnotcontains 'PASS: WYU WP11 exploration, rebase and native shutdown.') {
         throw "Volume phase $Phase failed (exit $exitCode)."
     }
+    if ($Phase -ceq 'init' -and $output -cnotcontains 'PASS: save verify matched committed generation 2.') {
+        throw 'Volume init did not verify the committed save.'
+    }
     return $checkpoints[0]
 }
 
 $expected = Invoke-VolumePhase 'init'
-if ((Invoke-VolumePhase 'restore') -cne $expected) {
-    throw 'Reopened checkpoint changed after normal exit.'
-}
 $slots = @(Get-ChildItem -LiteralPath (Join-Path $root 'v2') -Directory)
 if ($slots.Count -ne 1) { throw 'Expected exactly one reserved slot.' }
 $a = Join-Path $slots[0].FullName 'volume.a'
 $b = Join-Path $slots[0].FullName 'volume.b'
 $intent = Join-Path $slots[0].FullName 'volume.intent'
+if (!(Test-Path -LiteralPath $intent -PathType Leaf)) {
+    throw 'Save verification removed the committed write intent.'
+}
+if ((Invoke-VolumePhase 'restore') -cne $expected) {
+    throw 'Reopened checkpoint changed after normal exit.'
+}
 $before = @((Get-FileHash -LiteralPath $a).Hash, (Get-FileHash -LiteralPath $b).Hash)
 $beforeIntent = if (Test-Path -LiteralPath $intent) { (Get-FileHash -LiteralPath $intent).Hash } else { '' }
 $log = Join-Path $root 'interrupt.stdout'
