@@ -44,23 +44,26 @@ try
     }
     var start = Stopwatch.GetTimestamp();
     begin("to-orbit", start);
-    var allocated = GC.GetAllocatedBytesForCurrentThread();
-    mark("previous-stop-begin", 0);
-    mark("owner-create-end", 0);
-    mark("far-frame-submit", 17);
-    var stageBytes = GC.GetAllocatedBytesForCurrentThread() - allocated;
+    string[] expectedStages = ["previous-stop-begin", "previous-props-stopped", "previous-renderer-dispose-begin",
+        "previous-renderer-disposed", "owner-create-end", "far-frame-submit"];
+    var allocatedBeforeStages = GC.GetAllocatedBytesForCurrentThread();
+    foreach (var stage in expectedStages)
+        mark(stage, stage == "far-frame-submit" ? 17UL : 0);
+    var stageBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBeforeStages;
     var end = Stopwatch.GetTimestamp();
     Require(output.GetStringBuilder().Length == 0, "Stage logging wrote output inside the native acceptance interval.");
     Require(stageBytes == 0, "Stage logging allocated after preparation.");
     complete(2, 17, 99, end);
     var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-    Require(lines.Length == (enabled ? 3 : 0), "Stage count does not match the opt-in mode.");
+    Require(lines.Length == (enabled ? expectedStages.Length : 0), "Stage count does not match the opt-in mode.");
     long previous = start;
-    foreach (var line in lines)
+    for (var index = 0; index < lines.Length; index++)
     {
+        var line = lines[index];
         Require(line.StartsWith("PACKAGE G MEASURE ", StringComparison.Ordinal), "Unexpected stage output format.");
         using var json = JsonDocument.Parse(line["PACKAGE G MEASURE ".Length..]);
         var row = json.RootElement;
+        Require(row.GetProperty("stage").GetString() == expectedStages[index], "Diagnostic stage order changed.");
         var timestamp = row.GetProperty("timestamp").GetInt64();
         Require(timestamp >= previous && timestamp <= end, "Stage ordering or native endpoint correlation is invalid.");
         Require(row.GetProperty("start").GetInt64() == start && row.GetProperty("end").GetInt64() == end,

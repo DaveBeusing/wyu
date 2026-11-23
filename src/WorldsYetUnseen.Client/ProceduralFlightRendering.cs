@@ -153,8 +153,10 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
         SkyHandoffDiagnostics.Mark("previous-stop-begin");
         if (Props is { } props)
             await props.StopAsync().ConfigureAwait(false);
+        SkyHandoffDiagnostics.Mark("previous-props-stopped");
         var renderer = Current;
         var deadline = runtime.StopControl.RequestStop(HostStopReason.ExternalCancellation);
+        SkyHandoffDiagnostics.Mark("previous-renderer-dispose-begin");
         if (renderer is not null)
             await renderer.DisposeAsync().ConfigureAwait(false);
         SkyHandoffDiagnostics.Mark("previous-renderer-disposed");
