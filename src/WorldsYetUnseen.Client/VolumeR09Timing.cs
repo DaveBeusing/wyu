@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Groundwork.Core;
 using Groundwork.Rendering;
 using Groundwork.Rendering.D3D12;
@@ -65,6 +66,15 @@ internal sealed partial class VolumeExploration
             throw new InvalidOperationException($"R09 did not consume the {timing.Path} receipt at BeginTick.");
         Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
 
+        WriteR09Completion(timing, terrain, generation, frame, view, submitted, presented, handoffStarted, begin);
+    }
+
+    // Compile the reporting code only after the measured BeginTick consumes the receipt.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void WriteR09Completion(R09Timing timing, VolumeStreamingCoordinator terrain,
+        ulong generation, ulong frame, VolumeViewIdentity view, long submitted, long presented,
+        long handoffStarted, BarrierStamp begin)
+    {
         VolumeStreamingEvent? receipt = null, opened = null, maskReceipt = null;
         while (terrain.TryReadEvent(out var entry))
         {
