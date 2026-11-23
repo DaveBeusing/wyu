@@ -339,7 +339,10 @@ internal static partial class GameHost
             var guidance = selected == 0 ? (freeTestWorld ? "Up for Far Horizon features\n" : "Up for Far Horizon\n") : "";
             var menuTitle = freeTestWorld ? "Free Test World" : "Planet worlds";
             var slotNotice = selected == noticeSelection ? notice : null;
-            overlay.Menu = $"WYU\n\n{menuTitle}\n\n> {label}\n\n{guidance}Up / Down to choose\nEnter to open\nEsc to exit\n\n{slotNotice}";
+            const string controls = "Up / Down to choose\nEnter to open\nEsc to exit";
+            overlay.Menu = slotNotice is null
+                ? $"WYU\n\n{menuTitle}\n\n> {label}\n\n{guidance}{controls}"
+                : $"WYU · {menuTitle}\n> {label}\n\n{slotNotice}\n\n{controls}";
             await Task.Delay(16, token).ConfigureAwait(false);
             var input = window.Capture();
             if (PrototypeMenu.Pressed(input, InputControl.Escape))
