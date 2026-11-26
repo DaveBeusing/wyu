@@ -176,5 +176,6 @@ setup, locked restore, Release builds, smoke modes, and the Windows installer.
 ## Roadmap
 
 - [Shared Groundwork and WYU roadmap](https://github.com/DaveBeusing/Groundwork/blob/master/docs/roadmap.md) tracks work packages and acceptance evidence across both repositories.
+- [Reference measurement policy](docs/reference-measurement-policy.md) defines the evidence required for merges, previews and production activation.
 - [WYU roadmap](docs/Roadmap.html) is the game's roadmap in HTML.
 - [World vision](docs/World_Vision_Consolidated.md) describes the longer-term game design.

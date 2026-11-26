@@ -52,6 +52,10 @@ pair, alternates order in five measured pairs, and exports frame and phase CSVs.
 PresentMon GPU Busy comes from ETW GPU scheduling events. D3D12 timestamp-query
 qualification is tracked separately.
 
+Reference-class timing and pressure are production qualification gates under the
+[reference measurement policy](reference-measurement-policy.md). The functional
+region, flight and checkpoint checks above still apply.
+
 For an instrumented renderer that emits `TERRAIN GPU <sequence> <milliseconds>`,
 set `WYU_PACKAGE_E_MEASURE=1`, `WYU_WP13_MEASURE=on` and
 `WYU_PACKAGE_E_TIMESTAMP_PAIRS=1`, then run `--volume-smoke 42 hardware`.
