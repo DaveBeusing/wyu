@@ -80,6 +80,9 @@ internal sealed partial class VolumeExploration
             }
             if (!readback)
                 RequireSmokeSave(await SaveAsync(terrain, token).ConfigureAwait(false), 1);
+            if (SkyMeasurements.Enabled)
+                await MeasureSkyPhaseAsync(terrain, renderHost.Active,
+                    Camera(terrain.View, player.Position, player.Heading), "surface", false, _environmentTick, token).ConfigureAwait(false);
             var abort = phase == "abort";
             var flight = await FlyAsync(terrain, renderHost, player, anchor, true, token, abortAtFar: abort).ConfigureAwait(false);
             if (readback)

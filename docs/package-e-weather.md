@@ -5,6 +5,13 @@ Far Horizon advances its clock at accepted walking and flight steps. A day is
 determine tint and sky color. Fog fades between 32 and 72 metres above the
 reference radius. The orbital renderer uses the same daylight and sky.
 
+The stateless `wyu.far-horizon.daylight.v1` presentation profile adds warm dawn
+and dusk, neutral daylight and a darker cool night. Its elevation curves are
+shared by fallback tint/fog and optional WP15 direct/ambient sunlight. The
+weather-density recipe, 16-entry cache, clock and save format remain unchanged.
+See [Package G](package-g-sky.md) for profile values, verification and pending
+owner choices.
+
 The recipe `wyu.reference-weather.v1` samples base elevation and meadow weight
 at the centres of 256 m Cartesian regions. The cache retains at most sixteen
 endpoints across the current and next 60-tick segments. Starting with the seed,

@@ -118,3 +118,26 @@ jobs:
           }
           & ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $env:GROUNDWORK_ARTIFACT_DIR -ExpectedManifestSha256 $env:GROUNDWORK_EXPECTED_MANIFEST_SHA256 -ExpectedSourceCommit $env:GROUNDWORK_EXPECTED_HEAD_SHA -ExpectedVersion $env:GROUNDWORK_EXPECTED_VERSION -SaveSmoke -PrototypeSaveSmoke
           if ($LASTEXITCODE -ne 0) { throw 'Verified consumer gate failed.' }
+
+      - name: Verify Orbit material readiness without a GPU
+        run: ./eng/Test-OrbitMaterialReadiness.ps1
+
+      - name: Verify buffered sky measurement events without a GPU
+        run: ./eng/Test-SkyMeasurementBuffer.ps1
+
+      - name: Verify exact presentation acknowledgement without polling
+        run: ./eng/Test-SkyPresentationWait.ps1
+
+      - name: Verify sky runner mode identity and failure evidence without a GPU
+        run: ./eng/Test-ReferenceSkyRunner.ps1
+
+      - name: Verify Handoff diagnostic endpoints without a GPU
+        run: ./eng/Test-SkyHandoffDiagnostics.ps1
+
+      - name: Verify owned GPU collector failure handling with a stub
+        run: ./eng/Test-ReferenceGpuDiagnostics.ps1
+
+      - name: Verify bounded scheduling trace ownership and runner integration without ETW
+        run: |
+          ./eng/Test-ReferenceSchedulingTrace.ps1
+          ./eng/Test-ReferenceSchedulingRunner.ps1

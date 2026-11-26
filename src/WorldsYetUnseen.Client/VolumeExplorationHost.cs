@@ -45,7 +45,7 @@ internal static partial class GameHost
         var token = stage.Token;
         Task<bool> watchClose = Task.FromResult(false);
         D3D12Renderer? renderer = null;
-        var measure = measureSunlight || scripted && BiomeMeasurements.Enabled;
+        var measure = measureSunlight || scripted && (BiomeMeasurements.Enabled || SkyMeasurements.Enabled);
         var measureR09 = scripted && flightSmoke && saveSmoke == "flight" &&
             Environment.GetEnvironmentVariable("WYU_R09_LATENCY") == "1";
         using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure, measureR09)
@@ -66,7 +66,8 @@ internal static partial class GameHost
             diagnostics?.Enter("WorldSelection");
             await window.InitializeAsync(context, token).ConfigureAwait(false);
             await window.StartAsync(token).ConfigureAwait(false);
-            if ((measureSunlight || orbitSmoke && OrbitPbrMeasurements.Enabled) && !AlphaWindowSize.TryApply((1920, 1080)))
+            if ((measureSunlight || orbitSmoke && OrbitPbrMeasurements.Enabled || SkyMeasurements.Enabled && !SkyMeasurements.Smoke) &&
+                !AlphaWindowSize.TryApply((1920, 1080)))
                 throw new InvalidOperationException("The renderer probe requires a 1920x1080 client area.");
             watchClose = WatchWindowCloseAsync(window, stage);
             var settings = settingsDirectory is null ? AlphaSettings.Defaults : new AlphaSettingsStore(settingsDirectory).Load().Value;

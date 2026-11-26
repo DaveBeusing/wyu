@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using Groundwork.Rendering;
 using Groundwork.Rendering.D3D12;
+using WorldsYetUnseen.Gameplay;
 
 namespace WorldsYetUnseen.Client;
 
@@ -60,15 +62,50 @@ internal static partial class DesktopSmoke
         if (diagnostics.DebugLayerEnabled)
         {
             var report = diagnostics.DebugMessages;
+            var preview = ReferenceDaylight.PreviewEnabled;
+            var retainedPreviewObjects = preview && report is not null ? ReadRetainedPreviewObjects(report) : 0;
             Console.WriteLine($"D3D12 live-object report: warnings={report?.Warnings}, errors={report?.Errors}, " +
                 $"corruption={report?.Corruption}, discarded={report?.Discarded}, " +
                 $"HRESULT=0x{report?.LiveObjectReportResult:X8}, live child objects={report?.LiveChildObjects}, " +
-                $"retained session queue={report?.RetainedSessionQueue}.");
-            var expectedChildren = allowRetainedSessionQueue && report?.RetainedSessionQueue == true ? 1 : 0;
-            if (report is not { Errors: 0, Corruption: 0, Discarded: 0, LiveObjectReportResult: 0 } ||
-                report.LiveChildObjects != expectedChildren)
+                $"retained session queue={report?.RetainedSessionQueue}" +
+                (preview ? $"; retained preview objects={retainedPreviewObjects}." : "."));
+            var maximumPreviewObjects = preview ? PreviewObjectLimit() : 0;
+            if (!HasCleanDebugSettlement(report, allowRetainedSessionQueue, retainedPreviewObjects, maximumPreviewObjects))
                 throw new InvalidOperationException("The active D3D12 debug layer did not report clean device settlement.");
         }
+    }
 
+    // Direct can retain one root and one PSO. Lookup can keep one root and two
+    // PSOs, plus one parked texture and its descriptor heap when reuse is requested.
+    private static int PreviewObjectLimit() =>
+        Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE") == "1"
+            ? Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES") == "1" ? 5 : 3
+            : 2;
+
+    internal static bool HasPreviewObjectDiagnostics => PreviewObjectCountProperty() is not null;
+
+    private static PropertyInfo? PreviewObjectCountProperty()
+    {
+        var property = typeof(D3D12DebugMessages).GetProperty("RetainedSessionPreviewObjects",
+            BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+        return property is { GetMethod.IsPublic: true } && property.PropertyType == typeof(int) ? property : null;
+    }
+
+    private static int ReadRetainedPreviewObjects(D3D12DebugMessages report)
+    {
+        if (PreviewObjectCountProperty()?.GetValue(report) is not int count)
+            throw new InvalidOperationException("The paired Groundwork Preview renderer did not report classified retained session objects.");
+        return count;
+    }
+
+    private static bool HasCleanDebugSettlement(D3D12DebugMessages? report, bool allowRetainedSessionQueue,
+        int retainedPreviewObjects, int maximumPreviewObjects)
+    {
+        if (report is not { Errors: 0, Corruption: 0, Discarded: 0, LiveObjectReportResult: 0 })
+            return false;
+        var expectedQueue = allowRetainedSessionQueue && report.RetainedSessionQueue ? 1 : 0;
+        var previewLimit = expectedQueue == 1 ? maximumPreviewObjects : 0;
+        return retainedPreviewObjects >= 0 && retainedPreviewObjects <= previewLimit &&
+            report.LiveChildObjects == expectedQueue + retainedPreviewObjects;
     }
 }

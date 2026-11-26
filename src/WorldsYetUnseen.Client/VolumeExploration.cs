@@ -150,6 +150,18 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (placementGate is not null)
             Props!.PlacementGateForSmoke = placementGate.Task;
         var state = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
+        if (scripted && ReferenceDaylight.PreviewEnabled && Environment.GetEnvironmentVariable("WYU_DAWN_SMOKE") == "1")
+        {
+            // This presentation-only route does not enter the movement gate test.
+            // Release its optional placement so the combined preset can render props.
+            if (placementGate is not null)
+            {
+                Props!.PlacementGateForSmoke = null;
+                placementGate.SetResult();
+            }
+            await VerifyTwilightAsync(terrain, renderHost.Active, state, token).ConfigureAwait(false);
+            return;
+        }
         if (scripted && Environment.GetEnvironmentVariable("WYU_WP15_PROBE") is "route" or "measure")
         {
             using var composition = FlipProbeClip.ApplyIfRequested();
@@ -501,7 +513,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             var frame = ++_sequence;
             OrbitMaterialHost?.RetryMaterials(renderer, frame);
             var presentStarted = scripted ? BiomeMeasurements.Start() : 0;
-            RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, frame, camera));
+            RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, frame, SkyMeasurements.Submit(camera)));
             var scriptedProps = scripted ? Props : null;
             if (scriptedProps is not null || presentStarted != 0)
                 await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= frame, token).ConfigureAwait(false);
@@ -613,7 +625,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (overlay is not null)
             overlay.Menu = ActiveCaveClimbHint ?? $"Loading planet terrain\n\n{PlanetName}\nSeed {Descriptor.Seed}\nGenerator {Descriptor.GeneratorVersion}\n\nWaiting for safe collision and presentation";
         if (rendererReady is null)
-            RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, camera.Sky));
+        {
+            SkyHandoffDiagnostics.Mark("near-mask-submit", mask);
+            RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, SkyMeasurements.Submit(camera).Sky));
+        }
         var selection = returnTerrain?.Selection ?? relocation?.Selection ??
             SelectTerrain(coverageCenter ?? position, heading, edit, supportCells);
         if (_selection is null || selection.Minimum != _selection.Minimum)
@@ -651,7 +666,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                 BiomeMeasurements.Write("near-startup-wait", startupStarted);
                 if (timing is not null && handoffStarted != 0)
                     timing.RecoveryMask = (mask, Stopwatch.GetTimestamp());
-                RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, camera.Sky));
+                SkyHandoffDiagnostics.Mark("near-mask-submit", mask);
+                RequireFrame(renderer.TrySubmitVolumeMask(view, mask, camera.ClearColor, SkyMeasurements.Submit(camera).Sky));
             }
             catch
             {
@@ -747,7 +763,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         // Later cuts can reuse resident maps without admitting any optional copy ahead of first content.
         OrbitMaterialHost?.PublishSurfaceMaterials(renderer, terrain.WorldIdentity, _published, presented: false);
         warpReturn?.Readback.Arm("near-after-return", sequence);
-        RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, camera));
+        SkyHandoffDiagnostics.Mark("near-content-submit", sequence);
+        RequireMesh(renderer.TrySubmitVolumeTerrain(work.Generation, sequence, SkyMeasurements.Submit(camera)));
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
             pauseWhileMinimized: true, r09Presentation: timing is null ? null :
                 new(timing.Path, "content", terrain, view, work.Generation, sequence)).ConfigureAwait(false);
@@ -929,18 +946,19 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
     private VolumeCamera ApplyNearEnvironment(VolumeCamera camera, ulong tick, double fraction)
     {
         var weather = Atmosphere(camera.Position, tick, fraction);
-        return ApplySunlight(ApplySky(ApplyAtmosphere(camera, weather), tick, fraction), tick, fraction);
+        return ApplySunlight(ApplySky(ApplyAtmosphere(camera, weather), tick, fraction, weather), tick, fraction);
     }
 
     private VolumeCamera ApplySunlight(VolumeCamera camera, ulong tick, double fraction) =>
         _weather is not null && (orbitDemo ? ReferenceSunlight.OrbitEnabled : ReferenceSunlight.Enabled)
             ? ReferenceSunlight.Apply(camera, tick, fraction, orbitDemo) : camera;
 
-    private VolumeCamera ApplySky(VolumeCamera camera, ulong tick, double fraction) =>
+    private VolumeCamera ApplySky(VolumeCamera camera, ulong tick, double fraction, ReferenceAtmosphere? weather) =>
         reference is not null && ReferenceSky.Enabled ? camera with
         {
             Sky = ReferenceSky.Create(camera.Position, camera.Forward, camera.Up, camera.FieldOfView,
-                Descriptor.Seed, tick, fraction, orbitDemo ? OrbitDemoPreset.SunDirection(tick, fraction) : null),
+                Descriptor.Seed, tick, fraction, weather?.FogOpacity ?? 0,
+                orbitDemo ? OrbitDemoPreset.SunDirection(tick, fraction) : null),
         } : camera;
 
     private static VolumeCamera ApplyAtmosphere(VolumeCamera camera, ReferenceAtmosphere? weather)
