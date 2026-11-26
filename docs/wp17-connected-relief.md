@@ -15,3 +15,7 @@ Run eng/Test-ConnectedRelief.ps1 after a verified Windows Release build. The two
 On NVIDIA RTX PRO 5000 Blackwell Generation Laptop GPU (driver 32.0.15.9653), the route descended and mined four ore, then reopened revision 2 with matching player pose and overlay digest in a fresh process. It climbed to supported surface, completed the orbital route and returned to the rebuilt near terrain. The edit revision and inventory survived landing at tick 20755. Debug Layer and DRED were enabled, and final shutdown reported zero errors, corruption or live native child objects.
 
 Visual comparison of fixed ground/orbit transects and the reference-class performance gates remain open. WP15 default activation and Groundwork #89 remain open.
+
+The [reference measurement policy](reference-measurement-policy.md) governs
+current merge, preview and production decisions. The published-route and
+save-compatibility checks still apply to the relevant candidate.

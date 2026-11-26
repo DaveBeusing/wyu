@@ -8,7 +8,7 @@ Rocks, scree and trees have a 128 m render cutoff and separate LOD enter and exi
 
 Run the guarded NVIDIA route after the verified consumer build with `pwsh -File eng/Test-ReferenceProps.ps1`. The smoke holds placement while 12 movement ticks commit, rejects reuse under shifted coverage or changed LOD, and checks native draws from mixed LODs, cell staging and retirement, and zero payload uploads during the camera sweep. It also validates the NVIDIA adapter, Debug Layer, DRED and native shutdown.
 
-The full WP16 acceptance in WYU #44 includes save/reload parity, dedicated edit and hysteresis cases, the dense stress fixture and reference-class performance budgets. Those remain open.
+The full WP16 acceptance in WYU #44 includes save/reload parity, dedicated edit and hysteresis cases, the dense stress fixture and reference-class performance budgets. Those remain open. The [reference measurement policy](reference-measurement-policy.md) keeps the applicable functional and safety checks binding for merge and preview and the reference-class budgets binding for production qualification.
 
 ## Workstation evidence
 

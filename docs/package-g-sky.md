@@ -28,5 +28,7 @@ compares the upper two thirds. The outward views use controlled solar and night
 inputs to isolate the disk and stars. RGB must match within one code value and
 the bright solar centroid must remain within one pixel. Groundwork separately
 qualifies scattering, limb and 1080p rebase in its D3D12 readback tests.
-Reference-class GPU, CPU, memory and handoff
-performance remain separate acceptance gates.
+Reference-class GPU, CPU, memory and handoff performance remain production
+qualification gates. The [reference measurement policy](reference-measurement-policy.md)
+defines how to report them for merge and unqualified preview. The paired
+hardware and WARP functional checks above still apply.
