@@ -60,6 +60,13 @@ toggle F1 diagnostics, and **time** and **fog** where the world supports weather
 Use **time live** to return to the world clock. Console overrides apply during
 the current exploration session and are left out of the save.
 
+Use **render** to see which rendering features are active. **render sky off**
+skips the sky pass, **render sky on** enables it, and **render sky auto**
+restores the startup setting. **render textures off** uses untextured terrain
+materials in Orbit sessions with PBR enabled. **render textures on** resumes
+texture streaming. **render clouds** reports availability. The render overrides
+apply to the current exploration session.
+
 **preset save <name>** stores the three presentation settings for this session.
 Use **preset show <name>** to read them, **preset diff <a> <b>** to see their
 differences, and **preset load <name>** to apply them. **preset list** shows

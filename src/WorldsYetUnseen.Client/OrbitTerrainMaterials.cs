@@ -113,10 +113,35 @@ internal sealed class OrbitTerrainMaterials
         return true;
     }
 
-    internal Scheduling Publish(D3D12TextureHandoff stream, D3D12TextureView view, bool orbital)
+    internal MaterialPalette CreatePalette(ulong revision, bool texturesEnabled)
     {
-        if (!stream.PublishTerrainAppearance(view, _palette, _targets))
+        if (texturesEnabled)
+            return new(revision, _palette.Entries);
+
+        var entries = _palette.Entries.ToArray();
+        for (var i = 0; i < entries.Length; i++)
+        {
+            var material = entries[i].Descriptor;
+            entries[i] = entries[i] with
+            {
+                Descriptor = new(material.BaseColor, material.Metallic, material.Roughness, material.AmbientOcclusion,
+                    material.Emissive, material.NormalStrength),
+            };
+        }
+        return new(revision, entries);
+    }
+
+    internal bool PublishPalette(D3D12TextureHandoff stream, D3D12TextureView view, MaterialPalette? palette,
+        bool texturesEnabled) =>
+        stream.PublishTerrainAppearance(view, palette ?? _palette, texturesEnabled ? _targets : []);
+
+    internal Scheduling Publish(D3D12TextureHandoff stream, D3D12TextureView view, bool orbital,
+        MaterialPalette? palette, bool texturesEnabled)
+    {
+        if (!PublishPalette(stream, view, palette, texturesEnabled))
             return Scheduling.Stopped;
+        if (!texturesEnabled)
+            return Scheduling.Scheduled;
         // Coarse backing comes first on both renderers. The fixed orbit proxy
         // stays coarse, while the walking renderer promotes each resident map.
         var distance = orbital ? MipPolicy.DemoteBeyond : 0;

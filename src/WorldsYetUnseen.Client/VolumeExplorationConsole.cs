@@ -50,6 +50,14 @@ internal sealed partial class VolumeExploration
             new("stats", "stats [on|off]", "F1 diagnostics", value => OutsideComparison(value, SetDiagnostics), "on", "off")
                 { CurrentValue = ReadDiagnostics, Example = "stats on" },
         };
+        commands.Add(new("render", "render [feature]", "Rendering status and controls",
+            value => SetRenderOption(value, Measuring()), RenderFeatures)
+        {
+            CurrentValue = ReadRenderOptions,
+            CompleteValue = CompleteRenderOption,
+            UsageDetails = "render sky [auto|on|off]\nrender textures [on|off]\nrender clouds",
+            Example = "render sky off",
+        });
         if (_weather is not null)
         {
             commands.Add(new("time", "time [day|night|live]", "Preview the sky and lighting", value => TrackPresentation(value, SetTimePreview), "day", "night", "live")
