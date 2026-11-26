@@ -3,8 +3,38 @@
 Build and run from a clean WYU checkout on Windows with the .NET 10 SDK,
 PowerShell 7, and GitHub CLI. The engine is supplied by the immutable
 Groundwork NuGet archive. WYU pins all ten packages at
-`0.1.0-dev.45079399733.1` and commits the SDK-generated lockfile.
+`0.1.0-dev.45898177493.1` and commits the SDK-generated lockfile.
 The renderer runs on Windows x64 and requires a D3D12 hardware adapter.
+
+## Twilight Preview installer
+
+On Windows x64, run the Twilight Preview setup and open
+**Worlds Yet Unseen Twilight Preview (Unqualified)** from Start. The shortcut opens the
+New World selector with Twilight enabled for that process. Select Far Horizon with Up. Preview settings,
+worlds and logs live under `%LOCALAPPDATA%\WorldsYetUnseen\TwilightPreview`.
+The Preview has its own Windows installation identity and can run alongside
+WYU Alpha. Launch WYU Alpha for the standard experience.
+
+The setup is an unsigned, unqualified preview with a bundled .NET runtime.
+Use the SHA-256 values supplied with the build to validate the setup and
+installer manifest. Production qualification and the associated measurement
+requirements are tracked in the [acceptance contract](dawn-twilight/final-acceptance.md).
+
+To build it, use the verified consumer command below with .NET SDK `10.0.403`
+and the verified Inno Setup compiler. Add
+`-InstallerCompiler <path-to-ISCC.exe> -InstallerOutputDirectory <new-directory> -TwilightPreviewInstaller`.
+
+On an interactive Windows x64 desktop, verify the setup against the supplied
+manifest digest. The rehearsal requires a profile without an existing Twilight
+Preview installation.
+
+```powershell
+./eng/Test-OfflineInstaller.ps1 -InstallerDirectory $installerDirectory `
+  -ExpectedManifestSha256 $approvedInstallerManifestHash -TwilightPreview
+```
+
+It checks the installed payload, Start shortcut, bundled runtime, repair,
+installed Twilight sunrise/sunset checkpoints and uninstall.
 
 ## Offline alpha installer rehearsal
 
@@ -39,13 +69,13 @@ gate from the WYU repository root.
 ```powershell
 $archive = Join-Path ([IO.Path]::GetTempPath()) ('wyu-archive-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $archive | Out-Null
-gh release download archive-groundwork-0.1.0-dev.45079399733.1-immutable-complete `
+gh release download archive-groundwork-0.1.0-dev.45898177493.1-immutable-complete `
   --repo DaveBeusing/Groundwork --dir $archive
 if ($LASTEXITCODE -ne 0) { throw 'Groundwork archive download failed.' }
 ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $archive `
-  -ExpectedManifestSha256 7B907182976531A1A7105CDEC6C0742C38C044FA0DF030F02F026F1C54004B2D `
-  -ExpectedSourceCommit 7c889ca56ff9ae3dd6c712467e933221a254334f `
-  -ExpectedVersion 0.1.0-dev.45079399733.1
+  -ExpectedManifestSha256 79CF53C3A1D2025AEAF40810284BECD03580086A2A4664F684B440DD579284C0 `
+  -ExpectedSourceCommit d8b6d23058b09c5ba08c3005d0d0727aef816a17 `
+  -ExpectedVersion 0.1.0-dev.45898177493.1
 ```
 
 The gate checks package provenance, stages a temporary external NuGet feed,

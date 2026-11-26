@@ -16,7 +16,7 @@ internal static partial class GameHost
         CancellationToken cancellationToken, string? settingsDirectory = null,
         string? saveRoot = null, string? saveSmoke = null, bool flightSmoke = false, string? caveSmoke = null, bool freeTestWorld = false,
         bool constructionContinue = false, bool constructionMotion = false, bool constructionMeasure = false,
-        TerrainEditFeedbackMode terrainEditProof = TerrainEditFeedbackMode.None)
+        TerrainEditFeedbackMode terrainEditProof = TerrainEditFeedbackMode.None, bool twilightPreview = false)
     {
         var terrainEditFeedback = terrainEditProof != TerrainEditFeedbackMode.None;
         var clock = TimeProvider.System;
@@ -37,6 +37,7 @@ internal static partial class GameHost
             TerrainEditFeedbackMode.Keyboard => "Worlds Yet Unseen — Terrain feedback proof",
             TerrainEditFeedbackMode.OutcomesKeyboardE => "Worlds Yet Unseen — Terrain outcomes E",
             TerrainEditFeedbackMode.OutcomesKeyboardQ => "Worlds Yet Unseen — Terrain outcomes Q",
+            _ when twilightPreview => "Worlds Yet Unseen Twilight Preview (Unqualified)",
             _ => scripted ? DesktopSmoke.WindowTitle : "Worlds Yet Unseen — New World",
         };
         var window = new WindowsHostModule(new WindowsHostOptions(title, 960, 540, 256),

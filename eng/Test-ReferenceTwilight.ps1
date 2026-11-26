@@ -3,7 +3,8 @@ param(
     [ValidateSet('warp', 'hardware')][string]$Adapter = 'hardware',
     [ValidateSet('far-horizon', 'orbit-combined')][string]$Composition = 'far-horizon',
     [string]$OutputDirectory,
-    [switch]$SunlightOff
+    [switch]$SunlightOff,
+    [switch]$InstalledPreview
 )
 $ErrorActionPreference = 'Stop'
 $client = (Resolve-Path -LiteralPath $Assembly).Path
@@ -13,7 +14,7 @@ $names = 'GROUNDWORK_TWILIGHT_PREVIEW', 'GROUNDWORK_SKY_LOOKUP_PROTOTYPE', 'GROU
 $prior = @{}
 foreach ($name in $names) { $prior[$name] = [Environment]::GetEnvironmentVariable($name) }
 try {
-    $env:GROUNDWORK_TWILIGHT_PREVIEW = '1'
+    $env:GROUNDWORK_TWILIGHT_PREVIEW = if ($InstalledPreview) { $null } else { '1' }
     $env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE = $null
     $env:GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES = $null
     $env:WYU_DAWN_SMOKE, $env:WYU_PACKAGE_E, $env:WYU_PACKAGE_G = '1', 'on', 'on'
@@ -24,8 +25,32 @@ try {
     $env:WYU_DAWN_CAPTURE_DIR = if ($OutputDirectory) {
         (New-Item -ItemType Directory -Path $OutputDirectory -Force).FullName
     } else { $null }
-    $lines = @(& dotnet $client --volume-smoke 42 $Adapter)
-    $code = $LASTEXITCODE
+    if ($InstalledPreview) {
+        $start = [Diagnostics.ProcessStartInfo]::new($client)
+        $start.UseShellExecute = $false
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $start.CreateNoWindow = $true
+        foreach ($argument in '--twilight-preview','--volume-smoke','42',$Adapter) {
+            $start.ArgumentList.Add($argument)
+        }
+        $process = [Diagnostics.Process]::Start($start)
+        try {
+            $stdout = $process.StandardOutput.ReadToEndAsync()
+            $stderr = $process.StandardError.ReadToEndAsync()
+            if (!$process.WaitForExit(210000)) { throw 'Installed Twilight renderer smoke timed out.' }
+            $lines = $stdout.GetAwaiter().GetResult() -split '\r?\n'
+            $errors = $stderr.GetAwaiter().GetResult()
+            if ($errors) { Write-Host $errors }
+            $code = $process.ExitCode
+        } finally {
+            if (!$process.HasExited) { $process.Kill(); $process.WaitForExit() }
+            $process.Dispose()
+        }
+    } else {
+        $lines = @(& dotnet $client --volume-smoke 42 $Adapter)
+        $code = $LASTEXITCODE
+    }
     $lines | Write-Host
     if ($code -ne 0 -or $lines -cnotcontains 'PASS: WYU animated sunrise/sunset with unchanged clock and terrain publication.' -or
         $lines -cnotcontains 'PASS: WYU WP11 exploration, rebase and native shutdown.') {

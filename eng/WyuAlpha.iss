@@ -1,5 +1,11 @@
 [Setup]
-#ifdef R09Installer
+#if defined(TwilightPreviewInstaller)
+AppId={{0B385596-53E4-42F5-ACAD-279BFA78D5A1}
+AppName=Worlds Yet Unseen Twilight Preview (Unqualified)
+DefaultDirName={localappdata}\Programs\Worlds Yet Unseen Twilight Preview
+DisableDirPage=yes
+OutputBaseFilename=WYU-Twilight-Preview-Unqualified-{#AppVersion}-win-x64
+#elif defined(R09Installer)
 AppId={{1546F5A8-74AF-4D69-B06A-BEA3E8433DAE}
 AppName=Worlds Yet Unseen R09
 DefaultDirName={localappdata}\Programs\Worlds Yet Unseen R09
@@ -28,7 +34,10 @@ RestartApplications=no
 [Files]
 Source: "{#PayloadDirectory}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-#ifndef R09Installer
+#if defined(TwilightPreviewInstaller)
+[Icons]
+Name: "{userprograms}\Worlds Yet Unseen Twilight Preview (Unqualified)"; Filename: "{app}\WorldsYetUnseen.Client.exe"; Parameters: "--twilight-preview"; WorkingDir: "{app}"
+#elif !defined(R09Installer)
 [Icons]
 Name: "{userprograms}\Worlds Yet Unseen Alpha"; Filename: "{app}\WorldsYetUnseen.Client.exe"; WorkingDir: "{app}"
 #endif

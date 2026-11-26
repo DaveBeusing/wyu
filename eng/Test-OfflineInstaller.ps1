@@ -1,10 +1,12 @@
 param(
     [Parameter(Mandatory)][string]$InstallerDirectory,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedManifestSha256,
-    [switch]$PlanetPlaytest
+    [switch]$PlanetPlaytest,
+    [switch]$TwilightPreview
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($PlanetPlaytest -and $TwilightPreview) { throw 'Specify one installer test mode.' }
 . (Join-Path $PSScriptRoot 'Read-AlphaOverlay.ps1')
 if (![Environment]::UserInteractive) { throw 'Use an interactive Windows desktop.' }
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -17,17 +19,23 @@ $source = (Resolve-Path -LiteralPath $InstallerDirectory).Path
 $manifestPath = Join-Path $source 'installer-manifest.json'
 if ((Get-FileHash -LiteralPath $manifestPath).Hash -ine $ExpectedManifestSha256) { throw 'Unexpected installer manifest.' }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$installerPattern = if ($TwilightPreview) { '^WYU-Twilight-Preview-Unqualified-\d+\.\d+\.\d+-win-x64\.exe$' }
+    else { '^WYU-Alpha-\d+\.\d+\.\d+-win-x64\.exe$' }
 if ($manifest.schemaVersion -ne 1 -or $manifest.target -cne 'win-x64' -or
-    $manifest.installer -notmatch '^WYU-Alpha-\d+\.\d+\.\d+-win-x64\.exe$') { throw 'Invalid installer manifest.' }
+    $manifest.installer -cnotmatch $installerPattern) { throw 'Invalid installer manifest.' }
 $installer = Join-Path $source $manifest.installer
 if ((Get-FileHash -LiteralPath $installer).Hash -ine $manifest.installerSha256) { throw 'Installer digest mismatch.' }
 
-$app = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs/Worlds Yet Unseen Alpha'
-$shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Worlds Yet Unseen Alpha.lnk'
-$registration = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{E7123057-A9B2-46C8-A611-40C1D5504964}_is1'
+$appName = if ($TwilightPreview) { 'Worlds Yet Unseen Twilight Preview' } else { 'Worlds Yet Unseen Alpha' }
+$shortcutName = if ($TwilightPreview) { "$appName (Unqualified)" } else { $appName }
+$shortcutArguments = if ($TwilightPreview) { '--twilight-preview' } else { '' }
+$appId = if ($TwilightPreview) { '{0B385596-53E4-42F5-ACAD-279BFA78D5A1}' } else { '{E7123057-A9B2-46C8-A611-40C1D5504964}' }
+$app = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) "Programs/$appName"
+$shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) "$shortcutName.lnk"
+$registration = Join-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' "$($appId)_is1"
 $exe = Join-Path $app 'WorldsYetUnseen.Client.exe'
 foreach ($path in $app,$shortcut,$registration) {
-    if (Test-Path -LiteralPath $path) { throw "Use a profile without a previous WYU Alpha installation. Found $path." }
+    if (Test-Path -LiteralPath $path) { throw "Use a profile without a previous $appName installation. Found $path." }
 }
 $sentinel = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) ('WorldsYetUnseen/InstallerTest-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $sentinel | Out-Null
@@ -57,53 +65,65 @@ function Assert-UserData {
     }
 }
 
-Invoke-Setup $installer
-Assert-Payload
-if (!(Test-Path -LiteralPath $registration)) { throw 'Missing per-user Installed apps entry.' }
-$link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
-if ($link.TargetPath -ine $exe -or $link.WorkingDirectory -ine $app -or $link.Arguments) { throw 'Invalid Start menu entry.' }
-$client = Start-Process -FilePath $shortcut -PassThru
-try {
-    $clock = [Diagnostics.Stopwatch]::StartNew()
-    do {
-        Start-Sleep -Milliseconds 150
-        $client.Refresh()
-        if ($client.HasExited -or $clock.Elapsed.TotalSeconds -ge 30) { throw 'Start menu entry did not open the app.' }
-    } until ((Read-AlphaOverlay $client) -like 'WYU | * | Arrows / Enter')
-    $coreclr = @($client.Modules | Where-Object ModuleName -eq 'coreclr.dll')
-    if ($coreclr.Count -ne 1 -or $coreclr[0].FileName -ine (Join-Path $app 'coreclr.dll')) {
-        throw 'Start menu launch did not use the bundled .NET runtime.'
+function Invoke-WyuUninstall {
+    $uninstall = (Get-ItemProperty -LiteralPath $registration).QuietUninstallString
+    if ($uninstall -notmatch '^"([^"]+)"(?:\s|$)') { throw 'Invalid uninstall command.' }
+    $uninstaller = $Matches[1]
+    if ([IO.Path]::GetDirectoryName($uninstaller) -ine $app -or [IO.Path]::GetFileName($uninstaller) -notmatch '^unins\d+\.exe$') {
+        throw 'Unexpected uninstall path.'
     }
-    if (!$client.CloseMainWindow() -or !$client.WaitForExit(20000)) {
-        throw 'The installed app did not close its start menu.'
-    }
-    if ($client.ExitCode -ne 0) { throw "The installed app returned $($client.ExitCode)." }
-} finally {
-    if (!$client.HasExited) { $client.Kill(); $client.WaitForExit() }
-    $client.Dispose()
+    Invoke-Setup $uninstaller
 }
-Write-Host 'PASS: Per-user installation and Start menu launch with bundled runtime.'
 
-$repairFile = Join-Path $app 'WorldsYetUnseen.Client.runtimeconfig.json'
-if (!(Test-Path -LiteralPath $repairFile -PathType Leaf)) { throw 'Repair fixture is missing.' }
-Remove-Item -LiteralPath $repairFile
-Invoke-Setup $installer
-Assert-Payload
-Assert-UserData
-Write-Host 'PASS: Reinstall restored the removed program file and kept user data.'
-
-$uninstall = (Get-ItemProperty -LiteralPath $registration).QuietUninstallString
-if ($uninstall -notmatch '^"([^"]+)"(?:\s|$)') { throw 'Invalid uninstall command.' }
-$uninstaller = $Matches[1]
-if ([IO.Path]::GetDirectoryName($uninstaller) -ine $app -or [IO.Path]::GetFileName($uninstaller) -notmatch '^unins\d+\.exe$') {
-    throw 'Unexpected uninstall path.'
-}
 try {
-    if ($PlanetPlaytest) {
+    Invoke-Setup $installer
+    Assert-Payload
+    if (!(Test-Path -LiteralPath $registration)) { throw 'Missing per-user Installed apps entry.' }
+    $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
+    if ($link.TargetPath -ine $exe -or $link.WorkingDirectory -ine $app -or $link.Arguments -cne $shortcutArguments) {
+        throw 'Invalid Start menu entry.'
+    }
+    $client = Start-Process -FilePath $shortcut -PassThru
+    try {
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        do {
+            Start-Sleep -Milliseconds 150
+            $client.Refresh()
+            if ($client.HasExited -or $clock.Elapsed.TotalSeconds -ge 30) { throw 'Start menu entry did not open the app.' }
+            $overlay = Read-AlphaOverlay $client
+            $ready = if ($TwilightPreview) {
+                $client.MainWindowTitle -ceq $shortcutName -and $overlay -like '*Planet worlds*Enter to open*Esc to exit'
+            } else { $overlay -like 'WYU | * | Arrows / Enter' }
+        } until ($ready)
+        $coreclr = @($client.Modules | Where-Object ModuleName -eq 'coreclr.dll')
+        if ($coreclr.Count -ne 1 -or $coreclr[0].FileName -ine (Join-Path $app 'coreclr.dll')) {
+            throw 'Start menu launch did not use the bundled .NET runtime.'
+        }
+        if (!$client.CloseMainWindow() -or !$client.WaitForExit(20000)) {
+            throw 'The installed app did not close its start menu.'
+        }
+        if ($client.ExitCode -ne 0) { throw "The installed app returned $($client.ExitCode)." }
+    } finally {
+        if (!$client.HasExited) { $client.Kill(); $client.WaitForExit() }
+        $client.Dispose()
+    }
+    Write-Host "PASS: Per-user $appName installation and Start menu launch with bundled runtime."
+
+    $repairFile = Join-Path $app 'WorldsYetUnseen.Client.runtimeconfig.json'
+    if (!(Test-Path -LiteralPath $repairFile -PathType Leaf)) { throw 'Repair fixture is missing.' }
+    Remove-Item -LiteralPath $repairFile
+    Invoke-Setup $installer
+    Assert-Payload
+    Assert-UserData
+    Write-Host 'PASS: Reinstall restored the removed program file and kept user data.'
+
+    if ($TwilightPreview) {
+        & (Join-Path $PSScriptRoot 'Test-ReferenceTwilight.ps1') -Assembly $exe -InstalledPreview
+    } elseif ($PlanetPlaytest) {
         & (Join-Path $PSScriptRoot 'Test-InstalledPlanet.ps1') -Client $exe -ExpectedCommit $manifest.wyuCommit
     }
 } finally {
-    Invoke-Setup $uninstaller
+    if (Test-Path -LiteralPath $registration) { Invoke-WyuUninstall }
 }
 foreach ($path in $app,$shortcut,$registration) {
     if (Test-Path -LiteralPath $path) { throw "Uninstall left $path." }
