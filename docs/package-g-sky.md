@@ -19,6 +19,8 @@ Ember Caves retains its own presentation. Set `WYU_PACKAGE_G=off` to use the
 clear-color fallback and the Package E near and orbital cameras while retaining
 the Package E weather rules.
 
+The [reference measurement policy](reference-measurement-policy.md) makes the full reference run optional for merge and unqualified preview. The paired hardware and WARP functional checks remain required. GPU, CPU, memory and handoff performance are production qualification gates.
+
 Run `eng/Test-ReferenceSky.ps1` with the pinned Release build. Repeat with
 `-Adapter warp`. The fixture starts seeds 42 and 20261111 at tick 35500, checks
 twilight, the first far presentation during ascent, orbit outside the

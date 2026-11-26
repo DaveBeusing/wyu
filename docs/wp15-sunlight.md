@@ -32,6 +32,11 @@ to the landing pose and tick.
 
 ## Performance capture
 
+The published limits apply to production qualification. The
+[reference measurement policy](reference-measurement-policy.md) permits merge
+and unqualified preview while the feature stays opt-in and the functional
+checks above pass.
+
 Use eng/Measure-ReferenceSunlight.ps1 with a copy of the Release client that
 contains a Groundwork renderer instrumented from commit 695db49. In a
 separate Groundwork checkout at that commit, apply
