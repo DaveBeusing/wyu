@@ -7,12 +7,15 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $client = (Resolve-Path -LiteralPath $Assembly).Path
-$names = 'GROUNDWORK_TWILIGHT_PREVIEW', 'WYU_DAWN_SMOKE', 'WYU_DAWN_CAPTURE_DIR', 'WYU_PACKAGE_E', 'WYU_PACKAGE_G', 'WYU_WP15',
+$names = 'GROUNDWORK_TWILIGHT_PREVIEW', 'GROUNDWORK_SKY_LOOKUP_PROTOTYPE', 'GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES',
+    'WYU_DAWN_SMOKE', 'WYU_DAWN_CAPTURE_DIR', 'WYU_PACKAGE_E', 'WYU_PACKAGE_G', 'WYU_WP15',
     'WYU_WP16_SMOKE', 'WYU_ORBIT_DEMO_SMOKE', 'WYU_ORBIT_PBR', 'WYU_ORBIT_BOULDER', 'WYU_ORBIT_PBR_MEASURE'
 $prior = @{}
 foreach ($name in $names) { $prior[$name] = [Environment]::GetEnvironmentVariable($name) }
 try {
     $env:GROUNDWORK_TWILIGHT_PREVIEW = '1'
+    $env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE = $null
+    $env:GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES = $null
     $env:WYU_DAWN_SMOKE, $env:WYU_PACKAGE_E, $env:WYU_PACKAGE_G = '1', 'on', 'on'
     $env:WYU_WP15 = if ($SunlightOff) { 'off' } else { 'on' }
     $env:WYU_WP16_SMOKE = '0'
