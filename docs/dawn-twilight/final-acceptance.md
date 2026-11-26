@@ -29,15 +29,16 @@ additional warm multiplier. PBR textures, boulders, fallback, prop warm-up and
 save/profile metadata remain present. TW1–TW3 remain approved. Weather density,
 the accepted clock and save payloads are not migrated.
 
-All ten WYU engine modules use the immutable baseline from WYU master,
-`0.1.0-dev.45079399733.1`, source
-`7c889ca56ff9ae3dd6c712467e933221a254334f`, manifest SHA-256
-`7B907182976531A1A7105CDEC6C0742C38C044FA0DF030F02F026F1C54004B2D`.
-An unqualified paired preview uses separately staged `Groundwork.Rendering.dll`
-and `Groundwork.Rendering.D3D12.dll` from #193 for diagnostics. Startup verifies
-the supported Preview ABI stamp in both assemblies before starting a session.
-Record client and renderer hashes with the evidence. Normal package restores,
-installed R09 measurement and release provenance checks use their established paths.
+All ten WYU engine modules consume immutable Groundwork packages
+`0.1.0-dev.45898177493.1`, produced by the successful Groundwork master build
+`d8b6d23058b09c5ba08c3005d0d0727aef816a17` in run `45898177493.1`.
+The [immutable archive](https://github.com/DaveBeusing/Groundwork/releases/tag/archive-groundwork-0.1.0-dev.45898177493.1-immutable-complete)
+pins manifest SHA-256 `79CF53C3A1D2025AEAF40810284BECD03580086A2A4664F684B440DD579284C0`.
+The paired Preview uses the package-pinned renderer. Startup verifies
+the supported Preview ABI stamp in both rendering assemblies before starting a
+session. The verified installer records its package provenance and payload hashes.
+The preceding staged Preview used package baseline `0.1.0-dev.45079399733.1`
+with local renderer overlays. Its diagnostics apply to those binaries.
 
 The Preview handoff smoke checks the raw D3D12 live-object total against the
 named retained session queue and the provider's classified Preview inventory.

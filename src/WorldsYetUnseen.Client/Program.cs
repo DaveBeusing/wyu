@@ -7,6 +7,26 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        string? previewData = null;
+        if (args is ["--twilight-preview", ..])
+        {
+            if (args is ["--twilight-preview"])
+            {
+                previewData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "WorldsYetUnseen", "TwilightPreview");
+                args = ["--new-world"];
+            }
+            else if (args is ["--twilight-preview", "--volume-smoke", _, "warp" or "hardware"])
+                args = args[1..];
+            else
+            {
+                Console.Error.WriteLine("Usage: WorldsYetUnseen.Client --twilight-preview [--volume-smoke seed warp|hardware]");
+                return 2;
+            }
+
+            Environment.SetEnvironmentVariable("GROUNDWORK_TWILIGHT_PREVIEW", "1");
+        }
+
         if (ReferenceDaylight.PreviewEnabled)
         {
             try
@@ -37,7 +57,7 @@ internal static class Program
             args is ["--volume-flight-smoke", "readback" or "marker-readback", _, "warp"] ||
             args is ["--volume-flight-smoke", "flight" or "resume" or "abort" or "preflight" or "interrupt" or "interrupt-installed" or "resume-installed", _, "warp" or "hardware"] or
                 ["--volume-flight-smoke", "flight" or "resume", _, "warp" or "hardware", _])
-            return await RunExplorationAsync(args).ConfigureAwait(false);
+            return await RunExplorationAsync(args, previewData).ConfigureAwait(false);
 
         string? diagnosticCase = null;
         string? diagnosticFixture = null;
@@ -146,7 +166,7 @@ internal static class Program
         }
     }
 
-    private static async Task<int> RunExplorationAsync(string[] args)
+    private static async Task<int> RunExplorationAsync(string[] args, string? previewData)
     {
         var saveSmoke = args[0] == "--volume-save-smoke";
         var flightSmoke = args[0] == "--volume-flight-smoke";
@@ -197,8 +217,9 @@ internal static class Program
             return 2;
         if (terrainEditFeedback && !File.Exists(Path.Combine(fixture!, "wyu-terrain-edit-feedback.fixture")))
             return 2;
-        var logDirectory = fixture ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "WorldsYetUnseen", "Logs");
+        var logDirectory = previewData is not null ? Path.Combine(previewData, "Logs")
+            : fixture ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WorldsYetUnseen", "Logs");
         var diagnostics = scripted ? null : new AlphaDiagnostics(logDirectory, playtest && !terrainEditFeedback && args.Length == 3 ? args[2] : null);
         Console.CancelKeyPress += Cancel;
         try
@@ -216,11 +237,15 @@ internal static class Program
                 seed = flightSeed;
             }
             var warp = constructionContinue || terrainEditFeedback || saveSmoke || scripted && (flightSmoke ? args[3] : args[^1]) == "warp";
+            var saveRoot = previewData is not null ? Path.Combine(previewData, "Worlds")
+                : fixture is not null ? freeTestWorld ? Path.Combine(fixture, "test-worlds", "v2") : Path.Combine(fixture, "v2")
+                : saveSmoke || flightSmoke ? args[2] : null;
             await GameHost.RunExplorationAsync(seed, warp, diagnostics, stop.Token,
-                saveRoot: fixture is not null ? freeTestWorld ? Path.Combine(fixture, "test-worlds", "v2") : Path.Combine(fixture, "v2") : saveSmoke || flightSmoke ? args[2] : null,
+                settingsDirectory: previewData is not null ? Path.Combine(previewData, "Settings") : null,
+                saveRoot: saveRoot,
                 saveSmoke: saveSmoke || flightSmoke ? args[1] : null, flightSmoke: flightSmoke, freeTestWorld: freeTestWorld,
                 constructionContinue: constructionContinue, constructionMotion: constructionMotion, constructionMeasure: constructionMeasure,
-                terrainEditProof: terrainEditProof)
+                terrainEditProof: terrainEditProof, twilightPreview: previewData is not null)
                 .ConfigureAwait(false);
             diagnostics?.Write("exit");
             return 0;
