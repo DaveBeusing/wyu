@@ -34,9 +34,10 @@ All ten WYU engine modules use the immutable baseline from WYU master,
 `7c889ca56ff9ae3dd6c712467e933221a254334f`, manifest SHA-256
 `7B907182976531A1A7105CDEC6C0742C38C044FA0DF030F02F026F1C54004B2D`.
 An unqualified paired preview uses separately staged `Groundwork.Rendering.dll`
-and `Groundwork.Rendering.D3D12.dll` from #193 for diagnostics. Record client and
-renderer hashes with the evidence. Normal package restores, the installed R09
-measurement and release provenance checks continue to use their established paths.
+and `Groundwork.Rendering.D3D12.dll` from #193 for diagnostics. Startup verifies
+the supported Preview ABI stamp in both assemblies before starting a session.
+Record client and renderer hashes with the evidence. Normal package restores,
+installed R09 measurement and release provenance checks use their established paths.
 
 The X11D run started at 22:28 on 22 November pins Groundwork `d67d8d6` and
 WYU `0b194e3` with the prior immutable baseline `0.1.0-dev.45005277801.1`.

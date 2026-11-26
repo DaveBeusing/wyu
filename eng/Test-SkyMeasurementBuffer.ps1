@@ -36,6 +36,10 @@ var client = Assembly.LoadFrom(args[0]);
 var type = client.GetType("WorldsYetUnseen.Client.SkyMeasurements", true)!;
 const BindingFlags instance = BindingFlags.Instance | BindingFlags.NonPublic;
 const BindingFlags statics = BindingFlags.Static | BindingFlags.NonPublic;
+var previewAbi = type.GetMethod("HasPreviewAbi", statics)!.CreateDelegate<Func<Type, bool>>();
+Require(previewAbi(typeof(PreviewAbi)) && !previewAbi(typeof(MissingPreviewAbi)) &&
+    !previewAbi(typeof(WrongPreviewAbi)) && !previewAbi(typeof(NonLiteralPreviewAbi)),
+    "Twilight Preview accepted a missing, wrong or mutable ABI stamp.");
 var renderer = (D3D12Renderer)RuntimeHelpers.GetUninitializedObject(typeof(D3D12Renderer));
 GC.SuppressFinalize(renderer);
 var observer = type.GetConstructor(instance, null, [typeof(D3D12Renderer)], null)!.Invoke([renderer]);
@@ -348,6 +352,10 @@ static JsonElement[] ReadRows(StringWriter writer) => writer.ToString().Split('\
         return json.RootElement.Clone();
     }).ToArray();
 static void Require(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
+sealed class PreviewAbi { internal const int TwilightPreviewAbiVersion = 1; }
+sealed class MissingPreviewAbi { }
+sealed class WrongPreviewAbi { internal const int TwilightPreviewAbiVersion = 2; }
+sealed class NonLiteralPreviewAbi { internal static int TwilightPreviewAbiVersion = 1; }
 sealed class DirectOnlyDevice
 {
     internal void EnableSkyTimingForTests() { }

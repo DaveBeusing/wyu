@@ -15,6 +15,7 @@ namespace WorldsYetUnseen.Client;
 // when a package does not contain the exact owner-thread measurement hooks.
 internal sealed partial class SkyMeasurements
 {
+    private const int PreviewAbiVersion = 1;
     private static readonly string? Mode = Environment.GetEnvironmentVariable("WYU_PACKAGE_G_MEASURE");
     private static readonly ConditionalWeakTable<D3D12Renderer, SkyMeasurements> Owners = new();
     private static readonly Lazy<string> EngineHash = new(() =>
@@ -47,11 +48,17 @@ internal sealed partial class SkyMeasurements
 
     internal static void RequirePreviewRenderer()
     {
-        if (!ReferenceDaylight.PreviewEnabled)
-            return;
         var device = typeof(D3D12Renderer).Assembly.GetType("Groundwork.Rendering.D3D12.GpuDevice");
-        if (device is null || FindPreviewMode(device)?.PropertyType != typeof(bool))
+        if (device is null || FindPreviewMode(device)?.GetGetMethod(nonPublic: true)?.ReturnType != typeof(bool) ||
+            !HasPreviewAbi(device) || !HasPreviewAbi(typeof(RenderMesh)))
             throw new InvalidOperationException("Twilight Preview requires the matching Groundwork Preview renderer.");
+    }
+
+    private static bool HasPreviewAbi(Type owner)
+    {
+        var stamp = owner.GetField("TwilightPreviewAbiVersion",
+            BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly);
+        return stamp is { IsLiteral: true } && stamp.GetRawConstantValue() is int version && version == PreviewAbiVersion;
     }
 
     private static PropertyInfo? FindPreviewMode(Type device) =>

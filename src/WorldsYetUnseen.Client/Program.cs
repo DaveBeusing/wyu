@@ -1,4 +1,5 @@
 using System.Globalization;
+using WorldsYetUnseen.Gameplay;
 
 namespace WorldsYetUnseen.Client;
 
@@ -6,6 +7,18 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        if (ReferenceDaylight.PreviewEnabled)
+        {
+            try
+            {
+                SkyMeasurements.RequirePreviewRenderer();
+            }
+            catch (InvalidOperationException error)
+            {
+                Console.Error.WriteLine(error.Message);
+                return 1;
+            }
+        }
         if (args is ["--inventory-checkpoint-proof"])
             return InventoryCheckpointVerification.Run();
         if (args is ["--construction-collision-proof"])
