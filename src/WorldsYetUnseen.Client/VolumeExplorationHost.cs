@@ -18,6 +18,7 @@ internal static partial class GameHost
         bool constructionContinue = false, bool constructionMotion = false, bool constructionMeasure = false,
         TerrainEditFeedbackMode terrainEditProof = TerrainEditFeedbackMode.None)
     {
+        SkyMeasurements.RequirePreviewRenderer();
         var terrainEditFeedback = terrainEditProof != TerrainEditFeedbackMode.None;
         var clock = TimeProvider.System;
         var timeout = TimeSpan.FromSeconds(10);

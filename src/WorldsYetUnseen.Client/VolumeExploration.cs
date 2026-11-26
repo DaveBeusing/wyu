@@ -150,7 +150,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (placementGate is not null)
             Props!.PlacementGateForSmoke = placementGate.Task;
         var state = await OpenTerrainAsync(terrain, renderHost.Active, token).ConfigureAwait(false);
-        if (scripted && Environment.GetEnvironmentVariable("WYU_DAWN_SMOKE") == "1")
+        if (scripted && ReferenceDaylight.PreviewEnabled && Environment.GetEnvironmentVariable("WYU_DAWN_SMOKE") == "1")
         {
             // This presentation-only route does not enter the movement gate test.
             // Release its optional placement so the combined preset can render props.

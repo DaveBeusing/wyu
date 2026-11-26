@@ -80,7 +80,16 @@ try {
     Assert-True ((Get-FileHash -LiteralPath $lockPath -Algorithm SHA256).Hash -eq $lockHash) 'Locked restore changed the NuGet lockfile.'
     Invoke-Native 'dotnet' @('build', 'WorldsYetUnseen.slnx', '-c', 'Release', '--no-restore')
     Write-Host 'PASS: WYU structure, exact NuGet pins, locked restore and Release build.' -ForegroundColor Green
-    Invoke-Native 'dotnet' @('run', '--project', $gameplayTests, '-c', 'Release', '--no-build', '--no-restore')
+    $oldPreview = $env:GROUNDWORK_TWILIGHT_PREVIEW
+    try {
+        $env:GROUNDWORK_TWILIGHT_PREVIEW = $null
+        $testArgs = @('run', '--project', $gameplayTests, '-c', 'Release', '--no-build', '--no-restore')
+        Invoke-Native 'dotnet' $testArgs
+        $env:GROUNDWORK_TWILIGHT_PREVIEW = '1'
+        Invoke-Native 'dotnet' ($testArgs + @('--', '--twilight-preview-only'))
+    } finally {
+        $env:GROUNDWORK_TWILIGHT_PREVIEW = $oldPreview
+    }
 } finally {
     Pop-Location
 }

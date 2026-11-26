@@ -2,13 +2,13 @@
 
 ## Scope of this qualification
 
-This runbook documents production qualification. The proposed [reference
-measurement policy](https://github.com/DaveBeusing/wyu/pull/105)
-is under review. Upon adoption, reference-machine runs are optional for merge
-and explicitly unqualified preview. Required CI, reviews, functional and safety
-checks still apply, and features awaiting production qualification stay opt-in.
-The release and production activation gates below remain binding. Record the
-actual measured, failed or unmeasured status for the tested candidate.
+This runbook documents production qualification. The [reference measurement
+policy](../reference-measurement-policy.md) keeps reference-machine runs optional
+for merge and explicitly unqualified preview. Required CI, reviews, functional
+and safety checks still apply, and the release and standard activation gates
+remain binding. The runner selects `GROUNDWORK_TWILIGHT_PREVIEW=1` for both
+comparison variants. The off arm removes sky submission within that preview.
+Test the unchanged standard path in a separate process with the flag unset.
 
 TW1–TW3 are approved. The local two-seed hardware flight/Continue image
 qualification passed after the DPI capture correction. For production

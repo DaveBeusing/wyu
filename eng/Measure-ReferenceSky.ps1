@@ -73,7 +73,7 @@ $environmentNames = 'WYU_PACKAGE_G_MEASURE','WYU_SKY_MEASURE_SMOKE','WYU_SKY_MEA
     'WYU_R09_RECOVERY_AT_HANDOFF','WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
     'WYU_SKY_MEASURE_COMPOSITION','WYU_ORBIT_DEMO_SMOKE','WYU_ORBIT_PBR','WYU_ORBIT_BOULDER',
     'WYU_ORBIT_PBR_MEASURE','WYU_ORBIT_CAPTURE','WYU_WP15_FLIP','WYU_SKY_DIAGNOSTICS',
-    'GROUNDWORK_SKY_LOOKUP_PROTOTYPE','GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES','WYU_SKY_GPU_PASS_BREAKDOWN'
+    'GROUNDWORK_TWILIGHT_PREVIEW','GROUNDWORK_SKY_LOOKUP_PROTOTYPE','GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES','WYU_SKY_GPU_PASS_BREAKDOWN'
 $previous = @{}
 foreach ($name in $environmentNames) { $previous[$name] = [Environment]::GetEnvironmentVariable($name) }
 $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll' |
@@ -85,7 +85,7 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
     GpuSchedulingTrace=[bool]$GpuSchedulingTrace
     GpuPassBreakdown=[bool]$GpuPassBreakdown
     SchedulingTrace='Opt-in per-replay DxgKrnl circular ETL; capture status and commands are in each scheduling directory. Event loss and full coverage are unverified.'
-    LookupPrototype=[bool]$LookupPrototype; ReuseLookupResources=[bool]$ReuseLookupResources
+    TwilightPreview=$true; LookupPrototype=[bool]$LookupPrototype; ReuseLookupResources=[bool]$ReuseLookupResources
     SkyImplementation=$(if ($LookupPrototype) { 'Experimental fixed-size GPU lookup; visual approval pending; all build/update work charged.' } else { 'Direct 8x4 integration' })
     AcceptanceRequiredPairs=5; AcceptanceRequiredFlights=60; AcceptanceSamplesPerPhasePerVariant=2000
     EvidenceKind=$(if ($FullLookupSeries) { 'DIAGNOSTIC ONLY: experimental lookup with full WYU counts and original measured limits.' }
@@ -559,6 +559,7 @@ try {
     $env:WYU_WP15, $env:WYU_WP16 = 'off','off'
     $env:WYU_SKY_MEASURE_COMPOSITION = $Composition
     $env:WYU_SKY_DIAGNOSTICS = if ($Diagnostics) { '1' } else { '0' }
+    $env:GROUNDWORK_TWILIGHT_PREVIEW = '1'
     $env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE = if ($LookupPrototype) { '1' } else { $null }
     $env:GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES = if ($ReuseLookupResources) { '1' } else { $null }
     $env:WYU_SKY_GPU_PASS_BREAKDOWN = if ($GpuPassBreakdown) { '1' } else { $null }

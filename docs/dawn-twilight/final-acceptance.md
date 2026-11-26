@@ -2,17 +2,20 @@
 
 ## Scope of this qualification
 
-This runbook documents production qualification. The proposed [reference
-measurement policy](https://github.com/DaveBeusing/wyu/pull/105)
-is under review. Upon adoption, reference-machine runs are optional for merge
-and explicitly unqualified preview. Required CI, reviews, functional and safety
-checks still apply, and features awaiting production qualification stay opt-in.
-The release and production activation gates below remain binding. Record the
-actual measured, failed or unmeasured status for the tested candidate.
+The [reference measurement policy](../reference-measurement-policy.md) keeps
+reference-machine runs optional for merge and explicitly unqualified preview.
+Required CI, reviews, functional and safety checks still apply. Record measured,
+failed and unmeasured evidence against the exact candidate.
+
+Use `GROUNDWORK_TWILIGHT_PREVIEW=1` to enable Twilight in both WYU and the
+paired renderer. The normal launch and Continue paths keep the baseline
+atmosphere, lighting, weather presentation and flight. The preview keeps seed,
+accepted tick, terrain and save format. Approve the paired binaries for
+functional evaluation separately from any release or production activation.
 
 ## Integrated inputs
 
-PR #83 integrates WYU master `cf2a68abf3e25b01d8e2a9d1e28ab388cdb5dbd2`,
+PR #83 integrates WYU master `b7ae63069d4b6898bf8e3a1ef8ca3e6d2fa11095`,
 including static construction #90, terrain edit feedback #98 and console status #99.
 Groundwork #193 integrates the complete #186 head
 `b40c11b14e64bff9b446d6eab18e8755916f66ec`: owner wake, presentation waiting,
@@ -20,16 +23,21 @@ acknowledged-frame arbitration and texture-refinement fairness. It also
 integrates static construction through Groundwork master
 `751a1e022d703c6dfd582c6521cd1cc4f9c6a2eb`.
 
-The shared sun direction drives sky, weather and terrain lighting. Orbit retains
+In the preview, the shared sun direction drives sky, weather and terrain lighting. Orbit retains
 its celestial frame; the approved dawn/dusk colour curve replaces its former
 additional warm multiplier. PBR textures, boulders, fallback, prop warm-up and
 save/profile metadata remain present. TW1–TW3 remain approved. Weather density,
 the accepted clock and save payloads are not migrated.
 
 All ten WYU engine modules use the immutable baseline from WYU master,
-`0.1.0-dev.45047410961.1`, source
-`07ed4c82c2c77841bd02174194fdcf5dc25dec1b`, manifest SHA-256
-`944680A0CA588814827FE713B5ECAD242635C3C0DFEA24731D3508EE04711F19`.
+`0.1.0-dev.45079399733.1`, source
+`7c889ca56ff9ae3dd6c712467e933221a254334f`, manifest SHA-256
+`7B907182976531A1A7105CDEC6C0742C38C044FA0DF030F02F026F1C54004B2D`.
+An unqualified paired preview uses separately staged `Groundwork.Rendering.dll`
+and `Groundwork.Rendering.D3D12.dll` from #193 for diagnostics. Record client and
+renderer hashes with the evidence. Normal package restores, the installed R09
+measurement and release provenance checks continue to use their established paths.
+
 The X11D run started at 22:28 on 22 November pins Groundwork `d67d8d6` and
 WYU `0b194e3` with the prior immutable baseline `0.1.0-dev.45005277801.1`.
 Its results apply to those inputs.

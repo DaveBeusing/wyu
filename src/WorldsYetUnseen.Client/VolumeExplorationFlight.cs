@@ -7,6 +7,7 @@ using Groundwork.Persistence;
 using Groundwork.Rendering;
 using Groundwork.Rendering.D3D12;
 using Groundwork.Voxels;
+using WorldsYetUnseen.Gameplay;
 using static WorldsYetUnseen.Client.FlightVector;
 
 namespace WorldsYetUnseen.Client;
@@ -390,7 +391,8 @@ internal sealed partial class VolumeExploration
                 var forward = Vector3.Normalize(ProceduralGlobe.MarkerAimPoint(globe) - ProceduralGlobe.Float(camera.Position));
                 var tangent = ProceduralGlobe.Float(player.Heading);
                 var up = Vector3.Normalize(tangent - forward * Vector3.Dot(forward, tangent));
-                camera = ApplySky(camera with { Forward = forward, Up = up }, tick, 0, Atmosphere(camera.Position, tick));
+                camera = ApplySky(camera with { Forward = forward, Up = up }, tick, 0,
+                    ReferenceDaylight.PreviewEnabled ? Atmosphere(camera.Position, tick) : null);
             }
             var frame = readback.MarkerOnly ? ProceduralGlobe.Frame(sequence, camera) :
                 GlobeFrame(sequence, camera, flight.State.Position, player.Heading, tick, 0);
@@ -421,7 +423,7 @@ internal sealed partial class VolumeExploration
         {
             Forward = forward,
             Up = up,
-        }, tick, 0, Atmosphere(flightCamera.Position, tick)), tick, 0);
+        }, tick, 0, ReferenceDaylight.PreviewEnabled ? Atmosphere(flightCamera.Position, tick) : null), tick, 0);
         var sequence = ++_sequence;
         readback.Arm("edited-final-approach", sequence);
         RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, camera));

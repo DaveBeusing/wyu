@@ -5,6 +5,9 @@ namespace WorldsYetUnseen.Gameplay.Tests;
 
 internal static class ReferenceDaylightTests
 {
+    internal static void ProcessOptIn(bool expected) =>
+        Require(ReferenceDaylight.PreviewEnabled == expected, "Twilight did not follow the requested process mode.");
+
     internal static void DarkNightsAndWarmTwilight()
     {
         var night = ReferenceDaylight.Evaluate(-1);
@@ -60,7 +63,9 @@ internal static class ReferenceDaylightTests
             Require(before == new ReferenceWeather(planet).Evaluate(position, tick, 0.5) &&
                 before == weather.Evaluate(position, tick, 0.5), "Restored or paused lighting changed phase.");
             var sun = ReferenceWeather.SunDirection(tick, 0.5);
-            Require(Vector4.Distance(before.Tint, ReferenceDaylight.Evaluate(sun.Y).Tint) < 0.000001f,
+            var expected = ExpectedColours(sun.Y);
+            Require(Vector4.Distance(before.Tint, expected.Tint) < 0.000001f &&
+                Vector4.Distance(before.Sky, expected.Sky) < 0.000001f,
                 "Weather and sunlight disagree on the solar phase.");
         }
         Require(Vector3.Distance(ReferenceWeather.SunDirection(35_999, 1), ReferenceWeather.SunDirection(36_000)) < 0.000001f,
@@ -81,8 +86,9 @@ internal static class ReferenceDaylightTests
                     Vector3.Normalize(new Vector3(0.68f, 0.18f, 0.70f)) })
                 {
                     var actual = weather.Evaluate(position, tick, 0.5, direction);
-                    var expected = ReferenceDaylight.Evaluate(direction.Y);
-                    Require(actual.Tint == expected.Tint && actual.Sky == expected.Background,
+                    var expected = ExpectedColours(direction.Y);
+                    Require(Vector4.Distance(actual.Tint, expected.Tint) < 0.000001f &&
+                        Vector4.Distance(actual.Sky, expected.Sky) < 0.000001f,
                         "Preset sky/weather lighting ignored the shared solar direction.");
                     Require(actual.FogStart == clock.FogStart && actual.FogEnd == clock.FogEnd &&
                         actual.FogOpacity == clock.FogOpacity,
@@ -92,6 +98,21 @@ internal static class ReferenceDaylightTests
                 }
             }
         }
+    }
+
+    private static (Vector4 Tint, Vector4 Sky) ExpectedColours(double elevation)
+    {
+        if (ReferenceDaylight.PreviewEnabled)
+        {
+            var light = ReferenceDaylight.Evaluate((float)elevation);
+            return (light.Tint, light.Background);
+        }
+        // Independently calculate the master recipe before the preview was introduced.
+        var t = Math.Clamp((elevation + 0.15) / 0.35, 0, 1);
+        var daylight = (float)(t * t * (3 - 2 * t));
+        var ambient = 0.18f + 0.82f * daylight;
+        return (new(ambient, ambient, ambient, 1),
+            Vector4.Lerp(new(0.025f, 0.035f, 0.075f, 1), new(0.18f, 0.27f, 0.41f, 1), daylight));
     }
 
     private static Vector3 AsVector3(this Vector4 value) => new(value.X, value.Y, value.Z);

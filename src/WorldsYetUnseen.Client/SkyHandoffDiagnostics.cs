@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using WorldsYetUnseen.Gameplay;
 
 namespace WorldsYetUnseen.Client;
 
@@ -9,7 +10,8 @@ internal static class SkyHandoffDiagnostics
     private const int Capacity = 64;
     private static readonly Lock Gate = new();
     private static readonly Stage[] Stages = new Stage[Capacity];
-    internal static bool Enabled { get; } = Environment.GetEnvironmentVariable("WYU_SKY_DIAGNOSTICS") == "1";
+    internal static bool Enabled { get; } = ReferenceDaylight.PreviewEnabled &&
+        Environment.GetEnvironmentVariable("WYU_SKY_DIAGNOSTICS") == "1";
     private static bool _active;
     private static int _count;
     private static string _direction = "";

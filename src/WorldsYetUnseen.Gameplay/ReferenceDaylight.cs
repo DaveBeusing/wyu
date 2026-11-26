@@ -6,6 +6,8 @@ namespace WorldsYetUnseen.Gameplay;
 public static class ReferenceDaylight
 {
     public const string ProfileId = "wyu.far-horizon.daylight.v1";
+    public static bool PreviewEnabled { get; } =
+        Environment.GetEnvironmentVariable("GROUNDWORK_TWILIGHT_PREVIEW") == "1";
 
     public static ReferenceDaylightSample Evaluate(float solarElevation)
     {

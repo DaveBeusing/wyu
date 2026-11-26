@@ -7,6 +7,7 @@ using Groundwork.Core;
 using Groundwork.Rendering;
 using Groundwork.Rendering.D3D12;
 using Groundwork.Voxels;
+using WorldsYetUnseen.Gameplay;
 
 namespace WorldsYetUnseen.Client;
 
@@ -33,7 +34,7 @@ internal sealed partial class SkyMeasurements
 
     private SkyMeasurements(D3D12Renderer renderer) => _renderer = renderer;
 
-    internal static bool Enabled => Mode is "off" or "on";
+    internal static bool Enabled => ReferenceDaylight.PreviewEnabled && (Mode is "off" or "on");
     internal static bool Smoke => Environment.GetEnvironmentVariable("WYU_SKY_MEASURE_SMOKE") == "1";
     internal static bool CollectPhases => Enabled && Environment.GetEnvironmentVariable("WYU_SKY_MEASURE_PHASES") == "1";
     internal static int Warmup => Smoke ? 4 : 40;
@@ -43,6 +44,18 @@ internal sealed partial class SkyMeasurements
 
     internal static VolumeCamera Submit(VolumeCamera camera) => Enabled && Mode == "off" ? camera with { Sky = null } : camera;
     internal static RenderFrame Submit(RenderFrame frame) => Enabled && Mode == "off" ? frame with { Sky = null } : frame;
+
+    internal static void RequirePreviewRenderer()
+    {
+        if (!ReferenceDaylight.PreviewEnabled)
+            return;
+        var device = typeof(D3D12Renderer).Assembly.GetType("Groundwork.Rendering.D3D12.GpuDevice");
+        if (device is null || FindPreviewMode(device)?.PropertyType != typeof(bool))
+            throw new InvalidOperationException("Twilight Preview requires the matching Groundwork Preview renderer.");
+    }
+
+    private static PropertyInfo? FindPreviewMode(Type device) =>
+        device.GetProperty("TwilightPreviewEnabledForTests", BindingFlags.NonPublic | BindingFlags.Instance);
 
     internal static void Attach(D3D12Renderer renderer)
     {
@@ -125,6 +138,8 @@ internal sealed partial class SkyMeasurements
     private void Initialize(object device)
     {
         SkyHandoffDiagnostics.Mark("gpu-device-initialized");
+        if (Enabled && FindPreviewMode(device.GetType())?.GetValue(device) is not true)
+            throw Mismatch();
         var requested = Environment.GetEnvironmentVariable("GROUNDWORK_SKY_LOOKUP_PROTOTYPE") == "1";
         var enabled = device.GetType().GetProperty("SkyLookupPrototypeEnabledForTests",
             BindingFlags.NonPublic | BindingFlags.Instance);

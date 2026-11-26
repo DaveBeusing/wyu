@@ -20,8 +20,18 @@ internal static class Program
             (nameof(ConstructionTests.AtomicOwnershipAndOverlap), ConstructionTests.AtomicOwnershipAndOverlap),
             (nameof(ConstructionTests.RecordLimitsAndRestoreValidation), ConstructionTests.RecordLimitsAndRestoreValidation),
         ];
+        var previewOnly = args.Contains("--twilight-preview-only", StringComparer.Ordinal);
+        (string Name, Action Run)[] twilight =
+        [
+            (nameof(ReferenceDaylightTests.ProcessOptIn), () => ReferenceDaylightTests.ProcessOptIn(previewOnly)),
+            (nameof(ReferenceDaylightTests.DarkNightsAndWarmTwilight), ReferenceDaylightTests.DarkNightsAndWarmTwilight),
+            (nameof(ReferenceDaylightTests.ContinuousBoundedAndAllocationFree), ReferenceDaylightTests.ContinuousBoundedAndAllocationFree),
+            (nameof(ReferenceDaylightTests.ClockAndRestoreParity), ReferenceDaylightTests.ClockAndRestoreParity),
+            (nameof(ReferenceDaylightTests.PresetSunOverridesClockWithoutChangingWeather), ReferenceDaylightTests.PresetSunOverridesClockWithoutChangingWeather),
+        ];
         (string Name, Action Run)[] tests = args.Contains("--construction-only", StringComparer.Ordinal) ? construction :
             args.Contains("--inventory-only", StringComparer.Ordinal) ? inventory :
+            previewOnly ? twilight :
         [
             (nameof(FixedRouteRepeatsEveryCheckpoint), FixedRouteRepeatsEveryCheckpoint),
             (nameof(AllMiningOrdersConserveStone), AllMiningOrdersConserveStone),
@@ -29,10 +39,7 @@ internal static class Program
             (nameof(CapturedProgressSurvivesLaterActions), CapturedProgressSurvivesLaterActions),
             (nameof(ReferenceBiomeTests.TwoSeedParity), ReferenceBiomeTests.TwoSeedParity),
             (nameof(ReferenceWeatherTests.TransitionsAndBudget), ReferenceWeatherTests.TransitionsAndBudget),
-            (nameof(ReferenceDaylightTests.DarkNightsAndWarmTwilight), ReferenceDaylightTests.DarkNightsAndWarmTwilight),
-            (nameof(ReferenceDaylightTests.ContinuousBoundedAndAllocationFree), ReferenceDaylightTests.ContinuousBoundedAndAllocationFree),
-            (nameof(ReferenceDaylightTests.ClockAndRestoreParity), ReferenceDaylightTests.ClockAndRestoreParity),
-            (nameof(ReferenceDaylightTests.PresetSunOverridesClockWithoutChangingWeather), ReferenceDaylightTests.PresetSunOverridesClockWithoutChangingWeather),
+            .. twilight,
             (nameof(ReferencePlanetTests.SeedAudit), ReferencePlanetTests.SeedAudit),
             (nameof(ReferencePlanetTests.ChartContinuity), ReferencePlanetTests.ChartContinuity),
             (nameof(ReferencePlanetTests.PublishedSpawnAndLanding), ReferencePlanetTests.PublishedSpawnAndLanding),

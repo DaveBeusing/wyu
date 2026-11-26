@@ -7,14 +7,15 @@ namespace WorldsYetUnseen.Client;
 
 internal static class ReferenceSky
 {
-    internal const string Profile = "wyu.far-horizon.atmosphere.v2";
+    internal static string Profile => ReferenceDaylight.PreviewEnabled
+        ? "wyu.far-horizon.atmosphere.v2" : "wyu.far-horizon.atmosphere.v1";
     internal static readonly bool Enabled = Environment.GetEnvironmentVariable("WYU_PACKAGE_G") != "off";
 
     internal static RenderSky Create(PlanetVector eye, Vector3 forward, Vector3 up, float fov,
         ulong seed, ulong tick, double fraction, float haze, Vector3? sunDirection = null)
     {
         var right = Vector3.Normalize(Vector3.Cross(forward, up));
-        var aerosol = 1 + 0.35f * Math.Clamp(haze, 0, 1);
+        var aerosol = ReferenceDaylight.PreviewEnabled ? 1 + 0.35f * Math.Clamp(haze, 0, 1) : 1;
         return new(ProceduralGlobe.Float(eye), Vector3.Normalize(forward),
             Vector3.Normalize(Vector3.Cross(right, forward)), fov,
             ReferencePlanet.RadiusMeters, ReferencePlanet.RadiusMeters + 112, 40, 14,

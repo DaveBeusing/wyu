@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $client = (Resolve-Path -LiteralPath $Assembly).Path
 $root = (New-Item -ItemType Directory -Path (Join-Path $PSScriptRoot ('../artifacts/sky-handoff-test-' + [guid]::NewGuid().ToString('N')))).FullName
-$references = foreach ($file in Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter 'Groundwork.*.dll') {
+$references = foreach ($file in Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll') {
     $path = [Security.SecurityElement]::Escape($file.FullName)
     "<Reference Include=`"$($file.BaseName)`"><HintPath>$path</HintPath></Reference>"
 }
@@ -19,7 +19,8 @@ using System.Reflection;
 using System.Text.Json;
 
 var enabled = args[1] != "off";
-Environment.SetEnvironmentVariable("WYU_SKY_DIAGNOSTICS", enabled ? "1" : null);
+Environment.SetEnvironmentVariable("GROUNDWORK_TWILIGHT_PREVIEW", enabled ? "1" : null);
+Environment.SetEnvironmentVariable("WYU_SKY_DIAGNOSTICS", "1");
 var type = Assembly.LoadFrom(args[0]).GetType("WorldsYetUnseen.Client.SkyHandoffDiagnostics", true)!;
 const BindingFlags methods = BindingFlags.NonPublic | BindingFlags.Static;
 var prepare = type.GetMethod("Prepare", methods)!.CreateDelegate<Action>();

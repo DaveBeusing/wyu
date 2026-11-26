@@ -104,7 +104,8 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
     $orbit = $Composition -ceq 'orbit-combined'
     $requiredFlag = if ($orbit) { 'on' } else { 'off' }
     $requiredOrbit = if ($orbit) { '1' } else { '' }
-    if ($env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE -cne '1' -or $env:WYU_SKY_DIAGNOSTICS -cne '1' -or
+    if ($env:GROUNDWORK_TWILIGHT_PREVIEW -cne '1' -or $env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE -cne '1' -or
+        $env:WYU_SKY_DIAGNOSTICS -cne '1' -or
         $env:WYU_SKY_MEASURE_SMOKE -cne '0' -or $env:WYU_PACKAGE_E -cne 'on' -or
         $env:WYU_WP15 -cne $requiredFlag -or $env:WYU_WP16 -cne $requiredFlag -or
         [string]$env:WYU_ORBIT_DEMO_SMOKE -cne $requiredOrbit -or $env:WYU_SKY_MEASURE_COMPOSITION -cne $Composition) {

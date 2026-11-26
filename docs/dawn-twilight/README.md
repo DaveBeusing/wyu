@@ -2,13 +2,17 @@
 
 ## Scope of this qualification
 
-This runbook documents production qualification. The proposed [reference
-measurement policy](https://github.com/DaveBeusing/wyu/pull/105)
-is under review. Upon adoption, reference-machine runs are optional for merge
-and explicitly unqualified preview. Required CI, reviews, functional and safety
-checks still apply, and features awaiting production qualification stay opt-in.
-The release and production activation gates below remain binding. Record the
-actual measured, failed or unmeasured status for the tested candidate.
+The [reference measurement policy](../reference-measurement-policy.md) keeps
+reference-machine runs optional for merge and explicitly unqualified preview.
+Required CI, reviews, functional and safety checks still apply. The release and
+production activation gates remain binding.
+
+Start the paired Groundwork and WYU preview with
+`GROUNDWORK_TWILIGHT_PREVIEW=1` in the process environment. Unset it for normal
+play and Continue with the existing v1 atmosphere and lighting. `WYU_PACKAGE_G=off`
+continues to control the existing sky fallback. The twilight capture and sky
+measurement scripts set and restore the preview flag explicitly. Lookup and its
+resource reuse remain separate diagnostic switches.
 
 For the integrated Orbit/master candidate, renewed evidence and remaining gates,
 see [combined candidate acceptance](final-acceptance.md). Captures and raw logs
@@ -22,8 +26,9 @@ profile identities. The camera stays fixed within each sunrise/sunset sequence.
 ## Approved appearance
 
 The owner approved the captured TW1 colour treatment, TW2 night-strength floor
-and TW3 automatic visual adoption on Continue on 20 November 2026. This is
-visual/product approval, not a waiver of package, reference or handoff gates.
+and TW3 visual adoption on Continue on 20 November 2026. The new appearance
+applies on Continue when the preview is explicitly enabled. Package, reference
+and handoff release gates remain open.
 
 Predawn, with a localized warm horizon:
 
