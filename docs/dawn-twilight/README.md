@@ -1,5 +1,15 @@
 # Dawn and twilight candidate
 
+## Scope of this qualification
+
+This runbook documents production qualification. The proposed [reference
+measurement policy](https://github.com/DaveBeusing/wyu/pull/105)
+is under review. Upon adoption, reference-machine runs are optional for merge
+and explicitly unqualified preview. Required CI, reviews, functional and safety
+checks still apply, and features awaiting production qualification stay opt-in.
+The release and production activation gates below remain binding. Record the
+actual measured, failed or unmeasured status for the tested candidate.
+
 For the integrated Orbit/master candidate, renewed evidence and remaining gates,
 see [combined candidate acceptance](final-acceptance.md). Captures and raw logs
 below retain their original source identities; they do not certify a later merge.
@@ -99,8 +109,9 @@ hardware performance, or integrated pressure qualification.
 
 ## Prepared reference measurement
 
-The owner will execute the [reference runbook](reference-qualification.md) on
-the accepted i9-10850K / RTX 5070 machine. It separates the synthetic renderer
+For production qualification, use the [reference runbook](reference-qualification.md)
+on the accepted i9-10850K / RTX 5070 machine or with an accepted representative
+setup under the reference measurement policy. It separates the synthetic renderer
 pass fixture from the real WYU profile and paired native handoffs. The scripts
 retain raw samples, failures and exact denominators; smoke execution does not
 approve a budget. Source/assembly hashes, clean-source checks and fresh output

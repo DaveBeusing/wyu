@@ -1,5 +1,15 @@
 # Combined candidate acceptance
 
+## Scope of this qualification
+
+This runbook documents production qualification. The proposed [reference
+measurement policy](https://github.com/DaveBeusing/wyu/pull/105)
+is under review. Upon adoption, reference-machine runs are optional for merge
+and explicitly unqualified preview. Required CI, reviews, functional and safety
+checks still apply, and features awaiting production qualification stay opt-in.
+The release and production activation gates below remain binding. Record the
+actual measured, failed or unmeasured status for the tested candidate.
+
 ## Integrated inputs
 
 PR #83 integrates WYU master `cf2a68abf3e25b01d8e2a9d1e28ab388cdb5dbd2`,
@@ -28,7 +38,7 @@ with both rendering DLLs staged together as a diagnostic overlay.
 Preserve the master-only producer, archive and locked-restore checks when
 qualifying the integrated combination.
 
-## Required evidence
+## Required production qualification evidence
 
 Prior captures and timing observations apply to their original heads. They do
 not automatically qualify the merged combination. Final PR descriptions and

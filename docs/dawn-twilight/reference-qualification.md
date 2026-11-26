@@ -1,8 +1,20 @@
 # Reference qualification runbook
 
+## Scope of this qualification
+
+This runbook documents production qualification. The proposed [reference
+measurement policy](https://github.com/DaveBeusing/wyu/pull/105)
+is under review. Upon adoption, reference-machine runs are optional for merge
+and explicitly unqualified preview. Required CI, reviews, functional and safety
+checks still apply, and features awaiting production qualification stay opt-in.
+The release and production activation gates below remain binding. Record the
+actual measured, failed or unmeasured status for the tested candidate.
+
 TW1–TW3 are approved. The local two-seed hardware flight/Continue image
-qualification passed after the DPI capture correction. The owner will run
-the performance evidence on the accepted i9-10850K / RTX 5070 reference system.
+qualification passed after the DPI capture correction. For production
+qualification, collect performance evidence on the accepted i9-10850K / RTX
+5070 reference system or use a documented replacement protocol and explicitly
+accepted representative evidence under the policy.
 Results from the RTX PRO 5000 workstation are diagnostic evidence only.
 
 The integrated candidate now includes Orbit Demo from WYU master and the complete
