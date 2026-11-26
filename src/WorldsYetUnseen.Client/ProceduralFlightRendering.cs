@@ -4,6 +4,7 @@ using Groundwork.Core;
 using Groundwork.Platform.Windows;
 using Groundwork.Rendering;
 using Groundwork.Rendering.D3D12;
+using Groundwork.Rendering.Materials;
 using Groundwork.Voxels;
 using WorldsYetUnseen.Gameplay;
 using static WorldsYetUnseen.Client.FlightVector;
@@ -25,6 +26,8 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     private VolumeTerrainColorEvaluator? _colorEvaluator;
     private D3D12TextureHandoff? _materialStream;
     private D3D12TextureView? _materialCut;
+    private MaterialPalette? _renderMaterialPalette;
+    internal bool TerrainTexturesEnabled { get; private set; } = true;
     private bool _materialRequestsPending;
     private bool _orbitalMaterialCut;
     internal ReferenceProps? Props { get; set; }
@@ -98,7 +101,25 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     private void QueueMaterialCut(OrbitTerrainMaterials materials, D3D12TextureHandoff stream, D3D12TextureView cut)
     {
         _materialCut = cut;
-        _materialRequestsPending = materials.Publish(stream, cut, _orbitalMaterialCut) == OrbitTerrainMaterials.Scheduling.Retry;
+        _materialRequestsPending = materials.Publish(stream, cut, _orbitalMaterialCut, _renderMaterialPalette,
+            TerrainTexturesEnabled) == OrbitTerrainMaterials.Scheduling.Retry;
+    }
+
+    internal bool TrySetTerrainTextures(bool enabled)
+    {
+        if (OrbitMaterials is not { } materials || _materialStream is not { } stream || _materialCut is not { } cut)
+            return false;
+        if (TerrainTexturesEnabled == enabled)
+            return true;
+
+        var palette = materials.CreatePalette(checked((_renderMaterialPalette?.VisualRevision ?? 1) + 1), enabled);
+        if (!materials.PublishPalette(stream, cut, palette, enabled))
+            return false;
+
+        _renderMaterialPalette = palette;
+        TerrainTexturesEnabled = enabled;
+        _materialRequestsPending = enabled;
+        return true;
     }
 
     internal Task FarAsync(ProceduralGlobe.Geometry globe, Guid world, VolumePublicationInfo near, CancellationToken token) =>

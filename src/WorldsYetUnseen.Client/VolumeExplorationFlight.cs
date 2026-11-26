@@ -373,8 +373,9 @@ internal sealed partial class VolumeExploration
     private sealed record FlightReturnReadback(Wp11WarpReadback Readback, int Tick, string Digest, PlanetVector Pad);
 
     private RenderFrame GlobeFrame(ulong sequence, VolumeCamera camera, PlanetVector craft, PlanetVector heading,
-        ulong tick, double fraction) => camera.Sky is not null || orbitDemo ? ProceduralGlobe.Frame(sequence, camera) :
-        ProceduralGlobe.LegacyFrame(sequence, craft, heading, Atmosphere(FlightEye(craft), tick, fraction));
+        ulong tick, double fraction) => camera.Sky is not null || orbitDemo || (reference is not null && ReferenceSky.Enabled)
+        ? ProceduralGlobe.Frame(sequence, camera)
+        : ProceduralGlobe.LegacyFrame(sequence, craft, heading, Atmosphere(FlightEye(craft), tick, fraction));
 
     private async Task CaptureHandoffAsync(Wp11WarpReadback readback, string checkpoint, D3D12Renderer renderer,
         VolumeStreamingCoordinator terrain, PlanetWalkState player, ProceduralFlight flight, string digest, PlanetVector pad,
@@ -667,7 +668,7 @@ internal sealed partial class VolumeExploration
     private VolumeCamera FlightCamera(VolumeViewIdentity view, PlanetVector position, PlanetVector heading, ulong tick,
         double fraction = 0)
     {
-        if (!ReferenceSky.Enabled)
+        if (!ReferenceSky.Enabled && !RenderSkyEnabled)
         {
             var legacyUp = Vector3.Normalize(ProceduralGlobe.Float(position));
             var legacyForward = Vector3.Normalize(-legacyUp + ProceduralGlobe.Float(heading) * 0.35f);

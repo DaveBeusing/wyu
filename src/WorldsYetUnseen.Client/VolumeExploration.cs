@@ -954,7 +954,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             ? ReferenceSunlight.Apply(camera, tick, fraction, orbitDemo) : camera;
 
     private VolumeCamera ApplySky(VolumeCamera camera, ulong tick, double fraction, ReferenceAtmosphere? weather) =>
-        reference is not null && ReferenceSky.Enabled ? camera with
+        RenderSkyEnabled ? camera with
         {
             Sky = ReferenceSky.Create(camera.Position, camera.Forward, camera.Up, camera.FieldOfView,
                 Descriptor.Seed, tick, fraction, weather?.FogOpacity ?? 0,

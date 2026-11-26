@@ -16,6 +16,7 @@ $references = foreach ($name in 'Groundwork.Core','Groundwork.Rendering','Ground
 @'
 using System.Reflection;
 using Groundwork.Rendering.D3D12;
+using Groundwork.Rendering.Materials;
 using Groundwork.Voxels;
 
 // Managed ownership-state regression only. Native copy fences, staging release
@@ -27,6 +28,9 @@ var materials = type.GetMethod("Load", BindingFlags.NonPublic | BindingFlags.Sta
 var stream = (D3D12TextureHandoff)type.GetMethod("CreateStream", members)!.Invoke(materials, null)!;
 var resident = type.GetMethod("IsResident", members)!;
 var publish = type.GetMethod("Publish", members)!;
+var createPalette = type.GetMethod("CreatePalette", members)!;
+var publishPalette = type.GetMethod("PublishPalette", members)!;
+var installedTickets = new HashSet<D3D12TextureTicket>();
 var targets = (D3D12TextureTarget[])type.GetField("_targets", members)!.GetValue(materials)!;
 Require(targets.Length == 6, "The production manifest must supply all six texture targets.");
 var view = new D3D12TextureView(Guid.NewGuid(), new(1, 1, PlanetLocalFrame.Create(default)), 1, 1);
@@ -51,12 +55,38 @@ try
     }
     Require(Ready(false), "All six promoted residents must satisfy near readiness.");
     Require(!Ready(true), "Fine residents must not be mistaken for the fixed coarse orbit cut.");
+    var untextured = (MaterialPalette)createPalette.Invoke(materials, [2UL, false])!;
+    Require(untextured.Entries.ToArray().All(entry => entry.Descriptor.Textures == MaterialTextureSet.Empty),
+        "The disabled palette must preserve numeric materials without map references.");
+    Require((bool)publishPalette.Invoke(materials, [stream, view, untextured, false])!,
+        "The disabled palette must replace the active view.");
+    Schedule(false, untextured, texturesEnabled: false);
+    Require(!Ready(false) && !Ready(true) && !CompleteOne(), "Texture off must remove residents and queue no uploads.");
+    foreach (var ticket in installedTickets)
+        Require((bool)release.Invoke(stream, [ticket])!, "Disabled managed resident did not retire.");
+    installedTickets.Clear();
+
+    var textured = (MaterialPalette)createPalette.Invoke(materials, [3UL, true])!;
+    Require((bool)publishPalette.Invoke(materials, [stream, view, textured, true])!,
+        "Re-enabling textures must publish a newer palette on the same view.");
+    var original = (MaterialPalette)type.GetField("_palette", members)!.GetValue(materials)!;
+    foreach (var entry in original.Entries)
+    {
+        var fallback = untextured.Resolve(entry.MaterialId);
+        Require(fallback.BaseColor == entry.Descriptor.BaseColor && fallback.Emissive == entry.Descriptor.Emissive,
+            "The untextured palette must preserve terrain colors and the landing marker.");
+        Require(textured.Resolve(entry.MaterialId) == entry.Descriptor, "Re-enabling must restore the original material.");
+    }
+    Schedule(true, textured);
+    while (CompleteOne()) { }
+    Require(Ready(true), "All six coarse maps must reload after re-enabling textures.");
+
     var oldView = view;
     Require(view.View.Frame.TryRebase(new(64, 0, 0), out var rebased), "The test must cross an origin cell.");
     view = view with { View = new(1, 2, rebased), CoverageGeneration = 2 };
-    Schedule(false);
+    Schedule(false, textured);
     Require(!(bool)resident.Invoke(materials, [stream, oldView, false])!, "A superseded pre-rebase cut must not report ready.");
-    Console.WriteLine("PASSED: actual six-map residency rejects missing targets, wrong mip tiers and stale rebase cuts. No GPU used.");
+    Console.WriteLine("PASSED: six-map residency, texture off/on, numeric fallback and stale rebase cuts. No GPU used.");
 }
 finally
 {
@@ -64,9 +94,9 @@ finally
 }
 
 bool Ready(bool orbital) => (bool)resident.Invoke(materials, [stream, view, orbital])!;
-void Schedule(bool orbital)
+void Schedule(bool orbital, MaterialPalette? palette = null, bool texturesEnabled = true)
 {
-    var result = publish.Invoke(materials, [stream, view, orbital])!.ToString();
+    var result = publish.Invoke(materials, [stream, view, orbital, palette, texturesEnabled])!.ToString();
     Require(result is "Scheduled" or "Retry", "The production material publication unexpectedly stopped.");
 }
 bool CompleteOne()
@@ -80,7 +110,11 @@ bool CompleteOne()
     Require((bool)install.Invoke(stream, installed)!, "Managed resident installation failed.");
     var previous = (D3D12TextureTicket)installed[2]!;
     if (!previous.Equals(default(D3D12TextureTicket)))
+    {
         Require((bool)release.Invoke(stream, [previous])!, "Superseded managed resident did not release.");
+        installedTickets.Remove(previous);
+    }
+    installedTickets.Add(ticket);
     return true;
 }
 void Require(bool value, string message)
