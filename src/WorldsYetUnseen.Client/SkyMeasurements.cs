@@ -50,7 +50,7 @@ internal sealed partial class SkyMeasurements
     {
         var device = typeof(D3D12Renderer).Assembly.GetType("Groundwork.Rendering.D3D12.GpuDevice");
         if (device is null || FindPreviewMode(device)?.GetGetMethod(nonPublic: true)?.ReturnType != typeof(bool) ||
-            !HasPreviewAbi(device) || !HasPreviewAbi(typeof(RenderMesh)))
+            !HasPreviewAbi(device) || !HasPreviewAbi(typeof(RenderMesh)) || !DesktopSmoke.HasPreviewObjectDiagnostics)
             throw new InvalidOperationException("Twilight Preview requires the matching Groundwork Preview renderer.");
     }
 

@@ -40,6 +40,36 @@ var previewAbi = type.GetMethod("HasPreviewAbi", statics)!.CreateDelegate<Func<T
 Require(previewAbi(typeof(PreviewAbi)) && !previewAbi(typeof(MissingPreviewAbi)) &&
     !previewAbi(typeof(WrongPreviewAbi)) && !previewAbi(typeof(NonLiteralPreviewAbi)),
     "Twilight Preview accepted a missing, wrong or mutable ABI stamp.");
+var desktopSmoke = client.GetType("WorldsYetUnseen.Client.DesktopSmoke", true)!;
+var clean = desktopSmoke.GetMethod("HasCleanDebugSettlement", statics)!
+    .CreateDelegate<Func<D3D12DebugMessages?, bool, int, int, bool>>();
+var settled = new D3D12DebugMessages(1, 0, 0, 0, 0, 0);
+var retained = settled with { RetainedSessionQueue = true, LiveChildObjects = 3 };
+Require(clean(settled, false, 0, 0) && clean(retained with { LiveChildObjects = 1 }, true, 0, 0) &&
+    clean(retained, true, 2, 2) && clean(retained with { LiveChildObjects = 6 }, true, 5, 5),
+    "Clean shutdown, legacy queue or named Preview inventory was rejected.");
+Require(!clean(retained, false, 2, 2) && !clean(retained with { RetainedSessionQueue = false }, true, 2, 2) &&
+    !clean(retained with { LiveChildObjects = 4 }, true, 2, 2) && !clean(retained, true, 2, 0) &&
+    !clean(retained with { LiveChildObjects = 4 }, true, 3, 2) && !clean(retained, true, -1, 2) &&
+    !clean(retained with { LiveChildObjects = null }, true, 2, 2),
+    "Preview settlement accepted an unclassified, disallowed or out-of-range object count.");
+Require(!clean(retained with { Errors = 1 }, true, 2, 2) &&
+    !clean(retained with { Corruption = 1 }, true, 2, 2) &&
+    !clean(retained with { Discarded = 1 }, true, 2, 2) &&
+    !clean(retained with { LiveObjectReportResult = -1 }, true, 2, 2),
+    "Preview settlement accepted invalid native diagnostics.");
+var readPreviewObjects = desktopSmoke.GetMethod("ReadRetainedPreviewObjects", statics)!
+    .CreateDelegate<Func<D3D12DebugMessages, int>>();
+if (typeof(D3D12DebugMessages).GetProperty("RetainedSessionPreviewObjects") is null)
+{
+    var rejected = false;
+    try { _ = readPreviewObjects(settled); }
+    catch (InvalidOperationException) { rejected = true; }
+    Require(rejected, "Preview audit accepted a provider with no native classification.");
+}
+else
+    Require(readPreviewObjects(settled) == 0, "A new debug report did not start with zero classified objects.");
+Console.WriteLine("PASSED: classified preview settlement accepts only exact session objects and rejects invalid native reports.");
 var renderer = (D3D12Renderer)RuntimeHelpers.GetUninitializedObject(typeof(D3D12Renderer));
 GC.SuppressFinalize(renderer);
 var observer = type.GetConstructor(instance, null, [typeof(D3D12Renderer)], null)!.Invoke([renderer]);

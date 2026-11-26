@@ -39,6 +39,12 @@ the supported Preview ABI stamp in both assemblies before starting a session.
 Record client and renderer hashes with the evidence. Normal package restores,
 installed R09 measurement and release provenance checks use their established paths.
 
+The Preview handoff smoke checks the raw D3D12 live-object total against the
+named retained session queue and the provider's classified Preview inventory.
+Direct can retain two objects. Lookup can retain three, plus its parked texture
+and heap with reuse enabled. Unexpected objects or incomplete native diagnostics
+fail the smoke. Final shutdown requires zero live child objects.
+
 The X11D run started at 22:28 on 22 November pins Groundwork `d67d8d6` and
 WYU `0b194e3` with the prior immutable baseline `0.1.0-dev.45005277801.1`.
 Its results apply to those inputs.
