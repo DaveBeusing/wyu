@@ -595,6 +595,10 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             recovery ? VolumeWorkClass.Recovery : VolumeWorkClass.Movement, started);
         using var retained = timing is null ? null : terrain.TryRead()
             ?? throw new InvalidOperationException("R09 requires the previous terrain generation.");
+        using var independentCopy = timing?.Path is VolumeWorkClass.Movement or VolumeWorkClass.FirstEdit &&
+            R09RenderHost?.TexturePressure is { } texturePressure
+            ? await texturePressure.BeginAsync(renderer, terrain.WorldIdentity, retained!.Info, token).ConfigureAwait(false)
+            : null;
         VolumeViewIdentity view;
         if (returnTerrain is { } preparedReturn)
         {
@@ -656,7 +660,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         var pressure = returnTerrain?.Pressure ?? ownedPressure;
         var generated = returnTerrain?.Generated ?? (pressure is null
             ? ExecuteTerrainAsync(work, token)
-            : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token, earlyPrebuild));
+            : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token, earlyPrebuild, independentCopy));
         if (rendererReady is not null)
         {
             try
@@ -685,6 +689,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
             pauseWhileMinimized: relocation is null, r09Presentation: timing is null ? null :
                 new(timing.Path, "mask", terrain, view, work.Generation, mask)).ConfigureAwait(false);
+        if (independentCopy is not null)
+            await independentCopy.ObserveRetirementAsync(timing!.Path, mask, token).ConfigureAwait(false);
         if (timing is null)
         {
             var packSample = BiomeMeasurements.StartBuild();

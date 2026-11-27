@@ -17,11 +17,17 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
 {
     private readonly ProcessResourceBudget _budget = new(new ProcessResourceLimits(1, quota));
     private RuntimeSafetyAuthority? _runtime;
-    private readonly D3D12DeviceSession _device = new(
-        new D3D12DiagnosticsOptions(!measure, true) { EnableResourceSnapshots = qualifyR09 || SkyMeasurements.Enabled }, warp, reuseDirectQueue: true);
+    private D3D12DeviceSession? _device;
+    private D3D12DeviceSession Device => _device ??= new(new D3D12DiagnosticsOptions(!measure || TexturePressure is not null, true)
+    {
+        EnableResourceSnapshots = qualifyR09 || SkyMeasurements.Enabled,
+        TextureCopyQualification = TexturePressure?.Qualification,
+    }, warp, reuseDirectQueue: true);
     internal D3D12Renderer? Current { get; private set; }
     internal Wp11WarpReadback? WarpReadback { get; init; }
     internal R09NativeUploadGate? R09UploadGate { get; private set; }
+    internal R09IndependentTexturePressure? TexturePressure { get; } = qualifyR09 && R09IndependentTexturePressure.Requested
+        ? new() : null;
     private VolumeTerrainColorEvaluator? _colorEvaluator;
     private D3D12TextureHandoff? _materialStream;
     private D3D12TextureView? _materialCut;
@@ -56,15 +62,20 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
             D3D12Renderer renderer;
             if (OrbitMaterials is { } materials)
             {
+                if (TexturePressure is not null)
+                    throw new InvalidOperationException("R09 independent texture pressure uses Far Horizon without an Orbit material stream.");
                 renderer = D3D12Renderer.CreateWithTexturedSessionVolumeTerrain(window, owner, terrain,
-                    terrain.View.RendererEpoch, _device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
+                    terrain.View.RendererEpoch, Device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
                 var stream = materials.CreateStream();
                 renderer.AttachTextureHandoff(stream);
                 _materialStream = stream;
             }
             else
+            {
                 renderer = D3D12Renderer.CreateWithSessionVolumeTerrain(window, owner, terrain,
-                    terrain.View.RendererEpoch, _device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
+                    terrain.View.RendererEpoch, Device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
+                TexturePressure?.Attach(renderer);
+            }
             if (qualifyR09)
                 R09UploadGate = R09NativeUploadGate.Attach(renderer);
             if (ConstructionVisuals is { } buildings)
@@ -105,7 +116,7 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
         StartAsync(owner =>
         {
             if (!globe.Textured || OrbitMaterials is not { } materials)
-                return D3D12Renderer.CreateWithSessionMeshes(window, owner, globe.Meshes, _device,
+                return D3D12Renderer.CreateWithSessionMeshes(window, owner, globe.Meshes, Device,
                     timing.Shutdown, timing.Shutdown);
 
             var view = new VolumeViewIdentity(checked(near.View.RendererEpoch + 1), 1, PlanetLocalFrame.Create(default));
@@ -115,11 +126,11 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
             _orbitalMaterialCut = true;
             QueueMaterialCut(materials, stream, cut);
             var region = new RenderMeshRegion([globe.Meshes.First, globe.Meshes.Second]);
-            return D3D12Renderer.CreateWithSessionTexturedMeshes(window, owner, region, _device, stream, cut,
+            return D3D12Renderer.CreateWithSessionTexturedMeshes(window, owner, region, Device, stream, cut,
                 timing.Shutdown, timing.Shutdown);
         }, token);
 
-    public void Dispose() => _device.Dispose();
+    public void Dispose() => _device?.Dispose();
 
     private async Task StartAsync(Func<IRuntimeOwnership, D3D12Renderer> create, CancellationToken token,
         Action? onStarted = null)

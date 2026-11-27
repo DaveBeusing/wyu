@@ -153,7 +153,7 @@ internal sealed partial class VolumeExploration
 
         internal async Task<bool> RunProtectedAsync(VolumeStreamingWork work, R09Timing timing,
             VolumeStreamingCoordinator terrain, VolumeStreamingSelection selection, ulong revision, CancellationToken token,
-            R09EarlyPrebuild? earlyPrebuild = null)
+            R09EarlyPrebuild? earlyPrebuild = null, R09IndependentTexturePressure.Copy? independentCopy = null)
         {
             VolumeStreamingWork? privateWork = null;
             R09WorkerMeasurement? prebuild;
@@ -181,9 +181,19 @@ internal sealed partial class VolumeExploration
                     (privateWork, prebuild) = R09EarlyPrebuild.Offer(earlyPrebuild, timing);
                 }
 
-                var measurement = await MeasureWorkerAsync(work, privateWork, timing.Path.ToString(), token).ConfigureAwait(false);
+                var priorTerrain = (owner._ports.Committed.Read().Root as VolumeWorldRoot)?.Terrain;
+                var measurement = await MeasureWorkerAsync(work, privateWork, timing.Path.ToString(), token,
+                    independentCopy: independentCopy).ConfigureAwait(false);
                 if (measurement is not { } worker)
                     return false;
+                if (independentCopy is not null)
+                {
+                    RequireSaturated();
+                    if (priorTerrain is null || !terrain.Statistics.MovementHeld ||
+                        (owner._ports.Committed.Read().Root as VolumeWorldRoot)?.Terrain != priorTerrain)
+                        throw new InvalidOperationException("R09 lost the held terrain predecessor during independent GPU copy pressure.");
+                    independentCopy.Release(worker.Started, worker.Finished);
+                }
                 timing.WriteWorkers = () =>
                 {
                     prebuild?.Write(timing, "prebuild-worker");
@@ -208,7 +218,7 @@ internal sealed partial class VolumeExploration
 
         private async Task<R09WorkerMeasurement?> MeasureWorkerAsync(VolumeStreamingWork work,
             VolumeStreamingWork? privateWork, string description, CancellationToken token,
-            R09PublishedReuse reuse = R09PublishedReuse.None)
+            R09PublishedReuse reuse = R09PublishedReuse.None, R09IndependentTexturePressure.Copy? independentCopy = null)
         {
             RequireSaturated();
             long started = 0, finished = 0;
@@ -216,6 +226,7 @@ internal sealed partial class VolumeExploration
             VolumeStreamingWorkDetailedProfile profile = default;
             owner._r09Protected = cancellation =>
             {
+                independentCopy?.RequirePending();
                 started = Stopwatch.GetTimestamp();
                 if (reuse == R09PublishedReuse.Terrain)
                     completed = work.ExecuteDetailedProfiledReusingPublishedTerrain(out profile, cancellation);
@@ -225,6 +236,7 @@ internal sealed partial class VolumeExploration
                     completed = privateWork is null ? work.ExecuteDetailedProfiled(out profile, cancellation)
                         : work.ExecuteDetailedProfiled(privateWork, out profile, cancellation);
                 finished = Stopwatch.GetTimestamp();
+                independentCopy?.RequirePending();
                 return ValueTask.CompletedTask;
             };
             using var handle = Submit(R09JobScope.Protected);
