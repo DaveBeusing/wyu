@@ -64,9 +64,14 @@ function Get-DisplayedPresent($Row, [long]$Frequency) {
     $duration = Parse-Milliseconds $Row @('DisplayedTime')
     if ($null -eq $latency -or $null -eq $duration -or $duration -le 0) { return }
     $start = [long]$Row.CPUStartQPC + $latency * $Frequency / 1000
+    $address = $Row.PSObject.Properties['SwapChainAddress']?.Value
+    $swapChain = if ($address -match '^0x([0-9a-f]{1,16})$') {
+        $parsed = [Convert]::ToUInt64($Matches[1], 16)
+        if ($parsed -ne 0) { '0x{0:x}' -f $parsed }
+    }
     [pscustomobject]@{
         CpuQpc=[long]$Row.CPUStartQPC; StartQpc=$start; EndQpc=$start + $duration * $Frequency / 1000
-        DurationMs=$duration; SwapChain=$Row.PSObject.Properties['SwapChainAddress']?.Value
+        DurationMs=$duration; SwapChain=$swapChain
     }
 }
 
@@ -88,9 +93,10 @@ function Get-FlightHandoffDisplay($Crossing, $Displayed, [long]$Frequency, [long
     $old = @($window | Where-Object { $_.StartQpc -lt $Crossing.StartQpc } | Select-Object -Last 2)
     $new = @($window | Where-Object { $_.StartQpc -ge $Crossing.EndQpc } | Select-Object -Last 2)
     if ($old.Count -ne 2 -or $new.Count -ne 2 -or
-        $old[0].SwapChain -notmatch '^0x[0-9a-f]*[1-9a-f][0-9a-f]*$' -or
-        $new[0].SwapChain -notmatch '^0x[0-9a-f]*[1-9a-f][0-9a-f]*$' -or
-        $old[0].SwapChain -ine $old[1].SwapChain -or $new[0].SwapChain -ine $new[1].SwapChain) {
+        !$old[0].SwapChain -or !$new[0].SwapChain -or
+        $old[0].SwapChain -cne $old[1].SwapChain -or $new[0].SwapChain -cne $new[1].SwapChain -or
+        $old[0].CpuQpc -eq $old[1].CpuQpc -or $new[0].CpuQpc -eq $new[1].CpuQpc -or
+        $old[0].StartQpc -eq $old[1].StartQpc -or $new[0].StartQpc -eq $new[1].StartQpc) {
         $result.Reason = 'No stable displayed swap chain on both sides of the handoff.'
         return [pscustomobject]$result
     }
@@ -324,6 +330,17 @@ $incompleteFlightMarkers = @(foreach ($run in ($runs | Where-Object { $_.ReplayP
     }
 })
 $presentSamples = [Collections.Generic.List[object]]::new()
+function New-DisplayCrossingRow($Crossing, $Peak, $Status, $Reason, $Handoff) {
+    [pscustomobject]@{
+        Run=$Crossing.Run; Pair=$Crossing.Pair; Variant=$Crossing.Variant; Phase=$Crossing.Phase
+        Step=$Crossing.Step; Generation=$Crossing.Generation; StartQpc=$Crossing.StartQpc; EndQpc=$Crossing.EndQpc
+        LongestOverlappingDisplayIntervalMs=$Peak; DisplayStatus=$Status; DisplayReason=$Reason
+        HandoffDisplayIntervalMs=${Handoff}?.HandoffDisplayIntervalMs; UnclassifiedGapMs=${Handoff}?.UnclassifiedGapMs
+        OldSwapChain=${Handoff}?.OldSwapChain; NewSwapChain=${Handoff}?.NewSwapChain
+        LastOldDisplayQpc=${Handoff}?.LastOldDisplayQpc; FirstNewDisplayQpc=${Handoff}?.FirstNewDisplayQpc
+    }
+}
+
 $visibleCrossings = [Collections.Generic.List[object]]::new()
 if (($capture -or $external) -and !$traceError -and (Test-Path -LiteralPath $trace -PathType Leaf)) {
     $presents = Import-Csv -LiteralPath $trace | Group-Object ProcessID -AsHashTable -AsString
@@ -369,14 +386,7 @@ if (($capture -or $external) -and !$traceError -and (Test-Path -LiteralPath $tra
                 }
                 if ($null -ne $peak) { $status = 'OBSERVED'; $reason = $null }
             }
-            $visibleCrossings.Add([pscustomobject]@{
-                Run=$crossing.Run; Pair=$crossing.Pair; Variant=$crossing.Variant; Phase=$crossing.Phase
-                Step=$crossing.Step; Generation=$crossing.Generation; StartQpc=$crossing.StartQpc; EndQpc=$crossing.EndQpc
-                LongestOverlappingDisplayIntervalMs=$peak; DisplayStatus=$status; DisplayReason=$reason
-                HandoffDisplayIntervalMs=$handoff?.HandoffDisplayIntervalMs; UnclassifiedGapMs=$handoff?.UnclassifiedGapMs
-                OldSwapChain=$handoff?.OldSwapChain; NewSwapChain=$handoff?.NewSwapChain
-                LastOldDisplayQpc=$handoff?.LastOldDisplayQpc; FirstNewDisplayQpc=$handoff?.FirstNewDisplayQpc
-            })
+            $visibleCrossings.Add((New-DisplayCrossingRow $crossing $peak $status $reason $handoff))
         }
     }
 }

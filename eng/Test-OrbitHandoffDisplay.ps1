@@ -7,7 +7,7 @@ $errors = $null
 $script = [Management.Automation.Language.Parser]::ParseFile(
     (Join-Path $PSScriptRoot 'Measure-OrbitTerrainPbr.ps1'), [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw ($errors -join "`n") }
-foreach ($name in 'Parse-Milliseconds','Get-DisplayedPresent','Get-FlightHandoffDisplay') {
+foreach ($name in 'Parse-Milliseconds','Get-DisplayedPresent','Get-FlightHandoffDisplay','New-DisplayCrossingRow') {
     $definition = $script.Find({
         param($element)
         $element -is [Management.Automation.Language.FunctionDefinitionAst] -and $element.Name -ceq $name
@@ -18,7 +18,10 @@ foreach ($name in 'Parse-Milliseconds','Get-DisplayedPresent','Get-FlightHandoff
 
 $invariant = [Globalization.CultureInfo]::InvariantCulture
 $frequency = 10000L
-$crossing = [pscustomobject]@{ StartQpc=20000L; EndQpc=22000L }
+$crossing = [pscustomobject]@{
+    Run='01-baseline'; Pair=1; Variant='baseline'; Phase='orbit'
+    Step='flight'; Generation=2; StartQpc=20000L; EndQpc=22000L
+}
 function New-DisplayedRow([string]$Address, [long]$Cpu, [double]$Latency, [double]$Duration) {
     Get-DisplayedPresent ([pscustomobject]@{
         SwapChainAddress=$Address; CPUStartQPC=$Cpu
@@ -33,11 +36,23 @@ $measured = Get-FlightHandoffDisplay $crossing ($old + $new) $frequency 1000 400
 if ($measured.Status -cne 'OBSERVED' -or $measured.LastOldDisplayQpc -ne 20100 -or
     $measured.FirstNewDisplayQpc -ne 22200 -or $measured.HandoffDisplayIntervalMs -ne 210 -or
     $measured.UnclassifiedGapMs -ne 193) { throw 'Expected a displayed bracket extending beyond the first renderer receipt.' }
+$flightRow = New-DisplayCrossingRow $crossing $null $measured.Status $measured.Reason $measured
+$surfaceRow = New-DisplayCrossingRow $crossing 27.3 'OBSERVED' $null $null
+if ($flightRow.HandoffDisplayIntervalMs -ne 210 -or $flightRow.FirstNewDisplayQpc -ne 22200 -or
+    $surfaceRow.LongestOverlappingDisplayIntervalMs -ne 27.3 -or $null -ne $surfaceRow.FirstNewDisplayQpc) {
+    throw 'Expected separate flight and surface columns in the crossing CSV.'
+}
 
-$reused = @((New-DisplayedRow '0x01' 21700 50 17), (New-DisplayedRow '0x01' 21900 50 17))
+$reused = @((New-DisplayedRow '0x001' 21700 50 17), (New-DisplayedRow '0x1' 21900 50 17))
 $blocked = Get-FlightHandoffDisplay $crossing ($old + $reused) $frequency 1000 40000
 if ($blocked.Status -cne 'BLOCKED' -or $blocked.Reason -notlike 'Repeated swap-chain address*' -or
     $null -ne $blocked.HandoffDisplayIntervalMs) { throw 'A recycled address must fail closed.' }
+
+$duplicates = @($old[1], $old[1], $new[0], $new[0])
+$blocked = Get-FlightHandoffDisplay $crossing $duplicates $frequency 1000 40000
+if ($blocked.Status -cne 'BLOCKED' -or $blocked.Reason -notlike 'No stable displayed swap chain*') {
+    throw 'A repeated ETW row cannot corroborate renderer identity.'
+}
 
 $interleaved = $old + $new + (New-DisplayedRow '0x01' 21800 50 17)
 $blocked = Get-FlightHandoffDisplay $crossing $interleaved $frequency 1000 40000
