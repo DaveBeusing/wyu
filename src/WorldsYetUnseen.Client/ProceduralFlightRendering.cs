@@ -74,10 +74,15 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
             {
                 renderer = D3D12Renderer.CreateWithSessionVolumeTerrain(window, owner, terrain,
                     terrain.View.RendererEpoch, Device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
-                TexturePressure?.Attach(renderer);
             }
             if (qualifyR09)
                 R09UploadGate = R09NativeUploadGate.Attach(renderer);
+            if (TexturePressure is { } pressure)
+            {
+                if (R09UploadGate?.Twilight is null)
+                    throw new InvalidOperationException("Independent R09 texture pressure requires Far Horizon Direct Twilight.");
+                pressure.Attach(renderer);
+            }
             if (ConstructionVisuals is { } buildings)
                 buildings.Attach(renderer, Props);
             else

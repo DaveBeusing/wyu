@@ -42,11 +42,14 @@ internal sealed class R09IndependentTexturePressure
             new(MaterialTextureSemantic.BaseColor, _texture.AssetId));
         if (!stream.Publish(view, revision, [target]) || stream.TryRequest(view, target, Credit, out var ticket) != D3D12TextureResult.Accepted)
             throw new InvalidOperationException("R09 could not reserve the independent optional copy.");
-        var hold = Qualification.Arm(ticket);
+        D3D12TextureCopyQualification.Hold? hold = null;
+        var transferred = false;
         try
         {
+            hold = Qualification.Arm(ticket);
             if (stream.TryComplete(ticket, _texture) != D3D12TextureResult.Accepted)
                 throw new InvalidOperationException("R09 could not transfer the optional cooked texture.");
+            transferred = true;
             var submission = await hold.Submitted.WaitAsync(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
             if (submission.Ticket != ticket || submission.CopyFence == 0 || submission.WaitQueuedAt <= 0 ||
                 submission.SubmittedAt < submission.WaitQueuedAt)
@@ -58,7 +61,9 @@ internal sealed class R09IndependentTexturePressure
         }
         catch
         {
-            hold.Dispose();
+            hold?.Dispose();
+            if (!transferred)
+                stream.CompleteWorker(ticket);
             throw;
         }
     }
