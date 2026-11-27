@@ -395,7 +395,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                     ReportProfile(profile.Interrupt("Profile render origin changed."));
                 var crossingStarted = scripted && orbitDemo && OrbitPbrMeasurements.Enabled
                     ? Stopwatch.GetTimestamp() : 0;
-                await LoadAsync(terrain, renderer, state.Position, state.Heading, rebased, token).ConfigureAwait(false);
+                await LoadAsync(terrain, renderer, state.Position, state.Heading, rebased, token,
+                    reusePublishedRebase: ReferenceDaylight.PreviewEnabled).ConfigureAwait(false);
                 OrbitPbrMeasurements.WriteCrossing(steps, _published.Generation, crossingStarted);
                 // A new tick must capture focus, surface and keys after the potentially long load.
                 continue;
@@ -588,7 +589,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null,
         bool recovery = false, long? operationStarted = null, long handoffStarted = 0,
         R09EarlyPrebuild? earlyPrebuild = null, FlightReturnReadback? warpReturn = null,
-        ConsoleRelocationAttempt? relocation = null)
+        ConsoleRelocationAttempt? relocation = null, bool reusePublishedRebase = false)
     {
         var started = operationStarted ?? Stopwatch.GetTimestamp();
         var timing = returnTerrain?.Timing ?? StartR09(edit is not null ? VolumeWorkClass.FirstEdit :
@@ -659,7 +660,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             ? await StartR09PressureAsync(token).ConfigureAwait(false) : null;
         var pressure = returnTerrain?.Pressure ?? ownedPressure;
         var generated = returnTerrain?.Generated ?? (pressure is null
-            ? ExecuteTerrainAsync(work, token)
+            ? ExecuteTerrainAsync(work, token, reusePublishedRebase: reusePublishedRebase)
             : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token, earlyPrebuild, independentCopy));
         if (rendererReady is not null)
         {
@@ -812,11 +813,12 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             ? "The terrain streaming budget is full. The planet could not load. Close the game and try again."
             : $"The planet could not load terrain ({result}). Close the game and try again.");
 
-    private static Task<bool> ExecuteTerrainAsync(VolumeStreamingWork work, CancellationToken token, string phase = "terrain-build") =>
+    private static Task<bool> ExecuteTerrainAsync(VolumeStreamingWork work, CancellationToken token,
+        string phase = "terrain-build", bool reusePublishedRebase = false) =>
         Task.Run(() =>
         {
             var started = BiomeMeasurements.Start();
-            var result = work.Execute(token);
+            var result = reusePublishedRebase ? work.ExecuteReusingPublishedAtRebase(token) : work.Execute(token);
             BiomeMeasurements.Write(phase, started);
             return result;
         }, token);
