@@ -796,8 +796,12 @@ try {
         $manifest.wyuCommit -cnotmatch '^[A-Fa-f0-9]{40}$' -or $manifest.groundworkCommit -cnotmatch '^[A-Fa-f0-9]{40}$' -or
         $manifest.groundworkManifestSha256 -cnotmatch '^[A-Fa-f0-9]{64}$' -or
         $manifest.installerSha256 -cnotmatch '^[A-Fa-f0-9]{64}$') { throw 'Unexpected win-x64 installer manifest.' }
-    if ($DiagnosticR09Installer -and $manifest.installer -cnotmatch '^WYU-R09-\d+\.\d+\.\d+-win-x64\.exe$') {
-        throw 'The local R09 diagnostic run requires the verified R09-specific installer.'
+    if ($DiagnosticR09Installer) {
+        $isolated = $manifest.PSObject.Properties['diagnosticR09Instance']?.Value
+        if ($manifest.installer -cnotmatch '^WYU-R09-\d+\.\d+\.\d+-win-x64\.exe$' -or
+            $isolated -isnot [bool] -or !$isolated) {
+            throw 'The local R09 diagnostic run requires the verified isolated R09 installer.'
+        }
     }
     if ($TwilightPressure -and !$DiagnosticR09Installer -and
         $manifest.installer -cnotmatch '^WYU-Twilight-Preview-Unqualified-\d+\.\d+\.\d+-win-x64\.exe$') {
@@ -813,6 +817,7 @@ try {
         IndependentGpuCopyPressure = $false
         IndependentGpuCopyPaths = if ($IndependentTextureCopy) { @('Movement','FirstEdit') } else { @() }
         DiagnosticR09Installer = [bool]$DiagnosticR09Installer
+        VerifiedIsolatedR09Instance = [bool]$DiagnosticR09Installer
         InstallerEvidence = if ($DiagnosticR09Installer) { 'Local R09 diagnostic only' }
             elseif ($TwilightPressure) { 'Unqualified Twilight Preview' } else { 'Installed R09 fixture' }
         RecoveryMode = $RecoveryMode
