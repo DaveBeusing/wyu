@@ -59,6 +59,67 @@ function Parse-Milliseconds($Row, [string[]]$Columns) {
     }
 }
 
+function Get-DisplayedPresent($Row, [long]$Frequency) {
+    $latency = Parse-Milliseconds $Row @('DisplayLatency')
+    $duration = Parse-Milliseconds $Row @('DisplayedTime')
+    if ($null -eq $latency -or $null -eq $duration -or $duration -le 0) { return }
+    $start = [long]$Row.CPUStartQPC + $latency * $Frequency / 1000
+    [pscustomobject]@{
+        CpuQpc=[long]$Row.CPUStartQPC; StartQpc=$start; EndQpc=$start + $duration * $Frequency / 1000
+        DurationMs=$duration; SwapChain=$Row.PSObject.Properties['SwapChainAddress']?.Value
+    }
+}
+
+function Get-FlightHandoffDisplay($Crossing, $Displayed, [long]$Frequency, [long]$CaptureStart, [long]$CaptureEnd) {
+    $result = [ordered]@{
+        Status='BLOCKED'; Reason=$null; OldSwapChain=$null; NewSwapChain=$null
+        LastOldDisplayQpc=$null; FirstNewDisplayQpc=$null; HandoffDisplayIntervalMs=$null; UnclassifiedGapMs=$null
+    }
+    # Require one second of captured context on each side. This is an ownership observation window,
+    # not a performance threshold. Do not claim a bracket at an incomplete capture boundary.
+    $before = $Crossing.StartQpc - $Frequency
+    $after = $Crossing.EndQpc + $Frequency
+    if ($Crossing.EndQpc -le $Crossing.StartQpc -or $before -lt $CaptureStart -or $after -gt $CaptureEnd) {
+        $result.Reason = 'Incomplete capture around renderer handoff.'
+        return [pscustomobject]$result
+    }
+
+    $window = @($Displayed | Where-Object { $_.StartQpc -ge $before -and $_.StartQpc -le $after } | Sort-Object StartQpc)
+    $old = @($window | Where-Object { $_.StartQpc -lt $Crossing.StartQpc } | Select-Object -Last 2)
+    $new = @($window | Where-Object { $_.StartQpc -ge $Crossing.EndQpc } | Select-Object -Last 2)
+    if ($old.Count -ne 2 -or $new.Count -ne 2 -or
+        $old[0].SwapChain -notmatch '^0x[0-9a-f]*[1-9a-f][0-9a-f]*$' -or
+        $new[0].SwapChain -notmatch '^0x[0-9a-f]*[1-9a-f][0-9a-f]*$' -or
+        $old[0].SwapChain -ine $old[1].SwapChain -or $new[0].SwapChain -ine $new[1].SwapChain) {
+        $result.Reason = 'No stable displayed swap chain on both sides of the handoff.'
+        return [pscustomobject]$result
+    }
+    $result.OldSwapChain = $old[0].SwapChain
+    $result.NewSwapChain = $new[0].SwapChain
+    if ($result.OldSwapChain -ieq $result.NewSwapChain) {
+        $result.Reason = 'Repeated swap-chain address cannot establish distinct renderer lifetimes without native owner identity.'
+        return [pscustomobject]$result
+    }
+
+    $ownership = @($window | Where-Object { $_.StartQpc -ge $old[0].StartQpc })
+    $firstNew = @($ownership | Where-Object { $_.SwapChain -ieq $result.NewSwapChain })[0]
+    $lastOld = @($ownership | Where-Object { $_.SwapChain -ieq $result.OldSwapChain })[-1]
+    if ($firstNew.StartQpc -lt $Crossing.StartQpc -or $lastOld.StartQpc -ge $firstNew.StartQpc -or
+        $lastOld.EndQpc -gt $firstNew.StartQpc + ($Frequency / 1000000) -or
+        $firstNew.EndQpc -gt $CaptureEnd -or $firstNew.CpuQpc -lt $CaptureStart -or $lastOld.CpuQpc -lt $CaptureStart -or
+        @($ownership | Where-Object { $_.SwapChain -ine $result.OldSwapChain -and $_.SwapChain -ine $result.NewSwapChain }).Count) {
+        $result.Reason = 'Displayed swap-chain transition was ambiguous or beyond finite capture coverage.'
+        return [pscustomobject]$result
+    }
+
+    $result.Status = 'OBSERVED'
+    $result.LastOldDisplayQpc = $lastOld.StartQpc
+    $result.FirstNewDisplayQpc = $firstNew.StartQpc
+    $result.HandoffDisplayIntervalMs = 1000.0 * ($firstNew.StartQpc - $lastOld.StartQpc) / $Frequency
+    $result.UnclassifiedGapMs = 1000.0 * [Math]::Max(0, $firstNew.StartQpc - $lastOld.EndQpc) / $Frequency
+    return [pscustomobject]$result
+}
+
 function Save-Raw {
     $runs | Export-Csv -LiteralPath (Join-Path $output 'runs.csv') -NoTypeInformation
     $frames | Export-Csv -LiteralPath (Join-Path $output 'receipts.csv') -NoTypeInformation
@@ -255,10 +316,19 @@ if ($externalSession) {
     }
 }
 $valid = @($runs | Where-Object ReplayPassed | ForEach-Object Run)
+$incompleteFlightMarkers = @(foreach ($run in ($runs | Where-Object { $_.ReplayPassed -and $_.Route -ceq 'flight' })) {
+    foreach ($phase in 'to-orbit','to-ground') {
+        if (@($crossings | Where-Object { $_.Run -ceq $run.Run -and $_.Phase -ceq $phase }).Count -ne 1) {
+            "$($run.Run)/$phase"
+        }
+    }
+})
 $presentSamples = [Collections.Generic.List[object]]::new()
 $visibleCrossings = [Collections.Generic.List[object]]::new()
 if (($capture -or $external) -and !$traceError -and (Test-Path -LiteralPath $trace -PathType Leaf)) {
     $presents = Import-Csv -LiteralPath $trace | Group-Object ProcessID -AsHashTable -AsString
+    $captureStart = if ($external) { [long]$result.CaptureStartQpc } else { $routeStartQpc }
+    $captureEnd = if ($external) { [long]$result.CaptureEndQpc } else { $routeEndQpc }
     foreach ($batch in ($frames | Where-Object { $_.Run -in $valid } | Group-Object Run)) {
         $route = @($batch.Group)
         $rows = @($presents[[string]$route[0].Pid] | Where-Object { $_.CPUStartQPC -match '^\d+$' } |
@@ -280,21 +350,32 @@ if (($capture -or $external) -and !$traceError -and (Test-Path -LiteralPath $tra
                 DisplayedMs=Parse-Milliseconds $row @('DisplayedTime')
             })
         }
+        $displayed = @($rows | ForEach-Object { Get-DisplayedPresent $_ $frequency })
         foreach ($crossing in @($crossings | Where-Object Run -ceq $batch.Name)) {
             $peak = $null
-            foreach ($row in $rows) {
-                $latency = Parse-Milliseconds $row @('DisplayLatency')
-                $duration = Parse-Milliseconds $row @('DisplayedTime')
-                if ($null -eq $latency -or $null -eq $duration -or $duration -le 0) { continue }
-                $displayStart = [long]$row.CPUStartQPC + $latency * $frequency / 1000
-                $displayEnd = $displayStart + $duration * $frequency / 1000
-                if ($displayStart -lt $crossing.EndQpc -and $displayEnd -gt $crossing.StartQpc -and
-                    ($null -eq $peak -or $duration -gt $peak)) { $peak = $duration }
+            $handoff = $null
+            $status = 'BLOCKED'
+            $reason = 'No displayed surface interval overlapped the crossing.'
+            if ($crossing.Pid -ne $route[0].Pid) {
+                $reason = 'Crossing and renderer receipts have different process identities.'
+            } elseif ($crossing.Route -ceq 'flight') {
+                $handoff = Get-FlightHandoffDisplay $crossing $displayed $frequency $captureStart $captureEnd
+                $status = $handoff.Status
+                $reason = $handoff.Reason
+            } else {
+                foreach ($row in $displayed) {
+                    if ($row.StartQpc -lt $crossing.EndQpc -and $row.EndQpc -gt $crossing.StartQpc -and
+                        ($null -eq $peak -or $row.DurationMs -gt $peak)) { $peak = $row.DurationMs }
+                }
+                if ($null -ne $peak) { $status = 'OBSERVED'; $reason = $null }
             }
             $visibleCrossings.Add([pscustomobject]@{
                 Run=$crossing.Run; Pair=$crossing.Pair; Variant=$crossing.Variant; Phase=$crossing.Phase
                 Step=$crossing.Step; Generation=$crossing.Generation; StartQpc=$crossing.StartQpc; EndQpc=$crossing.EndQpc
-                LongestOverlappingDisplayIntervalMs=$peak
+                LongestOverlappingDisplayIntervalMs=$peak; DisplayStatus=$status; DisplayReason=$reason
+                HandoffDisplayIntervalMs=$handoff?.HandoffDisplayIntervalMs; UnclassifiedGapMs=$handoff?.UnclassifiedGapMs
+                OldSwapChain=$handoff?.OldSwapChain; NewSwapChain=$handoff?.NewSwapChain
+                LastOldDisplayQpc=$handoff?.LastOldDisplayQpc; FirstNewDisplayQpc=$handoff?.FirstNewDisplayQpc
             })
         }
     }
@@ -333,10 +414,13 @@ $runsWithDisplayedFrames = @($presentSamples | Where-Object { $_.DisplayedMs -gt
     EvidenceLabel=$EvidenceLabel; CompleteReplayCount=$valid.Count; InvalidReplayCount=$runs.Count-$valid.Count
     PresentMonRows=$presentSamples.Count; PresentMonError=$traceError
     RoutesWithDisplayedFrames=$runsWithDisplayedFrames.Count
-    CrossingsWithDisplayIntervals=@($visibleCrossings | Where-Object { $null -ne $_.LongestOverlappingDisplayIntervalMs }).Count
+    CrossingsWithDisplayIntervals=@($visibleCrossings | Where-Object DisplayStatus -ceq 'OBSERVED').Count
     ExpectedCrossings=$crossings.Count
+    IncompleteFlightMarkers=$incompleteFlightMarkers
     CompleteReferenceAcceptance=$false
     MeasurementLimits=@('Renderer receipt is an observer interval, separate from display timing.',
+        'Flight handoffs use last observed old-swap-chain to first observed new-swap-chain display. Unclassified gaps do not indicate what was displayed.',
+        'A reused address requires independent renderer-lifetime evidence. CSV coverage alone does not prove absence of ETW event loss.',
         'PresentMon GPU Busy measures active GPU time and application CPU Busy is not render-owner CPU time.',
         'Script covers the ordinary surface route, its turn/rebase and optional scripted flight. Dedicated dense/open scenarios and mixed-load WP11 acceptance are separate.',
         'Texture backing high-water comes from native texture diagnostics. Staging is sampled and retirement is combined with native current backing.')
@@ -345,7 +429,7 @@ $summary | Where-Object { $_.Metric -in 'SubmitToReceiptMs','GpuBusyMs','Display
 Write-Host "Orbit PBR evidence saved in $output."
 if ($runs.Count -ne $valid.Count) { exit 1 }
 if ($external -and ($traceError -or $runsWithDisplayedFrames.Count -ne $valid.Count -or
-    @($visibleCrossings | Where-Object { $null -ne $_.LongestOverlappingDisplayIntervalMs }).Count -ne $crossings.Count -or
-    $crossings.Count -eq 0)) {
+    @($visibleCrossings | Where-Object DisplayStatus -ceq 'OBSERVED').Count -ne $crossings.Count -or
+    $crossings.Count -eq 0 -or $incompleteFlightMarkers.Count)) {
     Write-Error 'External display capture did not cover every replay and crossing.'
 }
