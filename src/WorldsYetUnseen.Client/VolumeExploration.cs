@@ -705,7 +705,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
         else
         {
-            await StageR09UploadAsync(timing, pressure!, terrain, renderer, work.Generation, retained!, token)
+            await StageR09UploadAsync(timing, pressure!, terrain, renderer, work.Generation, mask, retained!, token)
                 .ConfigureAwait(false);
             Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
             await BeginAsync(token).ConfigureAwait(false);

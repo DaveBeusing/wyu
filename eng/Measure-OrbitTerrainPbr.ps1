@@ -3,17 +3,25 @@ param(
     [Parameter(Mandatory)][string]$OutputDirectory,
     [ValidateRange(1, 20)][int]$Pairs = 5,
     [string]$PresentMon,
+    [string]$ExternalPresentMonDirectory,
+    [ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedPresentMonSha256,
     [switch]$IncludeFlight,
     [string]$EvidenceLabel = 'workstation'
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($PresentMon -and $ExternalPresentMonDirectory) { throw 'Select a single PresentMon acquisition mode.' }
+if ([bool]$ExternalPresentMonDirectory -ne [bool]$ExpectedPresentMonSha256) {
+    throw 'External PresentMon requires the independently verified collector SHA-256.'
+}
 $path = (Resolve-Path -LiteralPath $Client).Path
 $dotnet = [IO.Path]::GetExtension($path) -ieq '.dll'
 $command = if ($dotnet) { (Get-Command dotnet).Source } else { $path }
+$processName = if ($dotnet) { 'dotnet.exe' } else { Split-Path $path -Leaf }
 $output = (New-Item -ItemType Directory -Path $OutputDirectory).FullName
 $capture = if ($PresentMon) { (Resolve-Path -LiteralPath $PresentMon).Path }
+$external = if ($ExternalPresentMonDirectory) { (Resolve-Path -LiteralPath $ExternalPresentMonDirectory).Path }
 $frequency = [Diagnostics.Stopwatch]::Frequency
 $invariant = [Globalization.CultureInfo]::InvariantCulture
 $frames = [Collections.Generic.List[object]]::new()
@@ -129,10 +137,14 @@ function Invoke-Arm([int]$Pair, $Variant, [string]$Route) {
     Write-Host "$key frames=$count valid=$pass exit=$code"
 }
 
-$trace = Join-Path $output 'presentmon.csv'
+$trace = Join-Path ($external ?? $output) 'presentmon.csv'
 $session = 'WyuOrbitPbr-' + [guid]::NewGuid().ToString('N')
 $process = $null
 $traceError = $null
+$externalSession = $null
+$externalClaimed = $false
+$routeStartQpc = 0L
+$routeEndQpc = 0L
 $metadata = [ordered]@{
     EvidenceLabel=$EvidenceLabel; Client=(Split-Path $path -Leaf); ClientSha256=(Get-Hash $path)
     ClientAssemblySha256=(Get-Hash (Join-Path (Split-Path $path) 'WorldsYetUnseen.Client.dll'))
@@ -140,7 +152,7 @@ $metadata = [ordered]@{
     OS=[Environment]::OSVersion.VersionString; LogicalProcessors=[Environment]::ProcessorCount
     Processor=$env:PROCESSOR_IDENTIFIER; QpcFrequency=$frequency; Seed=42; Width=1920; Height=1080
     Pairs=$Pairs; IncludesFlight=$IncludeFlight.IsPresent; WarmupFramesPerRoute=40
-    PresentMonSha256=(Get-Hash $capture); StartUtc=[DateTime]::UtcNow
+    PresentMonSha256=(Get-Hash $capture); ExternalPresentMon=[bool]$external; StartUtc=[DateTime]::UtcNow
 }
 try {
     $metadata['Display'] = @(Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,
@@ -153,14 +165,40 @@ $metadata | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $outpu
 try {
     foreach ($name in $environment.Keys) { [Environment]::SetEnvironmentVariable($name, $environment[$name]) }
     if ($capture) {
-        $exeName = if ($dotnet) { 'dotnet.exe' } else { Split-Path $path -Leaf }
-        $options = @('--process_name', ('"' + $exeName + '"'), '--session_name', $session,
+        $options = @('--process_name', ('"' + $processName + '"'), '--session_name', $session,
             '--no_console_stats', '--no_track_input', '--v2_metrics', '--qpc_time',
             '--output_file', ('"' + $trace + '"'))
         $process = Start-Process -FilePath $capture -ArgumentList $options -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $output 'presentmon.stderr') -RedirectStandardOutput (Join-Path $output 'presentmon.stdout')
         Start-Sleep -Seconds 2
         if ($process.HasExited) { $traceError = 'PresentMon exited at startup; inspect presentmon.stderr.' }
     }
+    if ($external) {
+        $ready = Join-Path $external 'ready.json'
+        $stopFile = Join-Path $external 'stop.requested'
+        $resultFile = Join-Path $external 'collector-result.json'
+        if (!(Test-Path -LiteralPath $ready -PathType Leaf) -or (Test-Path -LiteralPath $stopFile) -or
+            (Test-Path -LiteralPath $resultFile)) { throw 'Expected a ready, fresh external PresentMon session.' }
+        $externalSession = Get-Content -LiteralPath $ready -Raw | ConvertFrom-Json
+        if ($externalSession.Status -cne 'READY' -or $externalSession.Mode -cne 'Display' -or
+            $externalSession.RunId -cnotmatch '^[a-f0-9]{32}$' -or
+            (Split-Path -Leaf $external) -cne "p-$($externalSession.RunId)" -or $external -eq $output -or
+            $externalSession.Target -cne $processName -or
+            $externalSession.SessionName -cne "WyuPresent_$($externalSession.RunId)" -or
+            $externalSession.PresentMonSha256 -ine $ExpectedPresentMonSha256 -or
+            [long]$externalSession.QpcFrequency -ne $frequency -or [long]$externalSession.ReadyQpc -le 0) {
+            throw 'Invalid external PresentMon ownership record.'
+        }
+        foreach ($inputPath in $external,$ready) {
+            if ((Get-Item -LiteralPath $inputPath).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'External PresentMon handshake must use its original files.'
+            }
+        }
+        if ([long]$externalSession.ReadyQpc -gt [Diagnostics.Stopwatch]::GetTimestamp()) { throw 'External PresentMon is not ready for this run.' }
+        New-Item -ItemType File -Path (Join-Path $external 'runner.claimed') | Out-Null
+        $externalClaimed = $true
+        Copy-Item -LiteralPath $ready -Destination (Join-Path $output 'presentmon-ready.json')
+    }
+    $routeStartQpc = [Diagnostics.Stopwatch]::GetTimestamp()
     # Rotate and reverse a balanced four-arm order so thermal/ordering drift is observable.
     $orders = @([int[]](0,1,3,2), [int[]](1,2,0,3), [int[]](2,3,1,0), [int[]](3,0,2,1))
     for ($pair = 1; $pair -le $Pairs; $pair++) {
@@ -170,18 +208,56 @@ try {
         }
     }
 } finally {
+    $routeEndQpc = [Diagnostics.Stopwatch]::GetTimestamp()
     foreach ($name in $previous.Keys) { [Environment]::SetEnvironmentVariable($name, $previous[$name]) }
     if ($process -and !$process.HasExited) {
         & $capture --session_name $session --terminate_existing_session *> (Join-Path $output 'presentmon-stop.log')
         if (!$process.WaitForExit(10000)) { $traceError = 'PresentMon did not finish; inspect the recording files.' }
     }
+    if ($externalClaimed -and
+        !(Test-Path -LiteralPath $resultFile) -and !(Test-Path -LiteralPath $stopFile)) {
+        New-Item -ItemType File -Path $stopFile | Out-Null
+        $deadline = [Diagnostics.Stopwatch]::StartNew()
+        while (!(Test-Path -LiteralPath $resultFile -PathType Leaf) -and $deadline.Elapsed.TotalSeconds -lt 45) {
+            Start-Sleep -Milliseconds 200
+        }
+    }
     Save-Raw
 }
 
+if ($externalSession) {
+    if (!(Test-Path -LiteralPath $resultFile -PathType Leaf)) {
+        $traceError = 'External PresentMon did not provide a terminal status.'
+    } else {
+        foreach ($inputPath in $resultFile,$trace) {
+            if ((Test-Path -LiteralPath $inputPath -PathType Leaf) -and
+                ((Get-Item -LiteralPath $inputPath).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw 'External PresentMon result must use original files.'
+            }
+        }
+        Copy-Item -LiteralPath $resultFile -Destination (Join-Path $output 'presentmon-collector-result.json')
+        $result = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
+        if ($result.Status -cne 'CAPTURED' -or $result.RunId -cne $externalSession.RunId -or
+            $result.SessionName -cne $externalSession.SessionName -or $result.Target -cne $externalSession.Target -or
+            $result.PresentMonSha256 -ine $ExpectedPresentMonSha256 -or $result.CollectorExitCode -ne 0 -or
+            [long]$result.CaptureStartQpc -ne [long]$externalSession.ReadyQpc -or [long]$result.CaptureStartQpc -gt $routeStartQpc -or
+            [long]$result.CaptureEndQpc -lt $routeEndQpc -or
+            $result.CsvRows -lt 1 -or $result.CsvSha256 -notmatch '^[a-fA-F0-9]{64}$') {
+            $traceError = 'External PresentMon result is incomplete or does not cover this run.'
+        } elseif ((Get-Hash $trace) -ine $result.CsvSha256) {
+            $traceError = 'External PresentMon CSV was missing or changed.'
+        } else {
+            $archive = Join-Path $output 'presentmon.csv'
+            Copy-Item -LiteralPath $trace -Destination $archive
+            if ((Get-Hash $archive) -ine $result.CsvSha256) { $traceError = 'Copied PresentMon CSV hash mismatch.' }
+            else { $trace = $archive }
+        }
+    }
+}
 $valid = @($runs | Where-Object ReplayPassed | ForEach-Object Run)
 $presentSamples = [Collections.Generic.List[object]]::new()
 $visibleCrossings = [Collections.Generic.List[object]]::new()
-if ($capture -and !$traceError -and (Test-Path -LiteralPath $trace -PathType Leaf)) {
+if (($capture -or $external) -and !$traceError -and (Test-Path -LiteralPath $trace -PathType Leaf)) {
     $presents = Import-Csv -LiteralPath $trace | Group-Object ProcessID -AsHashTable -AsString
     foreach ($batch in ($frames | Where-Object { $_.Run -in $valid } | Group-Object Run)) {
         $route = @($batch.Group)
@@ -197,8 +273,10 @@ if ($capture -and !$traceError -and (Test-Path -LiteralPath $trace -PathType Lea
             $presentSamples.Add([pscustomobject]@{
                 Run=$sample.Run; Pair=$sample.Pair; Variant=$sample.Variant; Phase=$sample.Phase
                 Warmup=$sample.Warmup; Pid=$sample.Pid; CpuStartQpc=$qpc; SyncInterval=$row.SyncInterval
-                PresentMode=$row.PresentMode; GpuBusyMs=Parse-Milliseconds $row @('GPUBusy','MsGPUBusy')
+                PresentMode=$row.PresentMode; SwapChainAddress=$row.PSObject.Properties['SwapChainAddress']?.Value
+                GpuBusyMs=Parse-Milliseconds $row @('GPUBusy','MsGPUBusy')
                 ApplicationCpuBusyMs=Parse-Milliseconds $row @('CPUBusy','MsCPUBusy')
+                DisplayLatencyMs=Parse-Milliseconds $row @('DisplayLatency')
                 DisplayedMs=Parse-Milliseconds $row @('DisplayedTime')
             })
         }
@@ -207,7 +285,7 @@ if ($capture -and !$traceError -and (Test-Path -LiteralPath $trace -PathType Lea
             foreach ($row in $rows) {
                 $latency = Parse-Milliseconds $row @('DisplayLatency')
                 $duration = Parse-Milliseconds $row @('DisplayedTime')
-                if ($null -eq $latency -or $null -eq $duration) { continue }
+                if ($null -eq $latency -or $null -eq $duration -or $duration -le 0) { continue }
                 $displayStart = [long]$row.CPUStartQPC + $latency * $frequency / 1000
                 $displayEnd = $displayStart + $duration * $frequency / 1000
                 if ($displayStart -lt $crossing.EndQpc -and $displayEnd -gt $crossing.StartQpc -and
@@ -249,9 +327,14 @@ $summary = @(
     }
 )
 $summary | Export-Csv -LiteralPath (Join-Path $output 'summary.csv') -NoTypeInformation
+$runsWithDisplayedFrames = @($presentSamples | Where-Object { $_.DisplayedMs -gt 0 -and $null -ne $_.DisplayLatencyMs } |
+    Select-Object -ExpandProperty Run -Unique)
 [ordered]@{
     EvidenceLabel=$EvidenceLabel; CompleteReplayCount=$valid.Count; InvalidReplayCount=$runs.Count-$valid.Count
     PresentMonRows=$presentSamples.Count; PresentMonError=$traceError
+    RoutesWithDisplayedFrames=$runsWithDisplayedFrames.Count
+    CrossingsWithDisplayIntervals=@($visibleCrossings | Where-Object { $null -ne $_.LongestOverlappingDisplayIntervalMs }).Count
+    ExpectedCrossings=$crossings.Count
     CompleteReferenceAcceptance=$false
     MeasurementLimits=@('Renderer receipt is an observer interval, separate from display timing.',
         'PresentMon GPU Busy measures active GPU time and application CPU Busy is not render-owner CPU time.',
@@ -261,3 +344,8 @@ $summary | Export-Csv -LiteralPath (Join-Path $output 'summary.csv') -NoTypeInfo
 $summary | Where-Object { $_.Metric -in 'SubmitToReceiptMs','GpuBusyMs','DisplayedMs' } | Format-Table
 Write-Host "Orbit PBR evidence saved in $output."
 if ($runs.Count -ne $valid.Count) { exit 1 }
+if ($external -and ($traceError -or $runsWithDisplayedFrames.Count -ne $valid.Count -or
+    @($visibleCrossings | Where-Object { $null -ne $_.LongestOverlappingDisplayIntervalMs }).Count -ne $crossings.Count -or
+    $crossings.Count -eq 0)) {
+    Write-Error 'External display capture did not cover every replay and crossing.'
+}

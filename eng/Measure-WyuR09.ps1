@@ -7,6 +7,7 @@ param(
     [ValidateSet('hardware','warp')][string]$Adapter = 'hardware',
     [ValidateSet('Normal','Retry')][string[]]$Cohort = @('Normal','Retry'),
     [ValidateSet('Overlap','AtHandoff')][string]$RecoveryMode = 'Overlap',
+    [switch]$TwilightPressure,
     [switch]$RequireEarlyColdFallback,
     [switch]$RequireRecoveryColdFallback,
     [switch]$RequireRecoveryMeshRebuild
@@ -51,6 +52,8 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
     foreach ($argument in '--volume-flight-smoke','flight',$Slot,$Adapter) { $start.ArgumentList.Add($argument) }
     foreach ($name in 'WYU_R09_RECOVERY_AT_HANDOFF','WYU_R09_TEST_FORCE_PREFETCH_MISS','WYU_R09_TEST_FORCE_RECOVERY_COLD',
         'WYU_R09_TEST_FORCE_RECOVERY_MESH_REBUILD',
+        'WYU_R09_TWILIGHT_PRESSURE','WYU_PACKAGE_G_MEASURE','WYU_SKY_MEASURE_SMOKE','WYU_SKY_MEASURE_PHASES',
+        'WYU_SKY_DIAGNOSTICS','WYU_ORBIT_DEMO_SMOKE','WYU_ORBIT_PBR_MEASURE','WYU_DAWN_SMOKE',
         'WYU_HOST_RETRY_SMOKE','WYU_WP13_MEASURE','WYU_PACKAGE_G','WYU_PACKAGE_G_SMOKE',
         'WYU_WP16','WYU_WP16_SMOKE','WYU_WP15','WYU_WP15_PROBE','WYU_WP15_FLIP','WYU_PACKAGE_E',
         'WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_WALK','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
@@ -62,6 +65,14 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
         [void]$start.Environment.Remove($name)
     }
     $start.Environment['WYU_R09_LATENCY'] = '1'
+    if ($TwilightPressure) {
+        $start.Environment['WYU_R09_TWILIGHT_PRESSURE'] = 'far-horizon'
+        $start.Environment['GROUNDWORK_TWILIGHT_PREVIEW'] = '1'
+        $start.Environment['WYU_PACKAGE_G'] = 'on'
+        $start.Environment['WYU_PACKAGE_E'] = 'on'
+        $start.Environment['WYU_WP15'] = 'off'
+        $start.Environment['WYU_WP16_SMOKE'] = '0'
+    }
     if ($RecoveryMode -eq 'AtHandoff') { $start.Environment['WYU_R09_RECOVERY_AT_HANDOFF'] = '1' }
     if ($Mode -eq 'Retry') { $start.Environment['WYU_HOST_RETRY_SMOKE'] = '1' }
     if ($RequireEarlyColdFallback) { $start.Environment['WYU_R09_TEST_FORCE_PREFETCH_MISS'] = '1' }
@@ -714,12 +725,17 @@ try {
         $manifest.wyuCommit -cnotmatch '^[A-Fa-f0-9]{40}$' -or $manifest.groundworkCommit -cnotmatch '^[A-Fa-f0-9]{40}$' -or
         $manifest.groundworkManifestSha256 -cnotmatch '^[A-Fa-f0-9]{64}$' -or
         $manifest.installerSha256 -cnotmatch '^[A-Fa-f0-9]{64}$') { throw 'Unexpected win-x64 installer manifest.' }
+    if ($TwilightPressure -and $manifest.installer -cnotmatch '^WYU-Twilight-Preview-Unqualified-\d+\.\d+\.\d+-win-x64\.exe$') {
+        throw 'Twilight pressure requires the verified Twilight Preview installer.'
+    }
     Assert-InstalledPayload $installRoot $manifest
     $exe = Join-Path $installRoot 'WorldsYetUnseen.Client.exe'
     $meta = [ordered]@{
         Schema = 'wyu-r09-installed-flight-v11'; UTC = [DateTime]::UtcNow.ToString('o')
         OS = [Environment]::OSVersion.VersionString; LogicalProcessors = [Environment]::ProcessorCount
         Adapter = $Adapter; Cohorts = $Cohort; SamplesPerCohort = $Samples; WarmupsPerCohort = 1
+        TwilightPressure = [bool]$TwilightPressure
+        IndependentGpuCopyPressure = $false
         RecoveryMode = $RecoveryMode
         EarlyPrefetchMode = if ($RequireEarlyColdFallback) { 'forced-pending' } else { 'natural' }
         RecoveryBrickMode = if ($RequireRecoveryColdFallback) { 'forced-cold' } else { 'published-bricks' }
@@ -753,13 +769,30 @@ try {
             Invoke-Measurement $exe $slot $mode $log $errors
             $lines = @(Get-Content -LiteralPath $log)
             $finalReport = $lines -cmatch '^D3D12 live-object report:' | Select-Object -Last 1
+            $retainedSuffix = if ($TwilightPressure) { '; retained preview objects=0' } else { '' }
+            $settledPattern = 'errors=0, corruption=0, discarded=0, HRESULT=0x00000000, live child objects=0, retained session queue=False' + $retainedSuffix + '\.$'
             if ((Get-Item -LiteralPath $errors).Length -or !($lines -cmatch '^WP11 LANDED generation=2 ') -or
                 $lines -cnotcontains 'PASS: WYU WP11 exploration, rebase and native shutdown.' -or
-                $finalReport -cnotmatch 'errors=0, corruption=0, discarded=0, HRESULT=0x00000000, live child objects=0, retained session queue=False\.$' -or
+                $finalReport -cnotmatch $settledPattern -or
                 ($mode -eq 'Retry' -and $lines -cnotcontains 'WP11 HOST RETRY SETTLED terrain=0 readers=0 generations=0')) {
                 throw "$label did not demonstrate landing and clean settlement. See $log and $errors."
             }
             $run = Read-Measurements $lines $mode $sample
+            if ($TwilightPressure) {
+                $markers = @($lines -cmatch '^WYU R09 TWILIGHT ')
+                if ($markers.Count -ne 3) { throw "$label did not report Direct Twilight on all three protected paths." }
+                foreach ($identity in $run.Identities) {
+                    $path = $identity.Path
+                    $matched = [regex]::Matches(($markers -join "`n"),
+                        "(?m)^WYU R09 TWILIGHT $path far-horizon wyu\.far-horizon\.atmosphere\.v2 ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) 2$")
+                    if ($matched.Count -ne 1) { throw "$label did not report exactly one Direct Twilight draw for $path." }
+                    $values = $matched[0].Groups
+                    if ([ulong]$values[1].Value -ne $identity.Epoch -or [ulong]$values[2].Value -eq 0 -or
+                        [ulong]$values[3].Value -eq 0 -or [ulong]$values[3].Value -ge [ulong]$values[4].Value) {
+                        throw "$label did not bind a native Direct Twilight draw to $path."
+                    }
+                }
+            }
             if ($RequireEarlyColdFallback) {
                 foreach ($decision in $run.Reuse | Where-Object Path -In @('Movement','FirstEdit')) {
                     if ($decision.EarlyStatus -cne 'Pending' -or !$decision.ColdFallback) {

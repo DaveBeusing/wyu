@@ -51,7 +51,7 @@ internal sealed partial class VolumeExploration
     }
 
     private async Task StageR09UploadAsync(R09Timing timing, R09Pressure pressure, VolumeStreamingCoordinator terrain,
-        D3D12Renderer renderer, ulong generation, VolumeStreamingLease retained, CancellationToken token)
+        D3D12Renderer renderer, ulong generation, ulong mask, VolumeStreamingLease retained, CancellationToken token)
     {
         var gate = R09RenderHost?.R09UploadGate ?? throw new InvalidOperationException("The active R09 renderer has no native upload gate.");
         using var hold = gate.Arm();
@@ -87,6 +87,7 @@ internal sealed partial class VolumeExploration
             var path = timing.Path.ToString();
             held.Write(path, "held");
             nativeReady.Write(path, "native-ready");
+            gate.Twilight?.WriteHeldSky(timing.Path, epoch, mask, held.Gpu);
         };
     }
 
