@@ -790,7 +790,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (timing is null)
             Drain(terrain);
         else
-            await FinishR09Async(timing, terrain, work.Generation, sequence, view, submitted, presented, handoffStarted, token)
+            await FinishR09Async(timing, pressure!, terrain, work.Generation, sequence, view, submitted, presented, handoffStarted, token)
                 .ConfigureAwait(false);
         return TerrainPublicationOutcome.Presented;
     }

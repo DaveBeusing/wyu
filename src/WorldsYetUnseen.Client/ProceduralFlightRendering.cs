@@ -120,6 +120,14 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     internal Task FarAsync(ProceduralGlobe.Geometry globe, Guid world, VolumePublicationInfo near, CancellationToken token) =>
         StartAsync(owner =>
         {
+            if (TexturePressure is { } pressure)
+            {
+                if (globe.Textured || OrbitMaterials is not null)
+                    throw new InvalidOperationException("R09 fixed-scene copy pressure requires the original untextured Far Horizon geometry.");
+                var farView = new VolumeViewIdentity(checked(near.View.RendererEpoch + 1), 1, PlanetLocalFrame.Create(default));
+                return pressure.AttachFar(window, owner, globe.Meshes, Device,
+                    new(world, farView, near.TerrainRevision, 1), timing.Shutdown);
+            }
             if (!globe.Textured || OrbitMaterials is not { } materials)
                 return D3D12Renderer.CreateWithSessionMeshes(window, owner, globe.Meshes, Device,
                     timing.Shutdown, timing.Shutdown);
@@ -189,7 +197,10 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
             throw new InvalidOperationException("The planet renderer did not settle for handoff.");
         SkyHandoffDiagnostics.Mark("previous-runtime-settled");
         if (renderer is not null)
+        {
             SkyMeasurements.Flush(renderer);
+            TexturePressure?.Detach(renderer);
+        }
         _runtime = null;
         Current = null;
         R09UploadGate = null;

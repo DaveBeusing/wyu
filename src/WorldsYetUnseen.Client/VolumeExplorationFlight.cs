@@ -123,7 +123,7 @@ internal sealed partial class VolumeExploration
                         var handoffStarted = MeasureR09 ? Stopwatch.GetTimestamp() : 0;
                         // Freeze flight at the normal return boundary before starting measured Recovery.
                         if (recoveryAtHandoff)
-                            returnTerrain = await PrepareFlightReturnAsync(terrain, player, center, revision, texturedOrbit,
+                            returnTerrain = await PrepareFlightReturnAsync(terrain, renderHost, player, center, revision, texturedOrbit,
                                 returnCancellation.Token, handoffStarted).ConfigureAwait(false);
                         if (skySmoke)
                         {
@@ -328,7 +328,7 @@ internal sealed partial class VolumeExploration
                 if (transition is not null)
                     BiomeMeasurements.Write(transition, transitionStarted);
                 if (far && returnTerrain is null && !recoveryAtHandoff)
-                    returnTerrain = await PrepareFlightReturnAsync(terrain, player, center, revision, texturedOrbit, returnCancellation.Token).ConfigureAwait(false);
+                    returnTerrain = await PrepareFlightReturnAsync(terrain, renderHost, player, center, revision, texturedOrbit, returnCancellation.Token).ConfigureAwait(false);
                 if (abortAtFar && far)
                     return (player, true);
                 if (!scripted)
@@ -446,15 +446,21 @@ internal sealed partial class VolumeExploration
             new(Descriptor.Seed, flightTick, tick, fraction, digest, pad, origin, scene, aimedAtEdit), null, token);
     }
 
-    private async Task<FlightReturnTerrain> PrepareFlightReturnAsync(VolumeStreamingCoordinator terrain, PlanetWalkState player,
-        PlanetVector center, ulong revision, bool texturedOrbit, CancellationToken token, long? handoffStarted = null)
+    private async Task<FlightReturnTerrain> PrepareFlightReturnAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost,
+        PlanetWalkState player, PlanetVector center, ulong revision, bool texturedOrbit, CancellationToken token, long? handoffStarted = null)
     {
         var started = handoffStarted ?? Stopwatch.GetTimestamp();
         var timing = StartR09(VolumeWorkClass.Recovery, started, recoveryAtHandoff: handoffStarted.HasValue);
         var previous = terrain.View;
         var frame = previous.Frame.TryRebase(player.Position, out var rebased) ? rebased : previous.Frame;
-        // The static textured orbit has its own cut in the intervening renderer epoch.
-        var rendererEpoch = checked(previous.RendererEpoch + (texturedOrbit ? 2UL : 1UL));
+        var texturePressure = timing is null ? null : renderHost.TexturePressure;
+        var farRenderer = texturePressure is null ? null : renderHost.Active;
+        var farView = texturePressure?.FarView;
+        if (texturePressure is not null && (farView is not { } oldFar || oldFar.World != terrain.WorldIdentity ||
+            oldFar.TerrainRevision != revision || oldFar.View.RendererEpoch != checked(previous.RendererEpoch + 1)))
+            throw new InvalidOperationException("R09 Recovery did not match the intervening Far Horizon owner and terrain revision.");
+        // Both the ordinary textured orbit and the diagnostic fixed scene have their own intervening ownership epoch.
+        var rendererEpoch = checked(previous.RendererEpoch + (texturedOrbit || farView.HasValue ? 2UL : 1UL));
         var view = terrain.ChangeView(frame, rendererEpoch);
         if (view.RendererEpoch <= previous.RendererEpoch || !terrain.Statistics.MovementHeld)
             throw new InvalidOperationException("Could not reserve the held return view.");
@@ -463,15 +469,21 @@ internal sealed partial class VolumeExploration
             new(VolumeWorkClass.Recovery, view, revision, revision, selection, null), started, token, timing).ConfigureAwait(false);
         if (admission != VolumeAdmission.Accepted || work is null)
             throw TerrainAdmissionFailure(admission);
+        R09Pressure? pressure = null;
         try
         {
-            var pressure = timing is null ? null : await StartR09PressureAsync(token).ConfigureAwait(false);
+            pressure = timing is null ? null : await StartR09PressureAsync(token).ConfigureAwait(false);
             var generated = pressure is null ? ExecuteTerrainAsync(work, token, "return-terrain-build")
-                : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token);
+                : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token,
+                    recoveryPressure: texturePressure, farRenderer: farRenderer);
+            // An old-owner queue wait cannot outlive this call: the next far frame or renderer Stop would use that queue.
+            if (texturePressure is not null && (!await generated.ConfigureAwait(false) || timing?.RecoveryCopy is null))
+                throw new InvalidOperationException("R09 Recovery did not settle its independent Far Horizon copy.");
             return new(view, revision, selection, work, generated, timing, pressure);
         }
         catch
         {
+            pressure?.Dispose();
             work.Dispose();
             throw;
         }

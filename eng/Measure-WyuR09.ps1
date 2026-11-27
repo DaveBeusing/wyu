@@ -328,6 +328,8 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $identities = @{}
     $twilightDraws = @{}
     $textureCopies = @{}
+    $recoveryCopy = $null
+    $recoveryCpu = $null
     $pressure = @{}
     $resourceSamples = @{}
     $gpuOwners = @{}
@@ -496,6 +498,25 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
                 FromQpc = $from; ToQpc = $to; Frequency = $qpc; Milliseconds = (($to - $from) * 1000.0 / $qpc)
                 Attempts = $attempts; Denials = $denials
             }
+        } elseif ($line -cmatch '^WYU R09 RECOVERYCPU ((?:[0-9]+ ){8}[0-9]+)$') {
+            if (!$IndependentTextureCopy -or $null -ne $recoveryCpu) {
+                throw 'Unexpected or duplicate Recovery pressure at the consuming BeginTick.'
+            }
+            $original,$consuming,$running,$queued,$workers,$queue,$observed,$released,$settled =
+                $Matches[1].Split(' ') | ForEach-Object { [uint64]$_ }
+            if (!$original -or $consuming -le $original -or !$running -or $queued -le $running -or
+                $workers -ne 1 -or $queue -ne 1 -or !$observed -or $released -lt $observed -or $settled -le $released) {
+                throw 'Invalid Recovery speculative job identity or settlement timing at the consuming BeginTick.'
+            }
+            $recoveryCpu = [pscustomobject]@{
+                AdmissionTick=$original; ConsumingTick=$consuming; RunningJob=$running; QueuedJob=$queued
+                RunningWorkers=$workers; QueuedWorkers=$queue; ObservedQpc=$observed; ReleasedQpc=$released; SettledQpc=$settled
+            }
+        } elseif ($line -cmatch '^WYU R09 RECOVERYCOPY (\{.*\})$') {
+            if (!$IndependentTextureCopy -or $null -ne $recoveryCopy) {
+                throw 'Unexpected or duplicate independent Far Horizon Recovery copy.'
+            }
+            $recoveryCopy = $Matches[1] | ConvertFrom-Json
         } elseif ($line -cmatch '^WYU R09 TEXTURECOPY (Movement|FirstEdit) ((?:[0-9]+ ){15}[0-9]+)$') {
             $path = $Matches[1]
             if (!$IndependentTextureCopy -or $textureCopies.ContainsKey($path)) {
@@ -743,6 +764,61 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
             $editCopy.WaitQueuedQpc -le $movementCopy.RetiredObservationQpc) {
             throw 'FirstEdit must use a distinct native texture copy in the same renderer epoch after Movement retires.'
         }
+        if ($null -eq $recoveryCopy) { throw 'Missing independent Far Horizon Recovery copy.' }
+        if ($null -eq $recoveryCpu -or $recoveryCpu.ConsumingTick -ne $identities['Recovery'].OpenedTick -or
+            $recoveryCpu.ObservedQpc -lt $intervals['Recovery/setup-to-begin-tick'].ToQpc -or
+            $null -eq $resourceSamples['Shutdown/settled'] -or $recoveryCpu.SettledQpc -gt $resourceSamples['Shutdown/settled'].Qpc) {
+            throw 'Missing or mismatched Recovery speculative pressure through the consuming BeginTick.'
+        }
+        $far = $recoveryCopy.Far
+        foreach ($field in 'FarEpoch','FarFrame','FarPresentFence','FarPresentQpc','Ticket','CopyFence','WaitQueuedQpc',
+            'SubmittedQpc','WorkerStartQpc','WorkerEndQpc','ReleasedQpc','RetiredObservationQpc','HeldCompletedFence',
+            'RetiredCompletedFence','TextureRetainedBytes','StagingRetainedBytes') {
+            if (($far.$field -isnot [int] -and $far.$field -isnot [long]) -or $far.$field -le 0) {
+                throw "Invalid native Far Horizon Recovery field $field."
+            }
+        }
+        foreach ($field in 'NearEpoch','NearMask','NearDrawFence','NearPresentFence','NearPresentQpc') {
+            if (($recoveryCopy.$field -isnot [int] -and $recoveryCopy.$field -isnot [long]) -or $recoveryCopy.$field -le 0) {
+                throw "Invalid new near Recovery field $field."
+            }
+        }
+        $farStop = $intervals['Recovery/far-renderer-stop']
+        $worker = $intervals['Recovery/worker']
+        $privateWorker = $intervals['Recovery/prebuild-worker']
+        $nearMask = $intervals['Recovery/mask-submit-to-receipt']
+        $nearProof = $twilightDraws['Recovery']
+        if ($far.FarEpoch -ne ($editCopy.Epoch + 1) -or $recoveryCopy.NearEpoch -ne ($far.FarEpoch + 1) -or
+            $far.FarPresentFence -gt $far.HeldCompletedFence -or $far.HeldCompletedFence -ge $far.CopyFence -or
+            $far.RetiredCompletedFence -lt $far.CopyFence -or $far.TextureRetainedBytes -lt 2MB -or $far.StagingRetainedBytes -lt 2MB -or
+            $far.FarPresentQpc -gt $far.WaitQueuedQpc -or $privateWorker.ToQpc -gt $far.WaitQueuedQpc -or
+            $far.WaitQueuedQpc -gt $far.SubmittedQpc -or $far.SubmittedQpc -gt $far.WorkerStartQpc -or
+            $far.WorkerStartQpc -ne $worker.FromQpc -or $far.WorkerEndQpc -ne $worker.ToQpc -or
+            $far.WorkerEndQpc -gt $far.ReleasedQpc -or $far.ReleasedQpc -gt $far.RetiredObservationQpc -or
+            $far.RetiredObservationQpc -gt $farStop.FromQpc -or $far.FarFrame -ge $recoveryCopy.NearMask -or
+            $recoveryCopy.NearEpoch -ne $nearProof.Epoch -or $recoveryCopy.NearMask -ne $nearProof.MaskSequence -or
+            $recoveryCopy.NearDrawFence -ne $nearProof.DrawFence -or $recoveryCopy.NearPresentFence -ne $nearProof.PresentFence -or
+            $recoveryCopy.NearPresentQpc -lt $nearMask.FromQpc -or $recoveryCopy.NearPresentQpc -gt $nearMask.ToQpc) {
+            throw 'Far Horizon copy retirement, protected Recovery worker, and distinct near mask are not causally associated.'
+        }
+        $recoveryCopy = [pscustomobject]([ordered]@{
+            Cohort=$Mode; Run=$Sample; Warmup=($Sample -eq 0); Schedule=$RecoveryMode
+            FarEpoch=$far.FarEpoch; FarFrame=$far.FarFrame; FarPresentFence=$far.FarPresentFence; FarPresentQpc=$far.FarPresentQpc
+            Ticket=$far.Ticket; CopyFence=$far.CopyFence; WaitQueuedQpc=$far.WaitQueuedQpc; SubmittedQpc=$far.SubmittedQpc
+            WorkerStartQpc=$far.WorkerStartQpc; WorkerEndQpc=$far.WorkerEndQpc; ReleasedQpc=$far.ReleasedQpc
+            RetiredObservationQpc=$far.RetiredObservationQpc; HeldCompletedFence=$far.HeldCompletedFence
+            RetiredCompletedFence=$far.RetiredCompletedFence; TextureRetainedBytes=$far.TextureRetainedBytes
+            StagingRetainedBytes=$far.StagingRetainedBytes; FarStopStartedQpc=$farStop.FromQpc
+            NearEpoch=$recoveryCopy.NearEpoch; NearMask=$recoveryCopy.NearMask; NearDrawFence=$recoveryCopy.NearDrawFence
+            NearPresentFence=$recoveryCopy.NearPresentFence; NearPresentQpc=$recoveryCopy.NearPresentQpc
+            SpeculativeAdmissionTick=$recoveryCpu.AdmissionTick; ConsumingTick=$recoveryCpu.ConsumingTick
+            RunningJob=$recoveryCpu.RunningJob; QueuedJob=$recoveryCpu.QueuedJob
+            SpeculativeWorkersAtConsume=$recoveryCpu.RunningWorkers; SpeculativeQueuedAtConsume=$recoveryCpu.QueuedWorkers
+            SpeculativeObservedQpc=$recoveryCpu.ObservedQpc; SpeculativeReleasedQpc=$recoveryCpu.ReleasedQpc
+            SpeculativeSettledQpc=$recoveryCpu.SettledQpc
+            OverlapMs=1000.0 * ($far.WorkerEndQpc - $far.WorkerStartQpc) / $frequency
+            ReleaseToRetiredMs=1000.0 * ($far.RetiredObservationQpc - $far.ReleasedQpc) / $frequency
+        })
     }
     $resourcePeaks = @(Complete-ResourceSamples $resourceSamples $gpuOwners $intervals $identities $frequency)
     [pscustomobject]@{
@@ -751,6 +827,7 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
         BrickOverlap = $brickOverlap; MeshOverlap = $meshOverlap; Reuse = $reuse.Values
         ResourceSamples = $resourceSamples.Values; GpuOwners = $gpuOwners.Values; ResourcePeaks = $resourcePeaks
         TextureCopies = $textureCopies.Values
+        RecoveryCopy = $recoveryCopy
     }
 }
 
@@ -780,6 +857,7 @@ $brickOverlap = [Collections.Generic.List[object]]::new()
 $meshOverlap = [Collections.Generic.List[object]]::new()
 $reuseRows = [Collections.Generic.List[object]]::new()
 $textureCopyRows = [Collections.Generic.List[object]]::new()
+$recoveryCopyRows = [Collections.Generic.List[object]]::new()
 $work = $null
 try {
     $manifestFile = (Get-Item -LiteralPath $ManifestPath).FullName
@@ -815,7 +893,8 @@ try {
         Adapter = $Adapter; Cohorts = $Cohort; SamplesPerCohort = $Samples; WarmupsPerCohort = 1
         TwilightPressure = [bool]$TwilightPressure
         IndependentGpuCopyPressure = $false
-        IndependentGpuCopyPaths = if ($IndependentTextureCopy) { @('Movement','FirstEdit') } else { @() }
+        IndependentGpuCopyPaths = if ($IndependentTextureCopy) { @('Movement','FirstEdit','Recovery') } else { @() }
+        RecoveryNativeCopySchedule = if ($IndependentTextureCopy) { 'Early or boundary trigger; protected execution and far copy retirement finish before further work on the far queue' }
         DiagnosticR09Installer = [bool]$DiagnosticR09Installer
         VerifiedIsolatedR09Instance = [bool]$DiagnosticR09Installer
         InstallerEvidence = if ($DiagnosticR09Installer) { 'Local R09 diagnostic only' }
@@ -885,6 +964,7 @@ try {
             $meshOverlap.AddRange($run.MeshOverlap)
             foreach ($record in $run.Reuse) { $reuseRows.Add($record) }
             foreach ($record in $run.TextureCopies) { $textureCopyRows.Add($record) }
+            if ($run.RecoveryCopy) { $recoveryCopyRows.Add($run.RecoveryCopy) }
             Write-Host "$label passed."
         }
     }
@@ -930,6 +1010,7 @@ try {
         $reuseRows | Sort-Object Cohort,Run,Path | Export-Csv -LiteralPath (Join-Path $out 'reuse.csv') -NoTypeInformation
         if ($IndependentTextureCopy) {
             $textureCopyRows | Sort-Object Cohort,Run,Path | Export-Csv -LiteralPath (Join-Path $out 'independent-texture-copy.csv') -NoTypeInformation
+            $recoveryCopyRows | Sort-Object Cohort,Run | Export-Csv -LiteralPath (Join-Path $out 'recovery-independent-texture-copy.csv') -NoTypeInformation
         }
         $evidence = Get-ChildItem -LiteralPath $out -File
         Compress-Archive -LiteralPath $evidence.FullName -DestinationPath "$out.zip"
