@@ -3,7 +3,7 @@
 Build and run from a clean WYU checkout on Windows with the .NET 10 SDK,
 PowerShell 7, and GitHub CLI. The engine is supplied by the immutable
 Groundwork NuGet archive. WYU pins all ten packages at
-`0.1.0-dev.45898177493.1` and commits the SDK-generated lockfile.
+`0.1.0-dev.45978264868.1` and commits the SDK-generated lockfile.
 The renderer runs on Windows x64 and requires a D3D12 hardware adapter.
 
 ## Twilight Preview installer
@@ -69,13 +69,13 @@ gate from the WYU repository root.
 ```powershell
 $archive = Join-Path ([IO.Path]::GetTempPath()) ('wyu-archive-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $archive | Out-Null
-gh release download archive-groundwork-0.1.0-dev.45898177493.1-immutable-complete `
+gh release download archive-groundwork-0.1.0-dev.45978264868.1-immutable-complete `
   --repo DaveBeusing/Groundwork --dir $archive
 if ($LASTEXITCODE -ne 0) { throw 'Groundwork archive download failed.' }
 ./eng/Test-VerifiedGroundworkConsumer.ps1 -ArtifactDirectory $archive `
-  -ExpectedManifestSha256 79CF53C3A1D2025AEAF40810284BECD03580086A2A4664F684B440DD579284C0 `
-  -ExpectedSourceCommit d8b6d23058b09c5ba08c3005d0d0727aef816a17 `
-  -ExpectedVersion 0.1.0-dev.45898177493.1
+  -ExpectedManifestSha256 B1372C3D0F66632E83AF608DE37B1DC03075037204F685B24CDEC120F6AA586A `
+  -ExpectedSourceCommit 454f9b3d0d32c28c2ac7df071629852a58c9caa8 `
+  -ExpectedVersion 0.1.0-dev.45978264868.1
 ```
 
 The gate checks package provenance, stages a temporary external NuGet feed,
