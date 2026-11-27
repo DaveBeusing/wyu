@@ -6,9 +6,15 @@ DefaultDirName={localappdata}\Programs\Worlds Yet Unseen Twilight Preview
 DisableDirPage=yes
 OutputBaseFilename=WYU-Twilight-Preview-Unqualified-{#AppVersion}-win-x64
 #elif defined(R09Installer)
+#if defined(IsolatedR09Installer)
+AppId={{2E83075D-201F-4CFB-83F6-B2947F834E63}
+AppName=Worlds Yet Unseen R09 Diagnostics
+DefaultDirName={localappdata}\Programs\Worlds Yet Unseen R09 Diagnostics
+#else
 AppId={{1546F5A8-74AF-4D69-B06A-BEA3E8433DAE}
 AppName=Worlds Yet Unseen R09
 DefaultDirName={localappdata}\Programs\Worlds Yet Unseen R09
+#endif
 UsePreviousAppDir=no
 OutputBaseFilename=WYU-R09-{#AppVersion}-win-x64
 #else

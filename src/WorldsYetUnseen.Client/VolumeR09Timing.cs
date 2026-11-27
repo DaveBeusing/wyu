@@ -27,6 +27,7 @@ internal sealed partial class VolumeExploration
         internal long GroundRendererStartupStarted { get; set; }
         private long GroundRendererStarted { get; set; }
         internal R09WorkerMeasurement? RecoveryPrivateWorker { get; set; }
+        internal R09IndependentTexturePressure.RecoveryEvidence? RecoveryCopy { get; set; }
         internal (ulong Sequence, long Submitted) RecoveryMask { get; set; }
 
         internal void RecordGroundRendererStarted() => GroundRendererStarted = Stopwatch.GetTimestamp();
@@ -55,7 +56,7 @@ internal sealed partial class VolumeExploration
                 $"WYU R09 {Path} {phase} {start} {end} {Stopwatch.Frequency} {attempts} {denials}"));
     }
 
-    private async Task FinishR09Async(R09Timing timing, VolumeStreamingCoordinator terrain,
+    private async Task FinishR09Async(R09Timing timing, R09Pressure pressure, VolumeStreamingCoordinator terrain,
         ulong generation, ulong frame, VolumeViewIdentity view, long submitted, long presented,
         long handoffStarted, CancellationToken token)
     {
@@ -64,16 +65,18 @@ internal sealed partial class VolumeExploration
         var begin = await BeginAsync(token).ConfigureAwait(false);
         if (!terrain.BeginTick(begin))
             throw new InvalidOperationException($"R09 did not consume the {timing.Path} receipt at BeginTick.");
+        var speculative = timing.RecoveryCopy is null ? (R09Pressure.ThroughBeginTick?)null
+            : await pressure.ObserveAndSettleAtBeginTickAsync(begin, token).ConfigureAwait(false);
         Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
 
-        WriteR09Completion(timing, terrain, generation, frame, view, submitted, presented, handoffStarted, begin);
+        WriteR09Completion(timing, terrain, generation, frame, view, submitted, presented, handoffStarted, begin, speculative);
     }
 
     // Compile the reporting code only after the measured BeginTick consumes the receipt.
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void WriteR09Completion(R09Timing timing, VolumeStreamingCoordinator terrain,
         ulong generation, ulong frame, VolumeViewIdentity view, long submitted, long presented,
-        long handoffStarted, BarrierStamp begin)
+        long handoffStarted, BarrierStamp begin, R09Pressure.ThroughBeginTick? speculative)
     {
         VolumeStreamingEvent? receipt = null, opened = null, maskReceipt = null;
         while (terrain.TryReadEvent(out var entry))
@@ -103,6 +106,14 @@ internal sealed partial class VolumeExploration
             throw new InvalidOperationException($"R09 could not match the {timing.Path} receipt to the consuming BeginTick.");
 
         var consumed = openedFrame.MonotonicTimestamp;
+        if (speculative is { } throughTick)
+        {
+            if (throughTick.ConsumingTick != consumedAt.Tick || throughTick.ObservedQpc < consumed ||
+                throughTick.ReleasedQpc < throughTick.ObservedQpc || throughTick.SettledQpc < throughTick.ReleasedQpc)
+                throw new InvalidOperationException("R09 Recovery did not settle both original speculative jobs after the consuming BeginTick.");
+            Console.WriteLine(FormattableString.Invariant(
+                $"WYU R09 RECOVERYCPU {throughTick.OriginalTick} {throughTick.ConsumingTick} {throughTick.RunningJob} {throughTick.QueuedJob} {throughTick.RunningWorkers} {throughTick.QueuedWorkers} {throughTick.ObservedQpc} {throughTick.ReleasedQpc} {throughTick.SettledQpc}"));
+        }
         timing.Write("submit-to-observed-present", submitted, presented);
         timing.Write("observed-present-to-begin-tick", presented, consumed);
         timing.Write("authorized-receipt-to-begin-tick", presentedFrame.MonotonicTimestamp, consumed);

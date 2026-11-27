@@ -67,6 +67,12 @@ The early Movement peak can hold the published initial terrain, both private for
 
 For a deterministic fallback smoke, add `-RequireEarlyColdFallback` to the same installed runner command and choose a separate output directory. The fixture holds the early source pending until the publishing path makes its decision. Both early paths must then publish with zero reuse hits and settle cleanly. `machine.json` records `EarlyPrefetchMode` as `forced-pending` for this run. Use the default runner mode for the reference measurements.
 
+### Far Horizon Twilight pressure
+
+To measure the existing R09 protected paths with Direct Twilight, use a verified self-contained Twilight Preview installation and add `-TwilightPressure`. The runner sets the Direct opt-in for its child process and validates a native Sky pass on the held Movement, FirstEdit and Recovery frames. It binds each frame to the measured renderer epoch and requires the final Preview owner inventory to be empty. Keep the stock and Twilight output directories separate.
+
+This evidence covers the occupied speculative CPU worker and queue, native terrain-upload hold, authorized terrain publication and settlement. `machine.json` records `IndependentGpuCopyPressure=false`. The independent speculative texture-copy hold from Groundwork #89 and the Orbit Combined composition still need their own installed coverage. Keep these gates open when only this mode has run.
+
 ## Rebuild
 
 Use .NET SDK 10.0.403 and the reviewed Inno Setup 6.7.3 compiler. Download the immutable Groundwork archive using the release tag, package version, source commit and manifest SHA-256 in the [verified build instructions](build-bootstrap.md). Download all release assets into the same directory so the installer builder can verify the original Groundwork `LICENSE` alongside the ten NuGet packages.
