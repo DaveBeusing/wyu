@@ -319,6 +319,7 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $privatePhases += @($workerStages | ForEach-Object { "prebuild-worker-$_" })
     $intervals = @{}
     $identities = @{}
+    $twilightDraws = @{}
     $pressure = @{}
     $resourceSamples = @{}
     $gpuOwners = @{}
@@ -487,6 +488,13 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
                 FromQpc = $from; ToQpc = $to; Frequency = $qpc; Milliseconds = (($to - $from) * 1000.0 / $qpc)
                 Attempts = $attempts; Denials = $denials
             }
+        } elseif ($line -cmatch '^WYU R09 TWILIGHT (Movement|FirstEdit|Recovery) far-horizon wyu\.far-horizon\.atmosphere\.v2 ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) 2$') {
+            $path = $Matches[1]
+            if (!$TwilightPressure -or $twilightDraws.ContainsKey($path) -or [ulong]$Matches[2] -eq 0 -or
+                [ulong]$Matches[3] -eq 0 -or [ulong]$Matches[4] -eq 0 -or [ulong]$Matches[4] -ge [ulong]$Matches[5]) {
+                throw "Invalid native Direct Twilight draw for $path."
+            }
+            $twilightDraws[$path] = [ulong]$Matches[2]
         } elseif ($line.StartsWith('WYU R09 ', [StringComparison]::Ordinal)) {
             throw "Malformed R09 record: $line"
         }
@@ -498,6 +506,9 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $meshOverlap = [Collections.Generic.List[object]]::new()
     $generations = [Collections.Generic.HashSet[uint64]]::new()
     foreach ($identity in $identities.Values) {
+        if ($TwilightPressure -and $twilightDraws[$identity.Path] -ne $identity.Epoch) {
+            throw "Missing native Direct Twilight draw for $($identity.Path) in renderer epoch $($identity.Epoch)."
+        }
         if (!$generations.Add($identity.Generation)) { throw "Duplicate publishing generation: $($identity.Generation)" }
     }
     foreach ($path in $paths) {
@@ -778,21 +789,6 @@ try {
                 throw "$label did not demonstrate landing and clean settlement. See $log and $errors."
             }
             $run = Read-Measurements $lines $mode $sample
-            if ($TwilightPressure) {
-                $markers = @($lines -cmatch '^WYU R09 TWILIGHT ')
-                if ($markers.Count -ne 3) { throw "$label did not report Direct Twilight on all three protected paths." }
-                foreach ($identity in $run.Identities) {
-                    $path = $identity.Path
-                    $matched = [regex]::Matches(($markers -join "`n"),
-                        "(?m)^WYU R09 TWILIGHT $path far-horizon wyu\.far-horizon\.atmosphere\.v2 ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) 2$")
-                    if ($matched.Count -ne 1) { throw "$label did not report exactly one Direct Twilight draw for $path." }
-                    $values = $matched[0].Groups
-                    if ([ulong]$values[1].Value -ne $identity.Epoch -or [ulong]$values[2].Value -eq 0 -or
-                        [ulong]$values[3].Value -eq 0 -or [ulong]$values[3].Value -ge [ulong]$values[4].Value) {
-                        throw "$label did not bind a native Direct Twilight draw to $path."
-                    }
-                }
-            }
             if ($RequireEarlyColdFallback) {
                 foreach ($decision in $run.Reuse | Where-Object Path -In @('Movement','FirstEdit')) {
                     if ($decision.EarlyStatus -cne 'Pending' -or !$decision.ColdFallback) {
