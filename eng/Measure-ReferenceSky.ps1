@@ -11,6 +11,8 @@ param(
     [switch]$Diagnostics,
     [switch]$DiagnosticProbe,
     [switch]$GpuSchedulingTrace,
+    [ValidateSet('Direct8x4', 'ScatteringAtlas', 'TiledScatteringAtlas')][string]$SkyBackend = 'Direct8x4',
+    [switch]$AtlasPrefilter,
     [switch]$LookupPrototype,
     [switch]$FullLookupSeries,
     [switch]$ReuseLookupResources,
@@ -30,11 +32,38 @@ if ($LookupPrototype -and -not ($DiagnosticProbe -or $Smoke -or $FullLookupSerie
     throw 'LookupPrototype requires DiagnosticProbe or Smoke, or the explicit FullLookupSeries diagnostic mode.'
 }
 if ($ReuseLookupResources -and -not $LookupPrototype) { throw 'ReuseLookupResources requires the diagnostic Lookup prototype.' }
-if ($DiagnosticProbe -or $LookupPrototype) { $Diagnostics = $true }
+if ($LookupPrototype -and $PSBoundParameters.ContainsKey('SkyBackend')) {
+    throw 'Choose either SkyBackend or LookupPrototype; their backend selections cannot be combined.'
+}
+$selectedSkyBackend = if ($LookupPrototype) { 'LookupPrototype' } else {
+    switch ($SkyBackend) {
+        'ScatteringAtlas' { 'ScatteringAtlas' }
+        'TiledScatteringAtlas' { 'TiledScatteringAtlas' }
+        default { 'Direct8x4' }
+    }
+}
+$tiledSky = $selectedSkyBackend -ceq 'TiledScatteringAtlas'
+$expectedOnDraws = if ($tiledSky) { 2 } else { 1 }
+if ($selectedSkyBackend -ceq 'ScatteringAtlas' -and -not ($DiagnosticProbe -or $Smoke)) {
+    throw 'The experimental ScatteringAtlas backend requires DiagnosticProbe or Smoke.'
+}
+if ($AtlasPrefilter -and $selectedSkyBackend -cnotin 'ScatteringAtlas', 'TiledScatteringAtlas') {
+    throw 'AtlasPrefilter requires the explicit ScatteringAtlas or TiledScatteringAtlas backend.'
+}
+if ($tiledSky) { $AtlasPrefilter = $true }
+$inheritedSkyOptions = @(Get-ChildItem Env: | Where-Object {
+    $_.Name -match '^GROUNDWORK_SKY_' -and $_.Name -ine 'GROUNDWORK_SKY_REQUIRE_DEBUG'
+})
+$activeInheritedSkyOptions = @($inheritedSkyOptions | Where-Object { $_.Value -cnotin @('', '0') } | ForEach-Object Name)
+if ($activeInheritedSkyOptions.Count) {
+    throw "Unset inherited sky backend options ($($activeInheritedSkyOptions -join ', ')); select the backend explicitly through the runner."
+}
+if ($DiagnosticProbe -or $LookupPrototype -or $selectedSkyBackend -ceq 'ScatteringAtlas') { $Diagnostics = $true }
 if ($Diagnostics) { . (Join-Path $PSScriptRoot 'ReferenceGpuDiagnostics.ps1') }
 if ($GpuSchedulingTrace) { . (Join-Path $PSScriptRoot 'ReferenceSchedulingTrace.ps1') }
 $Composition = $Composition.ToLowerInvariant()
 $Adapter = $Adapter.ToLowerInvariant()
+if ($tiledSky -and $Adapter -cne 'hardware') { throw 'TiledScatteringAtlas requires hardware VRS and mesh shaders.' }
 if ($env:WYU_R09_LATENCY -eq '1') { throw 'Run R09 pressure qualification separately; this sky runner does not compose native pressure hooks.' }
 if (-not $Smoke -and $Adapter -ne 'hardware') { throw 'Full qualification requires the hardware adapter.' }
 $client = (Resolve-Path -LiteralPath $Assembly).Path
@@ -73,7 +102,10 @@ $environmentNames = 'WYU_PACKAGE_G_MEASURE','WYU_SKY_MEASURE_SMOKE','WYU_SKY_MEA
     'WYU_R09_RECOVERY_AT_HANDOFF','WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
     'WYU_SKY_MEASURE_COMPOSITION','WYU_ORBIT_DEMO_SMOKE','WYU_ORBIT_PBR','WYU_ORBIT_BOULDER',
     'WYU_ORBIT_PBR_MEASURE','WYU_ORBIT_CAPTURE','WYU_WP15_FLIP','WYU_SKY_DIAGNOSTICS',
-    'GROUNDWORK_TWILIGHT_PREVIEW','GROUNDWORK_SKY_LOOKUP_PROTOTYPE','GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES','WYU_SKY_GPU_PASS_BREAKDOWN'
+    'GROUNDWORK_TWILIGHT_PREVIEW','GROUNDWORK_SKY_LOOKUP_PROTOTYPE','GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES','WYU_SKY_GPU_PASS_BREAKDOWN',
+    'GROUNDWORK_SKY_SCATTERING_ATLAS','GROUNDWORK_SKY_ATLAS_PREFILTER','GROUNDWORK_SKY_SPLIT_DRAW'
+$environmentNames += @($inheritedSkyOptions | ForEach-Object Name)
+$environmentNames = @($environmentNames | Sort-Object -Unique)
 $previous = @{}
 foreach ($name in $environmentNames) { $previous[$name] = [Environment]::GetEnvironmentVariable($name) }
 $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll' |
@@ -86,7 +118,15 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
     GpuPassBreakdown=[bool]$GpuPassBreakdown
     SchedulingTrace='Opt-in per-replay DxgKrnl circular ETL; capture status and commands are in each scheduling directory. Event loss and full coverage are unverified.'
     TwilightPreview=$true; LookupPrototype=[bool]$LookupPrototype; ReuseLookupResources=[bool]$ReuseLookupResources
-    SkyImplementation=$(if ($LookupPrototype) { 'Experimental fixed-size GPU lookup; visual approval pending; all build/update work charged.' } else { 'Direct 8x4 integration' })
+    SkyBackendOn=$selectedSkyBackend; SkyBackendOff='Disabled'; AtlasPrefilter=[bool]$AtlasPrefilter
+    ExpectedSkyDrawsOn=$expectedOnDraws; ExpectedSkyDrawsOff=0
+    SkyImplementation=$(switch ($selectedSkyBackend) {
+        'LookupPrototype' { 'Experimental fixed-size GPU lookup; visual approval pending; all build/update work charged.' }
+        'ScatteringAtlas' { 'Experimental scattering atlas with exact fallbacks; sample-level routing is not inferred.' }
+        'TiledScatteringAtlas' { 'Opt-in scattering atlas with hardware VRS and a tiled mesh correction draw.' }
+        default { 'Direct 8x4 integration' }
+    })
+    SkyBackendEvidence='Per-replay native Atlas, prefilter and tiled mesh activation, Lookup owner binding and measured renderer hash. See attempts.csv and retained native draw counts.'
     AcceptanceRequiredPairs=5; AcceptanceRequiredFlights=60; AcceptanceSamplesPerPhasePerVariant=2000
     EvidenceKind=$(if ($FullLookupSeries) { 'DIAGNOSTIC ONLY: experimental lookup with full WYU counts and original measured limits.' }
         elseif ($Diagnostics) { 'DIAGNOSTIC ONLY: telemetry and/or reduced flight count; never acceptance evidence.' }
@@ -97,7 +137,7 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
     SourceCommit=$sourceCommit; WorkingTreeStatus=$workingTree; RendererSourceCommit=$RendererSourceCommit
     ExpectedClientSha256=$ExpectedClientSha256; ExpectedRendererSha256=$ExpectedRendererSha256
     ExpectedRenderingSha256=$ExpectedRenderingSha256
-    Provenance='Operator-identified diagnostic assemblies. Hook binding and recorded hashes do not establish immutable archive approval.'
+    Provenance='Independently identified assemblies. Hook binding and recorded hashes do not establish immutable archive approval.'
     GpuFrameInterval='Clear through last draw pass in one graphics command list, excluding separate uploads and native Present. Phase geometry is held fixed.'
     PresentationConfiguration='Native DXGI Present syncInterval=1 flags=0. Actual compositor/scanout mode is not captured by this runner.'
     HeldPresentationWait='Exact renderer sequence acknowledgement, 30-second bound, fault/cancellation checks; no additional 8 ms polling.'
@@ -132,6 +172,34 @@ function Assert-SkyLookupOwners($Owners, [bool]$Requested, [bool]$ReuseRequested
             throw 'Lookup resource reuse was not positively verified for every native owner.'
         }
     }
+}
+
+function Get-ObservedSkyBackend([string[]]$Lines, [string]$Mode, [string]$ExpectedBackend, [bool]$ExpectPrefilter) {
+    $atlas = [bool]($Lines -cmatch '^SKY SCATTERING ATLAS active(?: |$)')
+    $prefilter = [bool]($Lines -cmatch '^SKY SCATTERING PREFILTER active(?:,| |$)')
+    $legacySolar = [bool]($Lines -cmatch '^SKY SOLAR TABLE active(?: |$)')
+    $vrs = [bool]($Lines -cmatch '^SKY ADAPTIVE VRS active(?: |$)')
+    $split = [bool]($Lines -cmatch '^SKY ADAPTIVE VRS active tier 2, 16px tiles, R8_UINT \d+x\d+ viewport, 65536 native DEFAULT bytes, split sky draw\.$')
+    $mesh = [bool]($Lines -cmatch '^SKY MESH CORRECTION active(?:,| |$)')
+    if ($legacySolar) { throw 'Unexpected legacy solar-depth backend activity.' }
+    if ($Mode -ceq 'off') {
+        if ($atlas -or $prefilter -or $vrs -or $mesh) { throw 'Experimental sky backend active in the disabled-sky baseline.' }
+        return 'Disabled'
+    }
+    if ($ExpectedBackend -ceq 'TiledScatteringAtlas') {
+        if (!$atlas -or !$prefilter -or !$mesh -or !$split) {
+            throw 'The tiled atlas did not report its required native atlas, prefilter, split VRS and mesh activity.'
+        }
+        return $ExpectedBackend
+    }
+    if ($vrs -or $mesh) { throw "Unexpected tiled sky activity in the selected $ExpectedBackend backend." }
+    if ($ExpectedBackend -ceq 'ScatteringAtlas') {
+        if (-not $atlas) { throw 'The requested scattering atlas did not report a submitted draw.' }
+        if ($prefilter -ne $ExpectPrefilter) { throw 'Observed atlas prefilter activity differs from the selected mode.' }
+    } elseif ($atlas -or $prefilter) {
+        throw "Unexpected experimental sky activity in the selected $ExpectedBackend backend."
+    }
+    return $ExpectedBackend
 }
 
 function Get-SkyGpuInteger($Row, [string]$Field) {
@@ -254,7 +322,8 @@ function Percentile($values, [double]$percentile) {
     $sorted[[int][Math]::Ceiling($sorted.Count * $percentile) - 1]
 }
 
-function Get-SkyNativeExecutions($Rows, $Window, [string]$Mode) {
+function Get-SkyNativeExecutions($Rows, $Window, [string]$Mode, [ValidateRange(1,2)][int]$ExpectedOnDraws = 1) {
+    $expectedDraws = if ($Mode -ceq 'on') { $ExpectedOnDraws } else { 0 }
     $gpu = @{}
     $cpu = @{}
     $preparation = @{}
@@ -300,7 +369,9 @@ function Get-SkyNativeExecutions($Rows, $Window, [string]$Mode) {
             $c = $cpu["$($g.owner)-$($g.fence)"]
             if ($g.phase -cne $Window.phase) { throw 'Native timing phase mismatch.' }
             if ([bool]$g.hasSky -ne ($Mode -ceq 'on')) { throw 'The measured sky pass does not match the variant.' }
-            if ([int]$c.draws -ne $(if ($Mode -ceq 'on') { 1 } else { 0 })) { throw 'Native sky draw count does not match the variant.' }
+            if ([int]$c.draws -ne $expectedDraws) {
+                throw "Native sky draw count does not match the variant. Expected $expectedDraws, observed $($c.draws)."
+            }
             $frame = Number $g.frameMicroseconds
             if ($frame -le 0) { throw 'Zero GPU frame timestamp interval.' }
             $recordMs = (Number $c.recordMicroseconds) / 1000
@@ -347,6 +418,8 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
     $started = $false
     $ownedProcessId = 0
     $passed = $false
+    $expectedSkyBackend = if ($Mode -ceq 'off') { 'Disabled' } else { $selectedSkyBackend }
+    $observedSkyBackend = 'Unverified'
     $failure = ''
     $primaryFailure = $null
     $cleanupFailures = [Collections.Generic.List[string]]::new()
@@ -369,6 +442,11 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         $start.CreateNoWindow = $true
         $start.RedirectStandardOutput = $true
         $start.RedirectStandardError = $true
+        if ($tiledSky -and $Mode -ceq 'on') {
+            $start.Environment['GROUNDWORK_SKY_SCATTERING_ATLAS'] = '1'
+            $start.Environment['GROUNDWORK_SKY_ATLAS_PREFILTER'] = '1'
+            $start.Environment['GROUNDWORK_SKY_SPLIT_DRAW'] = '1'
+        }
         foreach ($argument in @($client,'--volume-flight-smoke','flight',$world,$Adapter,[string]$seed)) {
             $start.ArgumentList.Add($argument)
         }
@@ -416,6 +494,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             throw 'Missing or inconsistent near/far/near owner records.'
         }
         Assert-SkyLookupOwners $owners ([bool]$LookupPrototype) ([bool]$ReuseLookupResources)
+        $observedSkyBackend = Get-ObservedSkyBackend $lines $Mode $selectedSkyBackend ([bool]$AtlasPrefilter)
         if ($GpuPassBreakdown) {
             $prepass = Get-SkyPrepassIndex $rows 'gpu-prepass'
             $frameTicks = Get-SkyPrepassIndex $rows 'gpu-ticks'
@@ -459,7 +538,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                     throw "Canonical $phase camera/clock/terrain changed between variants."
                 }
                 $identities[$identityKey] = $w.identity
-                $joined = Get-SkyNativeExecutions $rows $w $Mode
+                $joined = Get-SkyNativeExecutions $rows $w $Mode $expectedOnDraws
                 $replayNativeExtras += $joined.RawNativeExtras
                 $nativeExtras.Add([pscustomobject]@{ Pair=$Pair; Replay=$Replay; Mode=$Mode; Composition=$Composition; Phase=$phase
                     RequestedSequences=$count; NativeExecutions=$joined.Rows.Count; RawNativeExtras=$joined.RawNativeExtras })
@@ -523,6 +602,8 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             StartedUtc=$replayStartedUtc; StartedQpc=$replayStartedQpc; FinishedUtc=[DateTime]::UtcNow.ToString('O')
             FinishedQpc=[Diagnostics.Stopwatch]::GetTimestamp(); QpcFrequency=[Diagnostics.Stopwatch]::Frequency
             Started=$started; ProcessId=$ownedProcessId; ExitCode=$exitCode
+            ExpectedSkyBackend=$expectedSkyBackend; ObservedSkyBackend=$observedSkyBackend
+            ExpectedSkyDraws=$(if ($Mode -ceq 'on') { $expectedOnDraws } else { 0 })
             SchedulingTraceStatus=$(if ($schedulingReport) { $schedulingReport.Status } else { 'DISABLED' })
             SchedulingTraceDirectory=$(if ($schedulingReport) { $schedulingReport.OutputDirectory } else { $null })
             Passed=($passed -and $cleanupFailures.Count -eq 0); Failure=$failure
@@ -553,7 +634,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
 }
 
 try {
-    foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, $null) }
+    foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, [NullString]::Value) }
     $env:WYU_SKY_MEASURE_SMOKE = if ($Smoke) { '1' } else { '0' }
     $env:WYU_PACKAGE_G, $env:WYU_PACKAGE_G_SMOKE, $env:WYU_PACKAGE_E, $env:WYU_WP13_MEASURE = 'on','1','on','on'
     $env:WYU_WP15, $env:WYU_WP16 = 'off','off'
@@ -562,6 +643,8 @@ try {
     $env:GROUNDWORK_TWILIGHT_PREVIEW = '1'
     $env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE = if ($LookupPrototype) { '1' } else { $null }
     $env:GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES = if ($ReuseLookupResources) { '1' } else { $null }
+    $env:GROUNDWORK_SKY_SCATTERING_ATLAS = if ($selectedSkyBackend -ceq 'ScatteringAtlas') { '1' } else { $null }
+    $env:GROUNDWORK_SKY_ATLAS_PREFILTER = if (!$tiledSky -and $AtlasPrefilter) { '1' } else { $null }
     $env:WYU_SKY_GPU_PASS_BREAKDOWN = if ($GpuPassBreakdown) { '1' } else { $null }
     if ($Composition -ceq 'orbit-combined') {
         $env:WYU_ORBIT_DEMO_SMOKE, $env:WYU_ORBIT_PBR, $env:WYU_ORBIT_BOULDER = '1','on','on'
@@ -575,6 +658,7 @@ try {
     }
 } catch {
     [pscustomobject]@{ Status='BLOCKED'; FullQualification=$false; LookupPrototype=[bool]$LookupPrototype; Failure=$_.Exception.Message
+        SkyBackendOn=$selectedSkyBackend; AtlasPrefilter=[bool]$AtlasPrefilter; ExpectedSkyDrawsOn=$expectedOnDraws; ExpectedSkyDrawsOff=0
         Composition=$Composition; Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe; FullLookupSeries=[bool]$FullLookupSeries
         ReuseLookupResources=[bool]$ReuseLookupResources
         GpuSchedulingTrace=[bool]$GpuSchedulingTrace; GpuPassBreakdown=[bool]$GpuPassBreakdown
@@ -586,7 +670,10 @@ try {
         ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $root 'result.json')
     throw
 } finally {
-    foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, $previous[$name]) }
+    foreach ($name in $environmentNames) {
+        if ($null -eq $previous[$name]) { [Environment]::SetEnvironmentVariable($name, [NullString]::Value) }
+        else { [Environment]::SetEnvironmentVariable($name, $previous[$name]) }
+    }
 }
 
 $summary = [Collections.Generic.List[object]]::new()
@@ -610,7 +697,7 @@ foreach ($phase in 'surface','ascent','orbit') {
             FrameP95DeltaPercent=$delta95; FrameP99DeltaPercent=$delta99; SkyP95Ms=$sky95; SkyP99Ms=$sky99
             RecordP99Ms=$record99; CombinedCpuP99Ms=$combined99; RecordMaxAllocatedBytes=($on.RecordAllocatedBytes | Measure-Object -Maximum).Maximum
             CombinedMaxAllocatedBytes=$allocated; SkyDrawsMax=$draws
-            Passed=($delta95 -le 5 -and $delta99 -le 8 -and $sky95 -le .8 -and $sky99 -le 1.2 -and $combined99 -le .10 -and $draws -eq 1 -and $allocated -eq 0) })
+            Passed=($delta95 -le 5 -and $delta99 -le 8 -and $sky95 -le .8 -and $sky99 -le 1.2 -and $combined99 -le .10 -and $draws -eq $expectedOnDraws -and $allocated -eq 0) })
     }
 }
 foreach ($direction in 'to-orbit','to-ground') {
@@ -631,6 +718,7 @@ $summary | Where-Object Pair -EQ 0 | Format-Table -AutoSize
 $failed = @($summary | Where-Object { -not $_.Passed }).Count
 [pscustomobject]@{ Status=if ($Smoke) { 'SMOKE ONLY' } elseif ($failed) { 'CHANGES REQUIRED' } elseif ($Diagnostics) { 'DIAGNOSTIC ONLY' } else { 'MEASURED GATES PASSED' }
     Composition=$Composition; Diagnostics=[bool]$Diagnostics; DiagnosticProbe=[bool]$DiagnosticProbe; FullLookupSeries=[bool]$FullLookupSeries
+    SkyBackendOn=$selectedSkyBackend; AtlasPrefilter=[bool]$AtlasPrefilter; ExpectedSkyDrawsOn=$expectedOnDraws; ExpectedSkyDrawsOff=0
     GpuSchedulingTrace=[bool]$GpuSchedulingTrace; GpuPassBreakdown=[bool]$GpuPassBreakdown
     SchedulingTraces=@($attempts | Select-Object Pair,Replay,Mode,SchedulingTraceStatus,SchedulingTraceDirectory)
     LookupPrototype=[bool]$LookupPrototype; ReuseLookupResources=[bool]$ReuseLookupResources

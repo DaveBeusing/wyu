@@ -188,6 +188,16 @@ The variables above identify the controlled build; do not substitute values
 from an unverified downloaded binary. The runner rejects mismatches. Do not
 use `-Smoke` for reference qualification.
 
+To measure the installed opt-in tiled renderer, set `$clientAssembly` to
+the installer-produced client DLL and use the installed payload hashes from
+the independently verified installer manifest. Add
+`-SkyBackend TiledScatteringAtlas` to both composition runs. The enabled arm
+must attest native atlas, prefilter, VRS and mesh activity and record exactly
+two sky draws per measured frame. The disabled arm must record zero sky
+draws. Run both compositions with the existing hardware counts and limits.
+The Groundwork moving-camera and moving-sun fixture is separate from the
+fixed in-phase route windows in this runner.
+
 The software-only `-Smoke -Adapter warp -Composition orbit-combined` diagnostic
 allows six minutes inside the child and 390 seconds in the parent. The complete
 PBR/shadow route exceeded the older three-minute smoke deadline while continuing
