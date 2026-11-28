@@ -24,7 +24,7 @@ var assembly = Assembly.LoadFrom(args[0]);
 var type = assembly.GetType("WorldsYetUnseen.Client.OrbitTerrainMaterials", true)!;
 const BindingFlags members = BindingFlags.NonPublic | BindingFlags.Instance;
 var materials = type.GetMethod("Load", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null)!;
-var stream = (D3D12TextureHandoff)type.GetMethod("CreateStream", members)!.Invoke(materials, null)!;
+var stream = (D3D12TextureHandoff)type.GetMethod("CreateStream", members)!.Invoke(materials, [false])!;
 var resident = type.GetMethod("IsResident", members)!;
 var publish = type.GetMethod("Publish", members)!;
 var targets = (D3D12TextureTarget[])type.GetField("_targets", members)!.GetValue(materials)!;
@@ -88,7 +88,9 @@ void Require(bool value, string message)
     if (!value) throw new InvalidOperationException(message);
 }
 '@ | Set-Content -LiteralPath (Join-Path $root 'Program.cs')
-& dotnet run --project (Join-Path $root 'Readiness.csproj') -c Release --no-launch-profile -- $client *> (Join-Path $root 'test.log')
-if ($LASTEXITCODE -ne 0) { throw "Managed Orbit readiness regression failed. Evidence $root/test.log" }
-Get-Content -LiteralPath (Join-Path $root 'test.log')
+$log = Join-Path $root 'test.log'
+& dotnet run --project (Join-Path $root 'Readiness.csproj') -c Release --no-launch-profile -- $client *> $log
+$exitCode = $LASTEXITCODE
+Get-Content -LiteralPath $log
+if ($exitCode -ne 0) { throw "Managed Orbit readiness regression failed. Evidence $log" }
 Write-Host "Evidence $root"
