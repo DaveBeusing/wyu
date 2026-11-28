@@ -8,7 +8,7 @@ using static WorldsYetUnseen.Client.FlightVector;
 namespace WorldsYetUnseen.Client;
 
 /// <summary>Versioned Far Horizon placement in a planet-centred lattice.</summary>
-internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder = false)
+internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder = false, bool observeBoulder = false)
 {
     private const uint Recipe = 1;
     private const int CellSize = 8;
@@ -22,6 +22,7 @@ internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder =
     private readonly D3D12PropAsset[] _assets = orbitBoulder ? OrbitAssets.Value : Assets;
     private readonly ReferenceBiomes _biomes = new(planet);
     private readonly Dictionary<PropCellKey, LatticeCoordinate[]> _supports = [];
+    private readonly Dictionary<PropCellKey, PlanetVector>? _observedBoulders = orbitBoulder && observeBoulder ? [] : null;
     private D3D12PropCells? _stream;
     private VolumePublicationInfo _previous;
     private VolumeStreamingSelection? _selection;
@@ -57,6 +58,7 @@ internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder =
         _renderCoverage = [];
         Supersede();
         _supports.Clear();
+        _observedBoulders?.Clear();
     }
 
     internal void Refresh(VolumeStreamingCoordinator terrain, VolumePublicationInfo publication,
@@ -100,6 +102,10 @@ internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder =
         CoverageCount = coverage.Length;
         Retired += _supports.Keys.Count(key => invalidated?.Contains(key) == true || !coverage.Contains(key) ||
             !overlap && !next.ContainsKey(key));
+        if (_observedBoulders is { } observed)
+            foreach (var key in observed.Keys)
+                if (!next.ContainsKey(key))
+                    observed.Remove(key);
         _supports.Clear();
         foreach (var (key, supports) in next)
             _supports.Add(key, supports);
@@ -153,6 +159,15 @@ internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder =
                     != PropCellResult.Accepted || cell.Placements.Length == 0)
                     continue;
                 _supports[cell.Request.Cell] = cell.Supports;
+                if (_observedBoulders is { } observed)
+                    foreach (var placement in cell.Placements)
+                        if (_assets[placement.ModelIndex].Model.Model == OrbitDemoPreset.BoulderModel)
+                        {
+                            var offset = placement.Translation;
+                            var foot = Add(cell.Origin, new(offset.X, offset.Y, offset.Z));
+                            observed[cell.Request.Cell] = Add(foot, Scale(Unit(foot), 0.45));
+                            break;
+                        }
                 Staged++;
             }
         }
@@ -167,6 +182,26 @@ internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder =
                 run.Work.Stream.CompleteWorker(request);
             run.Cancel.Dispose();
         }
+    }
+
+    internal bool TryFindVisibleBoulder(VolumeStreamingLease terrain, PlanetVector eye, out PlanetVector target)
+    {
+        target = default;
+        if (_observedBoulders is not { Count: > 0 } boulders || terrain.Info != _previous)
+            return false;
+        double nearest = 96;
+        var found = false;
+        Span<VolumeRayHit> hits = stackalloc VolumeRayHit[8];
+        foreach (var position in boulders.Values)
+        {
+            var distance = Length(Subtract(position, eye));
+            if (distance <= 3 || distance >= nearest || terrain.Raycast(eye, position, hits).Status != VolumeQueryStatus.Clear)
+                continue;
+            nearest = distance;
+            target = position;
+            found = true;
+        }
+        return found;
     }
 
     private void Supersede()
@@ -325,7 +360,8 @@ internal sealed class ReferenceProps(ReferencePlanet planet, bool orbitBoulder =
     private static D3D12PropAsset[] CreateOrbitAssets()
     {
         var assets = (D3D12PropAsset[])Assets.Clone();
-        assets[1] = new(new(2, 2, 1.35f, 128, 18, 23), OrbitDemoPreset.LoadBoulder(0), OrbitDemoPreset.LoadBoulder(1));
+        assets[1] = new(new(OrbitDemoPreset.BoulderModel, OrbitDemoPreset.BoulderMaterial, 1.35f, 128, 18, 23),
+            OrbitDemoPreset.LoadBoulder(0), OrbitDemoPreset.LoadBoulder(1));
         return assets;
     }
 

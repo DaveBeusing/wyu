@@ -15,6 +15,7 @@ param(
     [string]$InstallerCompiler,
     [string]$InstallerOutputDirectory,
     [switch]$R09MeasurementInstaller,
+    [switch]$IsolatedR09Installer,
     [switch]$TwilightPreviewInstaller
 )
 Set-StrictMode -Version Latest
@@ -23,6 +24,7 @@ if ([bool]$InstallerCompiler -ne [bool]$InstallerOutputDirectory) {
     throw 'Specify InstallerCompiler and InstallerOutputDirectory together.'
 }
 if ($R09MeasurementInstaller -and !$InstallerCompiler) { throw 'The R09 installer requires the installer compiler and output directory.' }
+if ($IsolatedR09Installer -and !$R09MeasurementInstaller) { throw 'The isolated installation requires the R09 measurement installer.' }
 if ($TwilightPreviewInstaller -and !$InstallerCompiler) { throw 'The Twilight Preview installer requires the installer compiler and output directory.' }
 if ($InstallerCompiler) {
     $InstallerCompiler = (Resolve-Path -LiteralPath $InstallerCompiler).Path
@@ -310,7 +312,7 @@ try {
             & (Join-Path $PSScriptRoot 'Build-OfflineInstaller.ps1') -Compiler $InstallerCompiler `
                 -OutputDirectory $InstallerOutputDirectory -WorkDirectory $work -GroundworkVersion $ExpectedVersion `
                 -GroundworkCommit $ExpectedSourceCommit -GroundworkManifestHash $ExpectedManifestSha256 `
-                -GroundworkLicense (Join-Path $artifactRoot 'LICENSE') -R09Measurement:$R09MeasurementInstaller `
+                -GroundworkLicense (Join-Path $artifactRoot 'LICENSE') -R09Measurement:$R09MeasurementInstaller -IsolatedR09:$IsolatedR09Installer `
                 -TwilightPreview:$TwilightPreviewInstaller
         }
         Write-Host "PASS: WYU consumed $($expectedIds.Count) verified Groundwork $ExpectedVersion packages with a fresh locked restore."

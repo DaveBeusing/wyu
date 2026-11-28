@@ -7,12 +7,14 @@ param(
     [Parameter(Mandatory)][string]$GroundworkManifestHash,
     [Parameter(Mandatory)][string]$GroundworkLicense,
     [switch]$R09Measurement,
+    [switch]$IsolatedR09,
     [switch]$TwilightPreview
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 if ($R09Measurement -and $TwilightPreview) { throw 'Specify one installer mode.' }
+if ($IsolatedR09 -and !$R09Measurement) { throw 'An isolated R09 instance requires the R09 measurement installer.' }
 
 # Called by the verified consumer while its validated feed and fresh cache are active.
 if (!$env:GROUNDWORK_NUGET_FEED -or !$env:NUGET_PACKAGES) { throw 'Use the verified consumer gate to build the installer.' }
@@ -68,6 +70,7 @@ Copy-Item -LiteralPath (Join-Path $runtimePackage 'THIRD-PARTY-NOTICES.TXT') -De
 New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
 $compilerArguments = @("/DAppVersion=$version", "/DPayloadDirectory=$payload", "/DInstallerOutput=$OutputDirectory")
 if ($R09Measurement) { $compilerArguments += '/DR09Installer=1' }
+if ($IsolatedR09) { $compilerArguments += '/DIsolatedR09Installer=1' }
 if ($TwilightPreview) { $compilerArguments += '/DTwilightPreviewInstaller=1' }
 $compilerArguments += (Join-Path $PSScriptRoot 'WyuAlpha.iss')
 & $compilerFile.FullName @compilerArguments
@@ -82,7 +85,7 @@ $files = @(Get-ChildItem -LiteralPath $payload -Recurse -File | Sort-Object Full
         sha256 = (Get-FileHash -LiteralPath $_.FullName).Hash
     }
 })
-[ordered]@{
+$manifest = [ordered]@{
     schemaVersion = 1
     wyuCommit = $commit
     wyuVersion = $version
@@ -98,5 +101,7 @@ $files = @(Get-ChildItem -LiteralPath $payload -Recurse -File | Sort-Object Full
     installer = $name
     installerSha256 = (Get-FileHash -LiteralPath $installer).Hash
     payload = $files
-} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'installer-manifest.json')
+}
+if ($IsolatedR09) { $manifest.diagnosticR09Instance = $true }
+$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'installer-manifest.json')
 Write-Host "PASS: Built offline installer $installer"

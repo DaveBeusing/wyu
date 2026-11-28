@@ -10,10 +10,9 @@ namespace WorldsYetUnseen.Client;
 internal sealed class R09NativeUploadGate
 {
     private UploadHold? _armed;
+    internal R09TwilightPressure? Twilight { get; }
 
-    private R09NativeUploadGate()
-    {
-    }
+    private R09NativeUploadGate(R09TwilightPressure? twilight) => Twilight = twilight;
 
     internal static R09NativeUploadGate Attach(D3D12Renderer renderer)
     {
@@ -44,10 +43,19 @@ internal sealed class R09NativeUploadGate
             parameters.Any(parameter => !parameter.HasDefaultValue || parameter.DefaultValue is not null))
             throw BindingMismatch();
 
-        var gate = new R09NativeUploadGate();
+        var twilight = R09TwilightPressure.Create(gpuType);
+        var gate = new R09NativeUploadGate(twilight);
         Action<object> beforeUpload = gate.BeforeVolumeUpload;
         var arguments = new object?[parameters.Length];
         arguments[callbackIndex] = Delegate.CreateDelegate(callbackType, beforeUpload.Target, beforeUpload.Method);
+        if (twilight is not null)
+        {
+            var initializeIndex = Array.FindIndex(parameters, parameter => parameter.Name == "AfterDeviceInitialize");
+            if (initializeIndex < 0 || parameters[initializeIndex].ParameterType != callbackType)
+                throw BindingMismatch();
+            Action<object> verifyDevice = twilight.VerifyDevice;
+            arguments[initializeIndex] = Delegate.CreateDelegate(callbackType, verifyDevice.Target, verifyDevice.Method);
+        }
         var hooks = constructor.Invoke(arguments);
         field.SetValue(renderer, hooks);
         if (!ReferenceEquals(field.GetValue(renderer), hooks))

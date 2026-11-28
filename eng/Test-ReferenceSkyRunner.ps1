@@ -34,6 +34,10 @@ try {
         $result.Attempts -ne 1 -or $result.FailedAttempts -ne 1) {
         throw 'Native launch failure lost its primary error or attempt evidence.'
     }
+    if ($manifest.SkyBackendOn -cne 'Direct8x4' -or $attempts[0].ExpectedSkyBackend -cne 'Disabled' -or
+        $attempts[0].ObservedSkyBackend -cne 'Unverified') {
+        throw 'Native launch failure was assigned an observed sky backend without evidence.'
+    }
     Write-Host "PASS: Native launch failure preserved PID=0, attempts.csv and BLOCKED result. Evidence $OutputDirectory"
 
     $lookupOutput=Join-Path $OutputDirectory 'lookup-smoke'
@@ -41,6 +45,9 @@ try {
     try {
         & (Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1') -Smoke -LookupPrototype -Composition $Composition -Adapter $Adapter -Assembly $Assembly -OutputDirectory $lookupOutput
     } catch { $lookupFailure=$_.Exception.Message }
+    if (-not (Test-Path -LiteralPath (Join-Path $lookupOutput 'manifest.json'))) {
+        throw "Lookup Smoke did not create its manifest: $lookupFailure"
+    }
     $lookupManifest=Get-Content -Raw (Join-Path $lookupOutput 'manifest.json') | ConvertFrom-Json
     $lookupResult=Get-Content -Raw (Join-Path $lookupOutput 'result.json') | ConvertFrom-Json
     if ($lookupFailure -notmatch 'start process.*dotnet' -or -not $lookupManifest.Diagnostics -or
@@ -56,7 +63,90 @@ try {
     if (-not $rejected -or (Test-Path -LiteralPath $forbiddenOutput)) { throw 'Lookup admitted to full acceptance.' }
     Write-Host 'PASS: Actual Lookup+Smoke enables diagnostics; Lookup without a diagnostic scope is rejected.'
 
-    function Assert-FullLookupSeries {
+    function Assert-SkyBackendProvenance {
+        $runner = Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1'
+        $output = Join-Path $OutputDirectory 'atlas-smoke'
+        $savedAtlas = [Environment]::GetEnvironmentVariable('GROUNDWORK_SKY_SCATTERING_ATLAS')
+        $savedPrefilter = [Environment]::GetEnvironmentVariable('GROUNDWORK_SKY_ATLAS_PREFILTER')
+        try {
+            $env:GROUNDWORK_SKY_SCATTERING_ATLAS = '1'
+            $caught = $null
+            try { & $runner -Smoke -Assembly $Assembly -OutputDirectory $output } catch { $caught = $_.Exception.Message }
+            if ($caught -notlike '*Unset inherited sky backend options*' -or (Test-Path -LiteralPath $output)) {
+                throw 'An inherited Atlas selector was silently accepted.'
+            }
+            $env:GROUNDWORK_SKY_SCATTERING_ATLAS = '0'
+            $env:GROUNDWORK_SKY_ATLAS_PREFILTER = '0'
+            foreach ($arguments in @(@{SkyBackend='ScatteringAtlas'},
+                @{SkyBackend='ScatteringAtlas'; LookupPrototype=$true; Smoke=$true},
+                @{SkyBackend='Direct8x4'; AtlasPrefilter=$true; Smoke=$true})) {
+                $caught = $null
+                try { & $runner @arguments -Assembly $Assembly -OutputDirectory $output } catch { $caught = $_.Exception.Message }
+                if ($caught -notmatch 'requires DiagnosticProbe or Smoke|cannot be combined|requires the explicit' -or
+                    (Test-Path -LiteralPath $output)) {
+                    throw "An invalid backend combination was accepted: $caught"
+                }
+            }
+            $caught = $null
+            try {
+                & $runner -Smoke -SkyBackend ScatteringAtlas -AtlasPrefilter -Assembly $Assembly -OutputDirectory $output
+            } catch { $caught = $_.Exception.Message }
+            $record = Get-Content -Raw -LiteralPath (Join-Path $output 'manifest.json') | ConvertFrom-Json
+            $result = Get-Content -Raw -LiteralPath (Join-Path $output 'result.json') | ConvertFrom-Json
+            if ($caught -notmatch 'start process.*dotnet' -or $record.SkyBackendOn -cne 'ScatteringAtlas' -or
+                $record.SkyBackendOff -cne 'Disabled' -or -not $record.AtlasPrefilter -or -not $record.Diagnostics -or
+                $record.SkyImplementation -match 'Direct 8x4' -or $result.SkyBackendOn -cne 'ScatteringAtlas' -or
+                $env:GROUNDWORK_SKY_SCATTERING_ATLAS -cne '0' -or $env:GROUNDWORK_SKY_ATLAS_PREFILTER -cne '0') {
+                throw "Explicit Atlas mode lost its manifest or previous environment: $caught"
+            }
+        } finally {
+            if ($null -eq $savedAtlas) { [Environment]::SetEnvironmentVariable('GROUNDWORK_SKY_SCATTERING_ATLAS', [NullString]::Value) }
+            else { [Environment]::SetEnvironmentVariable('GROUNDWORK_SKY_SCATTERING_ATLAS', $savedAtlas) }
+            if ($null -eq $savedPrefilter) { [Environment]::SetEnvironmentVariable('GROUNDWORK_SKY_ATLAS_PREFILTER', [NullString]::Value) }
+            else { [Environment]::SetEnvironmentVariable('GROUNDWORK_SKY_ATLAS_PREFILTER', $savedPrefilter) }
+        }
+
+        $tokens = $null; $parseErrors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile($runner, [ref]$tokens, [ref]$parseErrors)
+        if ($parseErrors.Count) { throw 'Reference runner has syntax errors.' }
+        $observer = $ast.Find({ param($node)
+            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-ObservedSkyBackend'
+        }, $false)
+        . ([scriptblock]::Create($observer.Extent.Text))
+        $atlas = 'SKY SCATTERING ATLAS active compressed full chart diagnostic with shared solar depth RG16F'
+        $prefilter = 'SKY SCATTERING PREFILTER active, native DEFAULT bytes 65536.'
+        if ((Get-ObservedSkyBackend @() 'off' 'ScatteringAtlas' $true) -cne 'Disabled' -or
+            (Get-ObservedSkyBackend @() 'on' 'Direct8x4' $false) -cne 'Direct8x4' -or
+            (Get-ObservedSkyBackend @($atlas, $prefilter) 'on' 'ScatteringAtlas' $true) -cne 'ScatteringAtlas' -or
+            (Get-ObservedSkyBackend @($atlas) 'on' 'ScatteringAtlas' $false) -cne 'ScatteringAtlas') {
+            throw 'Valid native backend evidence was rejected.'
+        }
+        $vrs = 'SKY ADAPTIVE VRS active tier 2, 16px tiles, R8_UINT 1920x1080 viewport, 65536 native DEFAULT bytes, split sky draw.'
+        $mesh = 'SKY MESH CORRECTION active, using the shared R8_UINT rate image.'
+        if ((Get-ObservedSkyBackend @($atlas, $prefilter, $vrs, $mesh) 'on' 'TiledScatteringAtlas' $true) -cne 'TiledScatteringAtlas' -or
+            (Get-ObservedSkyBackend @() 'off' 'TiledScatteringAtlas' $true) -cne 'Disabled') {
+            throw 'Valid split draw evidence was rejected.'
+        }
+        foreach ($invalid in @(@{Log=@($atlas, $prefilter, $vrs); Mode='on'; Backend='TiledScatteringAtlas'; Prefilter=$true},
+                @{Log=@($atlas, $prefilter, $mesh); Mode='on'; Backend='TiledScatteringAtlas'; Prefilter=$true},
+                @{Log=@($vrs, $mesh); Mode='off'; Backend='TiledScatteringAtlas'; Prefilter=$true},
+                @{Log=@($mesh); Mode='on'; Backend='Direct8x4'; Prefilter=$false},
+                @{Log=@($atlas); Mode='off'; Backend='ScatteringAtlas'; Prefilter=$false},
+                @{Log=@(); Mode='on'; Backend='ScatteringAtlas'; Prefilter=$false},
+                @{Log=@($atlas); Mode='on'; Backend='ScatteringAtlas'; Prefilter=$true},
+                @{Log=@($atlas, $prefilter); Mode='on'; Backend='ScatteringAtlas'; Prefilter=$false},
+                @{Log=@($atlas); Mode='on'; Backend='Direct8x4'; Prefilter=$false},
+                @{Log=@('SKY SOLAR TABLE active prepared optical depth'); Mode='on'; Backend='Direct8x4'; Prefilter=$false})) {
+            $rejected = $false
+            try { $null = Get-ObservedSkyBackend $invalid.Log $invalid.Mode $invalid.Backend $invalid.Prefilter }
+            catch { $rejected = $true }
+            if (-not $rejected) { throw 'Ambiguous native sky backend evidence was accepted.' }
+        }
+        Write-Host 'PASS: Explicit sky backend provenance rejects inherited selectors, conflicting modes and inconsistent native activation.'
+    }
+    Assert-SkyBackendProvenance
+
+    function Assert-FullSkySeries {
         $runner = Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1'
         foreach ($argument in 'Smoke', 'DiagnosticProbe', 'GpuSchedulingTrace') {
             $forbidden = @{ FullLookupSeries = $true; OutputDirectory = $forbiddenOutput }
@@ -104,8 +194,10 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
     $orbit = $Composition -ceq 'orbit-combined'
     $requiredFlag = if ($orbit) { 'on' } else { 'off' }
     $requiredOrbit = if ($orbit) { '1' } else { '' }
-    if ($env:GROUNDWORK_TWILIGHT_PREVIEW -cne '1' -or $env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE -cne '1' -or
-        $env:WYU_SKY_DIAGNOSTICS -cne '1' -or
+    $lookupFlag = if ($tiledSky) { '' } else { '1' }
+    $diagnosticFlag = if ($tiledSky) { '0' } else { '1' }
+    if ($env:GROUNDWORK_TWILIGHT_PREVIEW -cne '1' -or [string]$env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE -cne $lookupFlag -or
+        $env:WYU_SKY_DIAGNOSTICS -cne $diagnosticFlag -or
         $env:WYU_SKY_MEASURE_SMOKE -cne '0' -or $env:WYU_PACKAGE_E -cne 'on' -or
         $env:WYU_WP15 -cne $requiredFlag -or $env:WYU_WP16 -cne $requiredFlag -or
         [string]$env:WYU_ORBIT_DEMO_SMOKE -cne $requiredOrbit -or $env:WYU_SKY_MEASURE_COMPOSITION -cne $Composition) {
@@ -122,7 +214,8 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             $isOn = $Mode -ceq 'on'
             $frameMs = if ($orbit -and $isOn -and $phase -ceq 'ascent') { 1.1 } else { 1.0 }
             $samples.Add([pscustomobject]@{ Phase=$phase; Pair=$Pair; Mode=$Mode; FrameMs=$frameMs
-                SkyMs=0.01; Draws=[int]$isOn; AllocatedBytes=0; RecordAllocatedBytes=0; RecordMs=0.01; CombinedCpuMs=0.02 })
+                SkyMs=0.01; Draws=$(if (!$isOn) { 0 } elseif ($tiledSky) { 2 } else { 1 })
+                AllocatedBytes=0; RecordAllocatedBytes=0; RecordMs=0.01; CombinedCpuMs=0.02 })
         }
     }
 }
@@ -132,10 +225,18 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         $source = $ast.Extent.Text
         $source.Replace($replay.Extent.Text, $substitute) | Set-Content -LiteralPath $fixtureRunner
         New-Item -ItemType File -Path (Join-Path $fixture 'ReferenceGpuDiagnostics.ps1') | Out-Null
-        foreach ($configuration in 'far-horizon', 'orbit-combined') {
-            $output = Join-Path $OutputDirectory "lookup-series-$configuration"
+        $cases = @(
+            @{ Mode='lookup'; Arguments=@{FullLookupSeries=$true}; Composition='far-horizon'; PassStatus='DIAGNOSTIC ONLY' },
+            @{ Mode='lookup'; Arguments=@{FullLookupSeries=$true}; Composition='orbit-combined'; PassStatus='DIAGNOSTIC ONLY' },
+            @{ Mode='tiled'; Arguments=@{SkyBackend='tiledscatteringatlas'}; Composition='far-horizon'; PassStatus='MEASURED GATES PASSED' },
+            @{ Mode='tiled'; Arguments=@{SkyBackend='TiledScatteringAtlas'}; Composition='orbit-combined'; PassStatus='MEASURED GATES PASSED' })
+        foreach ($case in $cases) {
+            $configuration = $case.Composition
+            $options = $case.Arguments
+            $isLookup = $case.Mode -ceq 'lookup'
+            $output = Join-Path $OutputDirectory "$($case.Mode)-series-$configuration"
             $failure = $null
-            try { & $fixtureRunner @identity -FullLookupSeries -Composition $configuration -OutputDirectory $output }
+            try { & $fixtureRunner @identity @options -Composition $configuration -OutputDirectory $output }
             catch { $failure = $_.Exception.Message }
             $resultPath = Join-Path $output 'result.json'
             if (-not (Test-Path -LiteralPath $resultPath)) { throw "Fixture produced no result: $failure" }
@@ -144,13 +245,19 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             $summaryPath = Join-Path $output 'summary.csv'
             if (-not (Test-Path -LiteralPath $summaryPath)) { throw "Fixture produced no summary: $failure" }
             $rows = @(Import-Csv -LiteralPath $summaryPath)
-            if (-not $result.FullLookupSeries -or -not $result.LookupPrototype -or -not $result.Diagnostics -or
+            if ($result.FullLookupSeries -ne $isLookup -or $result.LookupPrototype -ne $isLookup -or $result.Diagnostics -ne $isLookup -or
                 $result.FullQualification -or $result.DiagnosticProbe -or $result.GpuSchedulingTrace -or
                 $result.Composition -cne $configuration -or $result.Attempts -ne 60 -or
                 $result.RequiredAttempts -ne 60 -or $result.FailedAttempts -ne 0 -or $rows.Count -ne 30 -or
-                -not $manifest.FullLookupSeries -or $manifest.Pairs -ne 5 -or $manifest.FlightsPerPairPerVariant -ne 6 -or
+                $manifest.FullLookupSeries -ne $isLookup -or $manifest.Pairs -ne 5 -or $manifest.FlightsPerPairPerVariant -ne 6 -or
                 $manifest.SamplesPerPhasePerRun -ne 400 -or $manifest.ProcessDeadlineMilliseconds -ne 660000) {
-                throw 'Full lookup series changed its counters, gates or mode identity.'
+                throw 'Full sky series changed its counters, gates or mode identity.'
+            }
+            if (!$isLookup -and ($result.SkyBackendOn -cne 'TiledScatteringAtlas' -or !$manifest.AtlasPrefilter -or
+                $manifest.ExpectedSkyDrawsOn -ne 2 -or $manifest.ExpectedSkyDrawsOff -ne 0 -or
+                $result.ExpectedSkyDrawsOn -ne 2 -or $result.ExpectedSkyDrawsOff -ne 0 -or
+                @($rows | Where-Object { $_.Kind -ceq 'GPU' -and $_.SkyDrawsMax -ne 2 }).Count)) {
+                throw 'Full tiled sky series lost its exact two-draw contract.'
             }
             for ($i = 0; $i -lt 60; $i++) {
                 $trace = $result.SchedulingTraces[$i]
@@ -167,7 +274,7 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 $_.OffCount -ne $expected -or $_.OnCount -ne $expected
             }).Count) { throw 'Full series pooled denominators changed.' }
             if ($configuration -ceq 'far-horizon') {
-                if ($failure -or $result.Status -cne 'DIAGNOSTIC ONLY' -or $result.FailedSummaryRows -ne 0) {
+                if ($failure -or $result.Status -cne $case.PassStatus -or $result.FailedSummaryRows -ne 0) {
                     throw 'Full-count passing fixture was promoted or rejected.'
                 }
             } elseif ($failure -notlike 'A required measured sky/frame/handoff budget failed*' -or
@@ -175,9 +282,80 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
                 throw 'An Ascent overrun did not fail every applicable pair and pooled row.'
             }
         }
-        Write-Host 'PASS: FullLookupSeries keeps native launch faults, strict flags and both 60-flight schedules diagnostic; phase overrun fails.'
+        Write-Host 'PASS: Full lookup and tiled sky series preserve native launch faults, 60-flight schedules and all numerical gates.'
     }
-    Assert-FullLookupSeries
+    Assert-FullSkySeries
+
+    function Assert-InstalledAppHostEvidence {
+        $runner = Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1'
+        $payload = (New-Item -ItemType Directory -Path (Join-Path $OutputDirectory 'installed-apphost-fixture')).FullName
+        $clientSource = (Resolve-Path -LiteralPath $Assembly).Path
+        $sourceDirectory = Split-Path -Parent $clientSource
+        $client = Join-Path $payload 'WorldsYetUnseen.Client.dll'
+        $appHost = Join-Path $payload 'WorldsYetUnseen.Client.exe'
+        $coreClr = Join-Path $payload 'coreclr.dll'
+        $rendering = Join-Path $payload 'Groundwork.Rendering.dll'
+        $renderer = Join-Path $payload 'Groundwork.Rendering.D3D12.dll'
+        Copy-Item -LiteralPath $clientSource -Destination $client
+        Copy-Item -LiteralPath (Join-Path $sourceDirectory 'Groundwork.Rendering.dll') -Destination $rendering
+        Copy-Item -LiteralPath (Join-Path $sourceDirectory 'Groundwork.Rendering.D3D12.dll') -Destination $renderer
+        Set-Content -LiteralPath $appHost -Value 'Invalid PE for exercising native launch failure.'
+        Set-Content -LiteralPath $coreClr -Value 'Fixture bytes for independent digest checks.'
+        $identity = @{
+            Assembly=$client; InstalledAppHost=$appHost
+            ExpectedAppHostSha256=(Get-FileHash -LiteralPath $appHost).Hash
+            ExpectedCoreClrSha256=(Get-FileHash -LiteralPath $coreClr).Hash
+            ExpectedClientSha256=(Get-FileHash -LiteralPath $client).Hash
+            ExpectedRendererSha256=(Get-FileHash -LiteralPath $renderer).Hash
+            ExpectedRenderingSha256=(Get-FileHash -LiteralPath $rendering).Hash
+            RendererSourceCommit='0000000000000000000000000000000000000000'
+        }
+        $wrong = $identity.Clone()
+        $wrong.ExpectedCoreClrSha256 = '0' * 64
+        $invalidOutput = Join-Path $OutputDirectory 'invalid-apphost'
+        $failure = $null
+        try { & $runner @wrong -SkyBackend TiledScatteringAtlas -OutputDirectory $invalidOutput }
+        catch { $failure = $_.Exception.Message }
+        if ($failure -notlike '*bundled CLR hash mismatch*' -or (Test-Path -LiteralPath $invalidOutput)) {
+            throw "Mismatched runtime digest was not rejected before startup: $failure"
+        }
+
+        $nativeFailure = Join-Path $OutputDirectory 'installed-apphost-launch-fault'
+        $failure = $null
+        try { & $runner @identity -SkyBackend TiledScatteringAtlas -OutputDirectory $nativeFailure }
+        catch { $failure = $_.Exception.Message }
+        $manifest = Get-Content -Raw -LiteralPath (Join-Path $nativeFailure 'manifest.json') | ConvertFrom-Json
+        $attempt = Import-Csv -LiteralPath (Join-Path $nativeFailure 'attempts.csv')
+        $result = Get-Content -Raw -LiteralPath (Join-Path $nativeFailure 'result.json') | ConvertFrom-Json
+        if ($failure -notmatch 'start process.*Client\.exe' -or $manifest.ExecutionHost -cne 'InstalledAppHost' -or
+            $result.ExecutionHost -cne 'InstalledAppHost' -or $attempt.ExecutionHost -cne 'InstalledAppHost' -or
+            $result.Status -cne 'BLOCKED' -or $attempt.Started -cne 'False' -or $attempt.ObservedCoreClr -or
+            $manifest.ExpectedCoreClrSha256 -cne $identity.ExpectedCoreClrSha256) {
+            throw "Installed native launch fault lost its executable, CLR correlation or failure: $failure"
+        }
+
+        $tokens = $null; $parseErrors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile($runner, [ref]$tokens, [ref]$parseErrors)
+        if ($parseErrors.Count) { throw 'Reference runner has syntax errors.' }
+        $observer = $ast.Find({ param($node)
+            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-OwnedReplayCoreClr'
+        }, $false)
+        . ([scriptblock]::Create($observer.Extent.Text))
+        $module = [pscustomobject]@{ ModuleName='coreclr.dll'; FileName=$coreClr }
+        $process = [pscustomobject]@{ HasExited=$false; Modules=@($module); ExitCode=123 }
+        $process | Add-Member -MemberType ScriptMethod -Name Refresh -Value {}
+        if ((Get-OwnedReplayCoreClr $process $coreClr) -cne $coreClr) { throw 'Bundled CLR evidence was rejected.' }
+        $module.FileName = Join-Path $OutputDirectory 'coreclr.dll'
+        $failure = $null
+        try { $null = Get-OwnedReplayCoreClr $process $coreClr } catch { $failure = $_.Exception.Message }
+        if ($failure -notlike '*did not load the verified bundled CLR*') { throw 'Unbundled runtime was accepted.' }
+        $process.HasExited = $true
+        $failure = $null
+        try { $null = Get-OwnedReplayCoreClr $process $coreClr } catch { $failure = $_.Exception.Message }
+        if ($failure -notlike '*code 123 before loading*') { throw 'AppHost runtime startup failure lost the exit code.' }
+        Write-Host 'PASS: Installed AppHost identity, native launch failure, and bundled CLR module checks.'
+    }
+    Assert-InstalledAppHostEvidence
 
     # Exercise the implementation's actual cleanup block with a faulted copy
     # task and a throwing disposable. This test never starts a native process.
@@ -206,6 +384,8 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         $passed = $false
         $failure = 'original-sentinel'
         $Pair = 1; $Replay = 1; $Mode = 'off'; $seed = 42
+        $expectedSkyBackend = 'Disabled'; $observedSkyBackend = 'Unverified'; $expectedOnDraws = 1
+        $executionHost = 'DotnetSource'; $observedCoreClr = $null
         $Diagnostics = $false; $collector = $null; $collectorReport = $null
         $schedulingCollector = $null; $schedulingReport = $null
         $replayStartedUtc = 'cleanup-test'; $replayStartedQpc = 0L
@@ -406,7 +586,23 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
             catch { $rejected = $_.Exception.Message -like $case.Error }
             if (-not $rejected) { throw "Native parser did not reject $($case.Error)" }
         }
-        Write-Host 'PASS: Distinct fences on one logical sequence retained and matched; preparation charged once; strict extras, duplicate fences and missing records rejected.'
+        $recordFirst.draws = 2
+        $tiled = Get-SkyNativeExecutions @($prepare,$gpuFirst,$recordFirst) $window 'on' 2
+        if ($tiled.Rows[0].Draws -ne 2) { throw 'Tiled native draw count was not retained.' }
+        $recordFirst.draws = 1
+        $rejected = $false
+        try { $null = Get-SkyNativeExecutions @($prepare,$gpuFirst,$recordFirst) $window 'on' 2 }
+        catch { $rejected = $_.Exception.Message -like '*Expected 2, observed 1*' }
+        if (!$rejected) { throw 'Tiled fallback to one draw was accepted.' }
+        $gpuFirst.hasSky = $false
+        $rejected = $false
+        try { $null = Get-SkyNativeExecutions @($prepare,$gpuFirst,$recordFirst) $window 'off' 2 }
+        catch { $rejected = $_.Exception.Message -like '*Expected 0, observed 1*' }
+        if (!$rejected) { throw 'Disabled sky incorrectly accepted a native draw.' }
+        $recordFirst.draws = 0
+        $off = Get-SkyNativeExecutions @($prepare,$gpuFirst,$recordFirst) $window 'off' 2
+        if ($off.Rows[0].Draws -ne 0) { throw 'Disabled sky native draw count was not retained.' }
+        Write-Host 'PASS: Native fences, preparation, strict denominators, and exact Direct, tiled and disabled draw counts verified.'
     }
     Assert-NativeExecutionJoining
     function Assert-DeadlinePolicy {
