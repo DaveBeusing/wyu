@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Security.Cryptography;
 using Groundwork.Rendering;
 using WorldsYetUnseen.Gameplay;
 
@@ -9,6 +10,8 @@ internal static class OrbitDemoPreset
     internal const string DisplayName = "Orbit Demo";
     internal const ulong Seed = 42;
     internal const float Pitch = -0.12f;
+    internal const uint BoulderModel = 2;
+    internal const uint BoulderMaterial = 2;
     internal static bool PbrEnabled => Environment.GetEnvironmentVariable("WYU_ORBIT_PBR") != "off";
     internal static bool BoulderEnabled => Environment.GetEnvironmentVariable("WYU_ORBIT_BOULDER") != "off";
 
@@ -25,9 +28,7 @@ internal static class OrbitDemoPreset
     internal static RenderMesh LoadBoulder(int lod)
     {
         var limit = lod == 0 ? 2_500 : 500;
-        var name = $"WorldsYetUnseen.Client.Assets.OrbitDemo.boulder_01_lod{lod}.bin";
-        using var stream = typeof(OrbitDemoPreset).Assembly.GetManifestResourceStream(name)
-            ?? throw new InvalidDataException($"Missing Orbit boulder mesh: {name}.");
+        using var stream = OpenBoulder(lod);
         using var reader = new BinaryReader(stream);
         if (reader.ReadUInt32() != 0x42524f57 || reader.ReadUInt32() != 1)
             throw new InvalidDataException("Invalid Orbit boulder mesh header.");
@@ -54,5 +55,18 @@ internal static class OrbitDemoPreset
             triangles[i] = index;
         }
         return RenderMesh.Create(positions, triangles);
+    }
+
+    internal static string BoulderDigest(int lod)
+    {
+        using var stream = OpenBoulder(lod);
+        return Convert.ToHexString(SHA256.HashData(stream));
+    }
+
+    private static Stream OpenBoulder(int lod)
+    {
+        var name = $"WorldsYetUnseen.Client.Assets.OrbitDemo.boulder_01_lod{lod}.bin";
+        return typeof(OrbitDemoPreset).Assembly.GetManifestResourceStream(name)
+            ?? throw new InvalidDataException($"Missing Orbit boulder mesh: {name}.");
     }
 }

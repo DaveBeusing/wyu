@@ -51,7 +51,7 @@ internal sealed partial class VolumeExploration
     }
 
     private async Task StageR09UploadAsync(R09Timing timing, R09Pressure pressure, VolumeStreamingCoordinator terrain,
-        D3D12Renderer renderer, ulong generation, VolumeStreamingLease retained, CancellationToken token)
+        D3D12Renderer renderer, ulong generation, ulong mask, VolumeStreamingLease retained, CancellationToken token)
     {
         var gate = R09RenderHost?.R09UploadGate ?? throw new InvalidOperationException("The active R09 renderer has no native upload gate.");
         using var hold = gate.Arm();
@@ -79,7 +79,10 @@ internal sealed partial class VolumeExploration
         timing.Write("held-upload-release-to-ready", uploadReleased, ready);
         Console.WriteLine(FormattableString.Invariant(
             $"WYU R09 PRESSURE {timing.Path} {peak.CpuBytes} {peak.NativeBytes} {peak.UploadBytes} {peak.RetirementBytes}"));
-        await pressure.SettleAsync(token).ConfigureAwait(false);
+        if (timing.RecoveryCopy is null)
+            await pressure.SettleAsync(token).ConfigureAwait(false);
+        else
+            pressure.CloseOriginalPhase();
         var writeWorkers = timing.WriteWorkers;
         timing.WriteWorkers = () =>
         {
@@ -87,6 +90,8 @@ internal sealed partial class VolumeExploration
             var path = timing.Path.ToString();
             held.Write(path, "held");
             nativeReady.Write(path, "native-ready");
+            gate.Twilight?.WriteHeldSky(timing.Path, epoch, mask, held.Gpu);
+            timing.RecoveryCopy?.Write(timing.FarRendererStopStarted, epoch, mask, held.Gpu);
         };
     }
 
@@ -134,6 +139,7 @@ internal sealed partial class VolumeExploration
         private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private IJobExecutionHandle? _running, _queued;
         private bool _closed;
+        private bool _originalPhaseClosed;
 
         internal async Task StartAsync(CancellationToken token)
         {
@@ -152,7 +158,8 @@ internal sealed partial class VolumeExploration
 
         internal async Task<bool> RunProtectedAsync(VolumeStreamingWork work, R09Timing timing,
             VolumeStreamingCoordinator terrain, VolumeStreamingSelection selection, ulong revision, CancellationToken token,
-            R09EarlyPrebuild? earlyPrebuild = null)
+            R09EarlyPrebuild? earlyPrebuild = null, R09IndependentTexturePressure.Copy? independentCopy = null,
+            R09IndependentTexturePressure? recoveryPressure = null, D3D12Renderer? farRenderer = null)
         {
             VolumeStreamingWork? privateWork = null;
             R09WorkerMeasurement? prebuild;
@@ -180,9 +187,25 @@ internal sealed partial class VolumeExploration
                     (privateWork, prebuild) = R09EarlyPrebuild.Offer(earlyPrebuild, timing);
                 }
 
-                var measurement = await MeasureWorkerAsync(work, privateWork, timing.Path.ToString(), token).ConfigureAwait(false);
+                await using var recoveryCopy = recoveryPressure is null ? null
+                    : await recoveryPressure.BeginFarAsync(farRenderer ?? throw new InvalidOperationException("Far Horizon owner unavailable."),
+                        token).ConfigureAwait(false);
+                var optionalCopy = recoveryCopy ?? independentCopy;
+                var priorTerrain = (owner._ports.Committed.Read().Root as VolumeWorldRoot)?.Terrain;
+                var measurement = await MeasureWorkerAsync(work, privateWork, timing.Path.ToString(), token,
+                    independentCopy: optionalCopy).ConfigureAwait(false);
                 if (measurement is not { } worker)
                     return false;
+                if (optionalCopy is not null)
+                {
+                    RequireSaturated();
+                    if (priorTerrain is null || !terrain.Statistics.MovementHeld ||
+                        (owner._ports.Committed.Read().Root as VolumeWorldRoot)?.Terrain != priorTerrain)
+                        throw new InvalidOperationException("R09 lost the held terrain predecessor during independent GPU copy pressure.");
+                    optionalCopy.Release(worker.Started, worker.Finished);
+                    if (recoveryCopy is not null)
+                        timing.RecoveryCopy = await recoveryCopy.SettleFarAsync(token).ConfigureAwait(false);
+                }
                 timing.WriteWorkers = () =>
                 {
                     prebuild?.Write(timing, "prebuild-worker");
@@ -207,7 +230,7 @@ internal sealed partial class VolumeExploration
 
         private async Task<R09WorkerMeasurement?> MeasureWorkerAsync(VolumeStreamingWork work,
             VolumeStreamingWork? privateWork, string description, CancellationToken token,
-            R09PublishedReuse reuse = R09PublishedReuse.None)
+            R09PublishedReuse reuse = R09PublishedReuse.None, R09IndependentTexturePressure.Copy? independentCopy = null)
         {
             RequireSaturated();
             long started = 0, finished = 0;
@@ -215,6 +238,7 @@ internal sealed partial class VolumeExploration
             VolumeStreamingWorkDetailedProfile profile = default;
             owner._r09Protected = cancellation =>
             {
+                independentCopy?.RequirePending();
                 started = Stopwatch.GetTimestamp();
                 if (reuse == R09PublishedReuse.Terrain)
                     completed = work.ExecuteDetailedProfiledReusingPublishedTerrain(out profile, cancellation);
@@ -224,6 +248,7 @@ internal sealed partial class VolumeExploration
                     completed = privateWork is null ? work.ExecuteDetailedProfiled(out profile, cancellation)
                         : work.ExecuteDetailedProfiled(privateWork, out profile, cancellation);
                 finished = Stopwatch.GetTimestamp();
+                independentCopy?.RequirePending();
                 return ValueTask.CompletedTask;
             };
             using var handle = Submit(R09JobScope.Protected);
@@ -249,9 +274,11 @@ internal sealed partial class VolumeExploration
             return new(queued, started, finished, observed, profile);
         }
 
-        internal JobSchedulerMetrics RequireSaturated()
+        internal JobSchedulerMetrics RequireSaturated() => RequireSaturated(phase);
+
+        private JobSchedulerMetrics RequireSaturated(JobDispatchPhase authorizedPhase)
         {
-            var refused = scheduler.TrySubmit(Submission(R09JobScope.Speculative), phase);
+            var refused = scheduler.TrySubmit(Submission(R09JobScope.Speculative, authorizedPhase.Stamp.Tick), authorizedPhase);
             refused.Handle?.Dispose();
             var metrics = scheduler.ReadMetrics();
             if (refused.Status != JobAdmissionStatus.CapacityExceeded ||
@@ -261,20 +288,49 @@ internal sealed partial class VolumeExploration
             return metrics;
         }
 
-        internal async Task SettleAsync(CancellationToken token)
+        internal async Task SettleAsync(CancellationToken token, JobDispatchPhase? settlementPhase = null)
         {
             _release.TrySetResult();
             if ((await _running!.ExecutionCompletion.WaitAsync(TimeSpan.FromSeconds(5), token).ConfigureAwait(false)).Status
                 != JobExecutionStatus.Succeeded)
                 throw new InvalidOperationException("The R09 speculative worker did not complete.");
             await WaitForWorkersAsync(0, token).ConfigureAwait(false);
-            await scheduler.DispatchReadyAsync(phase, token).ConfigureAwait(false);
+            await scheduler.DispatchReadyAsync(settlementPhase ?? phase, token).ConfigureAwait(false);
             if ((await _queued!.ExecutionCompletion.WaitAsync(TimeSpan.FromSeconds(5), token).ConfigureAwait(false)).Status
                 != JobExecutionStatus.Succeeded)
                 throw new InvalidOperationException("The R09 speculative queue did not settle.");
             await WaitForWorkersAsync(0, token).ConfigureAwait(false);
+            if (scheduler.ReadMetrics().Queued != 0)
+                throw new InvalidOperationException("R09 speculative queue was not empty after settlement.");
             Dispose();
             owner._r09Speculate = null;
+        }
+
+        internal async Task<ThroughBeginTick> ObserveAndSettleAtBeginTickAsync(BarrierStamp consumed, CancellationToken token)
+        {
+            if (!_originalPhaseClosed || consumed.Tick <= begin.Tick || consumed.World != begin.World ||
+                _running is not { } running || _queued is not { } queued || running.Id.Value >= queued.Id.Value)
+                throw new InvalidOperationException("R09 Recovery could not preserve its original speculative jobs to BeginTick.");
+            var settlementPhase = owner._ports.Phases.TryOpen(consumed, TickPhase.Base).Phase
+                ?? throw new InvalidOperationException("Could not open the consuming R09 tick's dispatch phase.");
+            try
+            {
+                var metrics = RequireSaturated(settlementPhase);
+                var observed = Stopwatch.GetTimestamp();
+                var released = Stopwatch.GetTimestamp();
+                await SettleAsync(token, settlementPhase).ConfigureAwait(false);
+                return new(begin.Tick, consumed.Tick, running.Id.Value, queued.Id.Value, metrics.OccupiedWorkerSlots,
+                    metrics.Queued, observed, released, Stopwatch.GetTimestamp());
+            }
+            finally { owner._ports.Phases.Close(settlementPhase); }
+        }
+
+        internal void CloseOriginalPhase()
+        {
+            if (_originalPhaseClosed)
+                return;
+            owner._ports.Phases.Close(phase);
+            _originalPhaseClosed = true;
         }
 
         public void Dispose()
@@ -285,19 +341,22 @@ internal sealed partial class VolumeExploration
             _release.TrySetResult();
             _queued?.Dispose();
             _running?.Dispose();
-            owner._ports.Phases.Close(phase);
+            CloseOriginalPhase();
         }
 
-        private JobSubmission Submission(JobHandlerId handler) => new(
-            new SourceKey(begin.World, begin.Tick, TickPhase.Base, 83, 0, checked(++owner._r09JobOrdinal)),
+        private JobSubmission Submission(JobHandlerId handler, ulong tick) => new(
+            new SourceKey(begin.World, tick, TickPhase.Base, 83, 0, checked(++owner._r09JobOrdinal)),
             handler, JobInputKind.None, JobResultKind.Commandless, [], [], [], [], [], default);
 
         private IJobExecutionHandle Submit(JobHandlerId handler)
         {
-            var result = scheduler.TrySubmit(Submission(handler), phase);
+            var result = scheduler.TrySubmit(Submission(handler, begin.Tick), phase);
             return result.Status == JobAdmissionStatus.Accepted && result.Handle is IJobExecutionHandle job
                 ? job : throw new InvalidOperationException($"R09 {handler} job was not admitted ({result.Status}).");
         }
+
+        internal readonly record struct ThroughBeginTick(ulong OriginalTick, ulong ConsumingTick, ulong RunningJob, ulong QueuedJob,
+            int RunningWorkers, int QueuedWorkers, long ObservedQpc, long ReleasedQpc, long SettledQpc);
 
         private async Task WaitForWorkersAsync(int occupied, CancellationToken token)
         {

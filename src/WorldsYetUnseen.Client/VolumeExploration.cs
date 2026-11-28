@@ -395,7 +395,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
                     ReportProfile(profile.Interrupt("Profile render origin changed."));
                 var crossingStarted = scripted && orbitDemo && OrbitPbrMeasurements.Enabled
                     ? Stopwatch.GetTimestamp() : 0;
-                await LoadAsync(terrain, renderer, state.Position, state.Heading, rebased, token).ConfigureAwait(false);
+                await LoadAsync(terrain, renderer, state.Position, state.Heading, rebased, token,
+                    reusePublishedRebase: ReferenceDaylight.PreviewEnabled).ConfigureAwait(false);
                 OrbitPbrMeasurements.WriteCrossing(steps, _published.Generation, crossingStarted);
                 // A new tick must capture focus, surface and keys after the potentially long load.
                 continue;
@@ -582,19 +583,55 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
     }
 
+    private async Task PrepareOrbitPressureMaterialsAsync(D3D12Renderer renderer, VolumeViewIdentity? nearView,
+        Func<ulong, RenderSubmissionResult> submit, CancellationToken token)
+    {
+        var host = OrbitMaterialHost ?? throw new InvalidOperationException("Orbit pressure material host is unavailable.");
+        for (var attempt = 0; attempt < OrbitTerrainMaterials.MaximumPreparationFrames; attempt++)
+        {
+            var ready = host.MaterialsResident(renderer, nearView) &&
+                renderer.ReadTextureDiagnostics() is { UploadedBytes: > 0, StagingBytes: 0 };
+            var sequence = ++_sequence;
+            host.RetryMaterials(renderer, sequence);
+            Props?.Pump();
+            RequireFrame(submit(sequence));
+            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+            if (ready && host.MaterialsResident(renderer, nearView))
+            {
+                await WaitAsync(renderer, () => renderer.TryReadResourceDiagnostics(out var retired) &&
+                    retired.FrameSequence == sequence && retired.RetiredPresentSequence == sequence, token).ConfigureAwait(false);
+                if (R09TwilightPressure.TryWriteOrbitMaterialFrame(renderer, sequence, nearView.HasValue,
+                    nearView.HasValue && Props?.Read() is { Draws: > 0, Instances: > 0 }))
+                    return;
+            }
+        }
+        throw new InvalidOperationException("Orbit Combined pressure could not present with all production maps resident.");
+    }
+
     private async Task<TerrainPublicationOutcome> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
         Task? rendererReady = null, FlightReturnTerrain? returnTerrain = null, ulong? flightTick = null,
         bool recovery = false, long? operationStarted = null, long handoffStarted = 0,
         R09EarlyPrebuild? earlyPrebuild = null, FlightReturnReadback? warpReturn = null,
-        ConsoleRelocationAttempt? relocation = null)
+        ConsoleRelocationAttempt? relocation = null, bool reusePublishedRebase = false)
     {
         var started = operationStarted ?? Stopwatch.GetTimestamp();
         var timing = returnTerrain?.Timing ?? StartR09(edit is not null ? VolumeWorkClass.FirstEdit :
             recovery ? VolumeWorkClass.Recovery : VolumeWorkClass.Movement, started);
         using var retained = timing is null ? null : terrain.TryRead()
             ?? throw new InvalidOperationException("R09 requires the previous terrain generation.");
+        if (timing?.Path is VolumeWorkClass.Movement or VolumeWorkClass.FirstEdit && R09IndependentTexturePressure.OrbitRequested)
+        {
+            var prior = retained!.Info;
+            var heldCamera = Camera(prior.View, position, heading);
+            await PrepareOrbitPressureMaterialsAsync(renderer, prior.View,
+                next => renderer.TrySubmitVolumeCamera(prior.Generation, next, heldCamera), token).ConfigureAwait(false);
+        }
+        await using var independentCopy = timing?.Path is VolumeWorkClass.Movement or VolumeWorkClass.FirstEdit &&
+            R09RenderHost?.TexturePressure is { } texturePressure
+            ? await texturePressure.BeginAsync(renderer, terrain.WorldIdentity, retained!.Info, token).ConfigureAwait(false)
+            : null;
         VolumeViewIdentity view;
         if (returnTerrain is { } preparedReturn)
         {
@@ -655,8 +692,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             ? await StartR09PressureAsync(token).ConfigureAwait(false) : null;
         var pressure = returnTerrain?.Pressure ?? ownedPressure;
         var generated = returnTerrain?.Generated ?? (pressure is null
-            ? ExecuteTerrainAsync(work, token)
-            : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token, earlyPrebuild));
+            ? ExecuteTerrainAsync(work, token, reusePublishedRebase: reusePublishedRebase)
+            : pressure.RunProtectedAsync(work, timing!, terrain, selection, revision, token, earlyPrebuild, independentCopy));
         if (rendererReady is not null)
         {
             try
@@ -685,6 +722,8 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= mask, token,
             pauseWhileMinimized: relocation is null, r09Presentation: timing is null ? null :
                 new(timing.Path, "mask", terrain, view, work.Generation, mask)).ConfigureAwait(false);
+        if (independentCopy is not null)
+            await independentCopy.ObserveRetirementAsync(timing!.Path, mask, token).ConfigureAwait(false);
         if (timing is null)
         {
             var packSample = BiomeMeasurements.StartBuild();
@@ -705,7 +744,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
         else
         {
-            await StageR09UploadAsync(timing, pressure!, terrain, renderer, work.Generation, retained!, token)
+            await StageR09UploadAsync(timing, pressure!, terrain, renderer, work.Generation, mask, retained!, token)
                 .ConfigureAwait(false);
             Finish(await SealAsync(BarrierKind.CommitResults, token).ConfigureAwait(false));
             await BeginAsync(token).ConfigureAwait(false);
@@ -783,7 +822,7 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         if (timing is null)
             Drain(terrain);
         else
-            await FinishR09Async(timing, terrain, work.Generation, sequence, view, submitted, presented, handoffStarted, token)
+            await FinishR09Async(timing, pressure!, terrain, work.Generation, sequence, view, submitted, presented, handoffStarted, token)
                 .ConfigureAwait(false);
         return TerrainPublicationOutcome.Presented;
     }
@@ -806,11 +845,12 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             ? "The terrain streaming budget is full. The planet could not load. Close the game and try again."
             : $"The planet could not load terrain ({result}). Close the game and try again.");
 
-    private static Task<bool> ExecuteTerrainAsync(VolumeStreamingWork work, CancellationToken token, string phase = "terrain-build") =>
+    private static Task<bool> ExecuteTerrainAsync(VolumeStreamingWork work, CancellationToken token,
+        string phase = "terrain-build", bool reusePublishedRebase = false) =>
         Task.Run(() =>
         {
             var started = BiomeMeasurements.Start();
-            var result = work.Execute(token);
+            var result = reusePublishedRebase ? work.ExecuteReusingPublishedAtRebase(token) : work.Execute(token);
             BiomeMeasurements.Write(phase, started);
             return result;
         }, token);
