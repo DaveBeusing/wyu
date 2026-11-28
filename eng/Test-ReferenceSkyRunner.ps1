@@ -286,6 +286,77 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
     }
     Assert-FullSkySeries
 
+    function Assert-InstalledAppHostEvidence {
+        $runner = Join-Path $PSScriptRoot 'Measure-ReferenceSky.ps1'
+        $payload = (New-Item -ItemType Directory -Path (Join-Path $OutputDirectory 'installed-apphost-fixture')).FullName
+        $clientSource = (Resolve-Path -LiteralPath $Assembly).Path
+        $sourceDirectory = Split-Path -Parent $clientSource
+        $client = Join-Path $payload 'WorldsYetUnseen.Client.dll'
+        $appHost = Join-Path $payload 'WorldsYetUnseen.Client.exe'
+        $coreClr = Join-Path $payload 'coreclr.dll'
+        $rendering = Join-Path $payload 'Groundwork.Rendering.dll'
+        $renderer = Join-Path $payload 'Groundwork.Rendering.D3D12.dll'
+        Copy-Item -LiteralPath $clientSource -Destination $client
+        Copy-Item -LiteralPath (Join-Path $sourceDirectory 'Groundwork.Rendering.dll') -Destination $rendering
+        Copy-Item -LiteralPath (Join-Path $sourceDirectory 'Groundwork.Rendering.D3D12.dll') -Destination $renderer
+        Set-Content -LiteralPath $appHost -Value 'Invalid PE for exercising native launch failure.'
+        Set-Content -LiteralPath $coreClr -Value 'Fixture bytes for independent digest checks.'
+        $identity = @{
+            Assembly=$client; InstalledAppHost=$appHost
+            ExpectedAppHostSha256=(Get-FileHash -LiteralPath $appHost).Hash
+            ExpectedCoreClrSha256=(Get-FileHash -LiteralPath $coreClr).Hash
+            ExpectedClientSha256=(Get-FileHash -LiteralPath $client).Hash
+            ExpectedRendererSha256=(Get-FileHash -LiteralPath $renderer).Hash
+            ExpectedRenderingSha256=(Get-FileHash -LiteralPath $rendering).Hash
+            RendererSourceCommit='0000000000000000000000000000000000000000'
+        }
+        $wrong = $identity.Clone()
+        $wrong.ExpectedCoreClrSha256 = '0' * 64
+        $invalidOutput = Join-Path $OutputDirectory 'invalid-apphost'
+        $failure = $null
+        try { & $runner @wrong -SkyBackend TiledScatteringAtlas -OutputDirectory $invalidOutput }
+        catch { $failure = $_.Exception.Message }
+        if ($failure -notlike '*bundled CLR hash mismatch*' -or (Test-Path -LiteralPath $invalidOutput)) {
+            throw "Mismatched runtime digest was not rejected before startup: $failure"
+        }
+
+        $nativeFailure = Join-Path $OutputDirectory 'installed-apphost-launch-fault'
+        $failure = $null
+        try { & $runner @identity -SkyBackend TiledScatteringAtlas -OutputDirectory $nativeFailure }
+        catch { $failure = $_.Exception.Message }
+        $manifest = Get-Content -Raw -LiteralPath (Join-Path $nativeFailure 'manifest.json') | ConvertFrom-Json
+        $attempt = Import-Csv -LiteralPath (Join-Path $nativeFailure 'attempts.csv')
+        $result = Get-Content -Raw -LiteralPath (Join-Path $nativeFailure 'result.json') | ConvertFrom-Json
+        if ($failure -notmatch 'start process.*Client\.exe' -or $manifest.ExecutionHost -cne 'InstalledAppHost' -or
+            $result.ExecutionHost -cne 'InstalledAppHost' -or $attempt.ExecutionHost -cne 'InstalledAppHost' -or
+            $result.Status -cne 'BLOCKED' -or $attempt.Started -cne 'False' -or $attempt.ObservedCoreClr -or
+            $manifest.ExpectedCoreClrSha256 -cne $identity.ExpectedCoreClrSha256) {
+            throw "Installed native launch fault lost its executable, CLR correlation or failure: $failure"
+        }
+
+        $tokens = $null; $parseErrors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile($runner, [ref]$tokens, [ref]$parseErrors)
+        if ($parseErrors.Count) { throw 'Reference runner has syntax errors.' }
+        $observer = $ast.Find({ param($node)
+            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-OwnedReplayCoreClr'
+        }, $false)
+        . ([scriptblock]::Create($observer.Extent.Text))
+        $module = [pscustomobject]@{ ModuleName='coreclr.dll'; FileName=$coreClr }
+        $process = [pscustomobject]@{ HasExited=$false; Modules=@($module); ExitCode=123 }
+        $process | Add-Member -MemberType ScriptMethod -Name Refresh -Value {}
+        if ((Get-OwnedReplayCoreClr $process $coreClr) -cne $coreClr) { throw 'Bundled CLR evidence was rejected.' }
+        $module.FileName = Join-Path $OutputDirectory 'coreclr.dll'
+        $failure = $null
+        try { $null = Get-OwnedReplayCoreClr $process $coreClr } catch { $failure = $_.Exception.Message }
+        if ($failure -notlike '*did not load the verified bundled CLR*') { throw 'Unbundled runtime was accepted.' }
+        $process.HasExited = $true
+        $failure = $null
+        try { $null = Get-OwnedReplayCoreClr $process $coreClr } catch { $failure = $_.Exception.Message }
+        if ($failure -notlike '*code 123 before loading*') { throw 'AppHost runtime startup failure lost the exit code.' }
+        Write-Host 'PASS: Installed AppHost identity, native launch failure, and bundled CLR module checks.'
+    }
+    Assert-InstalledAppHostEvidence
+
     # Exercise the implementation's actual cleanup block with a faulted copy
     # task and a throwing disposable. This test never starts a native process.
     function Assert-CleanupFailureEvidence {
@@ -313,7 +384,8 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         $passed = $false
         $failure = 'original-sentinel'
         $Pair = 1; $Replay = 1; $Mode = 'off'; $seed = 42
-        $expectedSkyBackend = 'Disabled'; $observedSkyBackend = 'Unverified'
+        $expectedSkyBackend = 'Disabled'; $observedSkyBackend = 'Unverified'; $expectedOnDraws = 1
+        $executionHost = 'DotnetSource'; $observedCoreClr = $null
         $Diagnostics = $false; $collector = $null; $collectorReport = $null
         $schedulingCollector = $null; $schedulingReport = $null
         $replayStartedUtc = 'cleanup-test'; $replayStartedQpc = 0L

@@ -191,7 +191,10 @@ use `-Smoke` for reference qualification.
 To measure the installed opt-in tiled renderer, set `$clientAssembly` to
 the installer-produced client DLL and use the installed payload hashes from
 the independently verified installer manifest. Add
-`-SkyBackend TiledScatteringAtlas` to both composition runs. The enabled arm
+`-InstalledAppHost` with the installed `WorldsYetUnseen.Client.exe`, its
+`-ExpectedAppHostSha256`, and the `-ExpectedCoreClrSha256` from that manifest.
+The runner checks that every owned replay loads the bundled CLR.
+Add `-SkyBackend TiledScatteringAtlas` to both composition runs. The enabled arm
 must attest native atlas, prefilter, VRS and mesh activity and record exactly
 two sky draws per measured frame. The disabled arm must record zero sky
 draws. Run both compositions with the existing hardware counts and limits.
