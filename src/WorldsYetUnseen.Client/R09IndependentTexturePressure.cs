@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Groundwork.Core;
 using Groundwork.Platform.Windows;
 using Groundwork.Rendering;
@@ -11,15 +13,37 @@ using Groundwork.Voxels;
 
 namespace WorldsYetUnseen.Client;
 
-// Only the explicit, installed Far Horizon fixture creates this stream. It supplies no scene material.
+// Explicit installed fixture: a normal empty stream for Far Horizon or an unused slot alongside Orbit materials.
 internal sealed class R09IndependentTexturePressure
 {
     private const int CopyBytes = 512 * 1024 * 4;
-    private static readonly D3D12TextureReservation Credit = new(CopyBytes + 256, CopyBytes, CopyBytes + 256, CopyBytes, CopyBytes);
+    internal static readonly D3D12TextureReservation Credit = new(CopyBytes + 256, CopyBytes, CopyBytes + 256, CopyBytes, CopyBytes);
     private readonly CookedTexture _texture = CookTexture();
     private D3D12TextureHandoff? _stream;
     private D3D12Renderer? _renderer;
     private ulong _paletteRevision;
+    private OrbitTerrainMaterials? _materials;
+    private bool _orbital;
+
+    internal void AttachOrbit(D3D12Renderer renderer, D3D12TextureHandoff stream,
+        OrbitTerrainMaterials materials, D3D12TextureView? farView = null)
+    {
+        _renderer = renderer;
+        _stream = stream;
+        _materials = materials;
+        _orbital = farView.HasValue;
+        FarView = farView;
+    }
+
+    private bool MaterialsResident(D3D12TextureHandoff stream, D3D12TextureView view) =>
+        _materials?.IsResident(stream, view, _orbital) ?? true;
+
+    private bool PublishTarget(D3D12TextureHandoff stream, D3D12TextureView view, D3D12TextureTarget? target) =>
+        _materials is { } materials ? materials.PublishPressureTarget(stream, view, target)
+            : stream.Publish(view, target?.Sequence ?? checked(++_paletteRevision), target is { } value ? [value] : []);
+
+    internal static bool OrbitRequested => Requested &&
+        Environment.GetEnvironmentVariable("WYU_R09_TWILIGHT_PRESSURE") == R09TwilightPressure.OrbitCombined;
 
     internal static bool Requested => Environment.GetEnvironmentVariable("WYU_R09_INDEPENDENT_TEXTURE_COPY") == "1";
     internal D3D12TextureCopyQualification Qualification { get; } = new();
@@ -55,6 +79,8 @@ internal sealed class R09IndependentTexturePressure
         _stream = null;
         _renderer = null;
         FarView = null;
+        _materials = null;
+        _orbital = false;
     }
 
     internal Task<Copy> BeginAsync(D3D12Renderer renderer, Guid world, VolumePublicationInfo previous, CancellationToken token) =>
@@ -68,8 +94,21 @@ internal sealed class R09IndependentTexturePressure
         if (!ReferenceEquals(_renderer, renderer) || _stream is not { } stream)
             throw new InvalidOperationException("The R09 optional texture stream is unavailable for this renderer owner.");
         var predecessor = renderer.Read();
-        if (predecessor is not { Surface: RenderSurfaceState.Drawable, LastPresentedSequence: > 0 } || stream.ReadUsage() != default)
-            throw new InvalidOperationException("R09 texture pressure requires a drawable predecessor and an idle texture stream.");
+        var before = stream.ReadUsage();
+        if (predecessor is not { Surface: RenderSurfaceState.Drawable, LastPresentedSequence: > 0 } ||
+            (_materials is null ? before != default : before.Requests != 0 ||
+                !MaterialsResident(stream, view)))
+            throw new InvalidOperationException("R09 texture pressure requires a drawable predecessor, settled copies and resident Orbit materials when enabled.");
+        D3D12ResourceBalance originalTexture = default;
+        if (_materials is not null)
+        {
+            if (!renderer.TryReadResourceDiagnostics(out var prior) ||
+                prior.GetBalance(D3D12ResourceOwner.TextureStaging) is not { Live: 0, Retained: 0 })
+                throw new InvalidOperationException("R09 Orbit pressure requires a coherent native allocation baseline without active staging.");
+            originalTexture = prior.GetBalance(D3D12ResourceOwner.Texture);
+            if (originalTexture.Live < OrbitTerrainMaterials.MapCount)
+                throw new InvalidOperationException("R09 Orbit pressure requires all native production maps before arming the copy.");
+        }
         var diagnostics = renderer.ReadDiagnostics();
         if (!diagnostics.DebugLayerEnabled || !diagnostics.DredEnabled)
             throw new InvalidOperationException("R09 texture pressure requires the native debug layer and DRED.");
@@ -77,33 +116,97 @@ internal sealed class R09IndependentTexturePressure
         var revision = checked(++_paletteRevision);
         var target = new D3D12TextureTarget(new(ushort.MaxValue, MaterialTextureSemantic.BaseColor), revision,
             new(MaterialTextureSemantic.BaseColor, _texture.AssetId));
-        if (!stream.Publish(view, revision, [target]) || stream.TryRequest(view, target, Credit, out var ticket) != D3D12TextureResult.Accepted)
-            throw new InvalidOperationException("R09 could not reserve the independent optional copy.");
+        IDisposable? appearanceObservation = null;
         D3D12TextureCopyQualification.Hold? hold = null;
-        var transferred = false;
+        D3D12TextureTicket ticket = default;
+        var published = false;
+        var workerOwnsTicket = false;
         try
         {
+            if (_orbital)
+            {
+                appearanceObservation = BeginOrbitCopyObservation(renderer, view);
+                if (!renderer.TryReadResourceDiagnostics(out var farPredecessor) ||
+                    !R09TwilightPressure.TryReadOrbitTerrain(farPredecessor, predecessor.LastPresentedSequence, out _))
+                    throw new InvalidOperationException("R09 Orbit Recovery could not bind the native textured copy predecessor.");
+            }
+            if (!PublishTarget(stream, view, target))
+                throw new InvalidOperationException("R09 could not publish the independent optional copy target.");
+            published = true;
+            if (stream.TryRequest(view, target, Credit, out ticket) != D3D12TextureResult.Accepted)
+                throw new InvalidOperationException("R09 could not reserve the independent optional copy.");
+            workerOwnsTicket = true;
             hold = Qualification.Arm(ticket);
             if (stream.TryComplete(ticket, _texture) != D3D12TextureResult.Accepted)
                 throw new InvalidOperationException("R09 could not transfer the optional cooked texture.");
-            transferred = true;
+            workerOwnsTicket = false;
             var submission = await hold.Submitted.WaitAsync(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
             if (submission.Ticket != ticket || submission.CopyFence == 0 || submission.WaitQueuedAt <= 0 ||
                 submission.SubmittedAt < submission.WaitQueuedAt)
                 throw new InvalidOperationException("R09 observed a mismatched native optional copy submission.");
-            var copy = new Copy(this, renderer, stream, view, hold, submission, predecessor.LastPresentedSequence);
+            var copy = new Copy(this, renderer, stream, view, hold, submission, predecessor.LastPresentedSequence,
+                before, originalTexture, appearanceObservation);
             await PollAsync(copy.HasPendingSnapshot, token).ConfigureAwait(false);
             copy.RequirePending();
             return copy;
         }
-        catch
+        catch (Exception failure)
         {
             hold?.Dispose();
-            if (!transferred)
+            if (workerOwnsTicket)
                 stream.CompleteWorker(ticket);
+            try
+            {
+                if (published && RemovePressureTarget(renderer, stream, view))
+                    await AwaitBaselineAsync(renderer, stream, view, before, originalTexture).ConfigureAwait(false);
+            }
+            catch (Exception cleanup)
+            {
+                throw new AggregateException("R09 could not roll back its optional copy after the fixture failed.", failure, cleanup);
+            }
+            finally
+            {
+                appearanceObservation?.Dispose();
+            }
             throw;
         }
     }
+
+    private static IDisposable BeginOrbitCopyObservation(D3D12Renderer renderer, D3D12TextureView view)
+    {
+        // Keep the pinned consumer build usable for Far Horizon. Orbit Recovery requires this newer engine ABI.
+        var method = typeof(D3D12Renderer).GetMethod("BeginOrbitTextureCopyObservation",
+            BindingFlags.Instance | BindingFlags.Public, [typeof(D3D12TextureView)]);
+        if (method?.ReturnType != typeof(IDisposable) || method.Invoke(renderer, [view]) is not IDisposable observation)
+            throw new InvalidOperationException("Orbit Combined requires the Groundwork textured copy observation binding.");
+        return observation;
+    }
+
+    private bool RemovePressureTarget(D3D12Renderer renderer, D3D12TextureHandoff stream, D3D12TextureView view)
+    {
+        if (PublishTarget(stream, view, null))
+            return true;
+        if (renderer.Read().Lifecycle is RendererLifecycle.Stopping or RendererLifecycle.Stopped)
+            return false; // The closing render owner drains the native stream under its existing fences.
+        throw new InvalidOperationException("Could not remove the R09 fixture-only texture target.");
+    }
+
+    private Task AwaitBaselineAsync(D3D12Renderer renderer, D3D12TextureHandoff stream, D3D12TextureView view,
+        D3D12TextureUsage before, D3D12ResourceBalance originalTexture) =>
+        PollAsync(() => renderer.Read().Lifecycle is RendererLifecycle.Stopping or RendererLifecycle.Stopped ||
+            stream.ReadUsage() == before && renderer.TryReadResourceDiagnostics(out var snapshot) && IsHealthy(snapshot) &&
+            snapshot.GetBalance(D3D12ResourceOwner.TextureStaging) is { Live: 0, Retained: 0 } &&
+            NativeTextureBalanceRestored(snapshot, originalTexture) && MaterialsResident(stream, view), CancellationToken.None);
+
+    private static bool NativeTextureBalanceRestored(in D3D12ResourceSnapshot snapshot, in D3D12ResourceBalance original)
+    {
+        var current = snapshot.GetBalance(D3D12ResourceOwner.Texture);
+        return current.Live == original.Live && current.LiveBytes == original.LiveBytes &&
+            current.Retained == original.Retained && current.RetainedBytes == original.RetainedBytes;
+    }
+
+    private static bool IsHealthy(D3D12ResourceSnapshot snapshot) =>
+        snapshot.Custody == D3D12CustodyStatus.None && !snapshot.LedgerOverflowed && !snapshot.LedgerHasUnknownSizes;
 
     private static CookedTexture CookTexture()
     {
@@ -130,10 +233,13 @@ internal sealed class R09IndependentTexturePressure
 
     internal sealed class Copy(R09IndependentTexturePressure owner, D3D12Renderer renderer, D3D12TextureHandoff stream,
         D3D12TextureView view, D3D12TextureCopyQualification.Hold hold,
-        D3D12TextureCopyQualification.Submission submission, ulong predecessor) : IDisposable
+        D3D12TextureCopyQualification.Submission submission, ulong predecessor, D3D12TextureUsage before,
+        D3D12ResourceBalance originalTexture, IDisposable? appearanceObservation) : IAsyncDisposable
     {
         private long _workerStarted, _workerFinished, _released;
         private D3D12ResourceSnapshot _held;
+        private OrbitMaterialPredecessor? _materialPredecessor;
+        private Task? _rollback;
 
         internal bool HasPendingSnapshot() => renderer.TryReadResourceDiagnostics(out var pending) &&
             pending.TextureCopyFence == submission.CopyFence && pending.SubmittedFence >= submission.CopyFence &&
@@ -143,7 +249,8 @@ internal sealed class R09IndependentTexturePressure
 
         internal void RequirePending()
         {
-            if (!HasPendingSnapshot() || renderer.Read().LastPresentedSequence != predecessor)
+            if (!HasPendingSnapshot() || renderer.Read().LastPresentedSequence != predecessor ||
+                !owner.MaterialsResident(stream, view))
                 throw new InvalidOperationException("The native optional copy or predecessor was not held while protected work executed.");
         }
 
@@ -153,6 +260,15 @@ internal sealed class R09IndependentTexturePressure
             if (started < submission.SubmittedAt || finished <= started || !renderer.TryReadResourceDiagnostics(out _held) ||
                 _held.CompletedFence >= submission.CopyFence || _held.TextureCopyFence != submission.CopyFence)
                 throw new InvalidOperationException("R09 protected worker timing did not fall inside the retained copy.");
+            if (appearanceObservation is not null)
+            {
+                if (!R09TwilightPressure.TryReadOrbitTerrain(_held, predecessor, out var terrain) ||
+                    _held.RetiredPresentSequence != predecessor || _held.RetiredPresentFence != _held.PresentFence ||
+                    _held.PresentFence > _held.CompletedFence || _held.PresentFence >= submission.CopyFence)
+                    throw new InvalidOperationException("Orbit Recovery lost its exact retired textured predecessor while the copy was held.");
+                _materialPredecessor = new(view.View.RendererEpoch, predecessor, _held.DrawFence, _held.PresentFence,
+                    submission.CopyFence, terrain.ResourceUses);
+            }
             _workerStarted = started;
             _workerFinished = finished;
             _released = hold.Release();
@@ -170,7 +286,7 @@ internal sealed class R09IndependentTexturePressure
                 retired.PresentedSequence == mask && retired.PresentFence > submission.CopyFence && retired.PresentTimestamp >= _released &&
                 retired.GetBalance(D3D12ResourceOwner.TextureStaging) is { Live: 0, Retained: 0 }, token).ConfigureAwait(false);
             var observed = Stopwatch.GetTimestamp();
-            await ClearTargetAsync(token).ConfigureAwait(false);
+            await ClearTargetAsync(requireRunning: true).ConfigureAwait(false);
             var texture = _held.GetBalance(D3D12ResourceOwner.Texture).RetainedBytes;
             var staging = _held.GetBalance(D3D12ResourceOwner.TextureStaging).RetainedBytes;
             Console.WriteLine(FormattableString.Invariant(
@@ -184,37 +300,62 @@ internal sealed class R09IndependentTexturePressure
                 _held.PresentTimestamp > submission.WaitQueuedAt)
                 throw new InvalidOperationException("R09 Recovery did not bind its copy to an already presented Far Horizon frame.");
             D3D12ResourceSnapshot retired = default;
-            await PollAsync(() => renderer.TryReadResourceDiagnostics(out retired) && IsHealthy(retired) &&
-                retired.TextureCopyFence == submission.CopyFence && retired.CompletedFence >= submission.CopyFence &&
-                retired.PresentedSequence == predecessor && retired.PresentFence == _held.PresentFence &&
-                retired.GetBalance(D3D12ResourceOwner.TextureStaging) is { Live: 0, Retained: 0 }, token).ConfigureAwait(false);
-            await ClearTargetAsync(token).ConfigureAwait(false);
+            try
+            {
+                await PollAsync(() => renderer.TryReadResourceDiagnostics(out retired) && IsHealthy(retired) &&
+                    retired.TextureCopyFence == submission.CopyFence && retired.CompletedFence >= submission.CopyFence &&
+                    retired.PresentedSequence == predecessor && retired.PresentFence == _held.PresentFence &&
+                    retired.GetBalance(D3D12ResourceOwner.TextureStaging) is { Live: 0, Retained: 0 }, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException error) when (!token.IsCancellationRequested)
+            {
+                var staging = retired.GetBalance(D3D12ResourceOwner.TextureStaging);
+                throw new InvalidOperationException(FormattableString.Invariant(
+                    $"R09 Recovery retirement timed out. Predecessor sequence/fence={predecessor}/{_held.PresentFence}; observed sequence/fence={retired.PresentedSequence}/{retired.PresentFence}; expected/observed copy fence={submission.CopyFence}/{retired.TextureCopyFence}; completed fence={retired.CompletedFence}; staging live/retained={staging.Live}/{staging.Retained}; custody={retired.Custody}."), error);
+            }
+            await ClearTargetAsync(requireRunning: true).ConfigureAwait(false);
             return new(view.View.RendererEpoch, predecessor, _held.PresentFence, _held.PresentTimestamp,
                 submission.Ticket.Generation, submission.CopyFence, submission.WaitQueuedAt, submission.SubmittedAt,
                 _workerStarted, _workerFinished, _released, Stopwatch.GetTimestamp(), _held.CompletedFence,
                 retired.CompletedFence, _held.GetBalance(D3D12ResourceOwner.Texture).RetainedBytes,
-                _held.GetBalance(D3D12ResourceOwner.TextureStaging).RetainedBytes);
+                _held.GetBalance(D3D12ResourceOwner.TextureStaging).RetainedBytes) { OrbitMaterial = _materialPredecessor };
         }
 
-        private async Task ClearTargetAsync(CancellationToken token)
+        private async Task ClearTargetAsync(bool requireRunning)
         {
-            if (!stream.Publish(view, checked(++owner._paletteRevision), []))
-                throw new InvalidOperationException("Could not remove the R09 fixture-only texture target.");
-            await PollAsync(() => stream.ReadUsage() == default && renderer.TryReadResourceDiagnostics(out var snapshot) &&
-                snapshot.GetBalance(D3D12ResourceOwner.Texture) is { Live: 0, Retained: 0 }, token).ConfigureAwait(false);
+            if (_rollback is null)
+                _rollback = owner.RemovePressureTarget(renderer, stream, view)
+                    ? owner.AwaitBaselineAsync(renderer, stream, view, before, originalTexture) : Task.CompletedTask;
+            await _rollback.ConfigureAwait(false);
+            if (requireRunning && renderer.Read().Lifecycle != RendererLifecycle.Running)
+                throw new InvalidOperationException("The renderer stopped before R09 could prove copy retirement.");
         }
 
-        public void Dispose() => hold.Dispose();
-
-        private static bool IsHealthy(D3D12ResourceSnapshot snapshot) =>
-            snapshot.Custody == D3D12CustodyStatus.None && !snapshot.LedgerOverflowed && !snapshot.LedgerHasUnknownSizes;
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                hold.Dispose();
+                await ClearTargetAsync(requireRunning: false).ConfigureAwait(false);
+            }
+            finally
+            {
+                appearanceObservation?.Dispose();
+            }
+        }
     }
+
+    internal sealed record OrbitMaterialPredecessor(ulong Epoch, ulong Frame, ulong DrawFence, ulong PresentFence,
+        ulong CopyFence, int ResourceUses);
 
     internal sealed record RecoveryEvidence(ulong FarEpoch, ulong FarFrame, ulong FarPresentFence, long FarPresentQpc,
         ulong Ticket, ulong CopyFence, long WaitQueuedQpc, long SubmittedQpc, long WorkerStartQpc, long WorkerEndQpc,
         long ReleasedQpc, long RetiredObservationQpc, ulong HeldCompletedFence, ulong RetiredCompletedFence,
         ulong TextureRetainedBytes, ulong StagingRetainedBytes)
     {
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public OrbitMaterialPredecessor? OrbitMaterial { get; init; }
+
         internal void Write(long farStopStarted, ulong nearEpoch, ulong mask, in D3D12ResourceSnapshot near)
         {
             if (RetiredObservationQpc > farStopStarted || nearEpoch != checked(FarEpoch + 1) || mask <= FarFrame ||

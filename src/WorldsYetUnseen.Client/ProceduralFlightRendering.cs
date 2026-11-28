@@ -21,6 +21,8 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     private D3D12DeviceSession Device => _device ??= new(new D3D12DiagnosticsOptions(!measure || TexturePressure is not null, true)
     {
         EnableResourceSnapshots = qualifyR09 || SkyMeasurements.Enabled,
+        ObservedPropModel = qualifyR09 && R09IndependentTexturePressure.OrbitRequested ? OrbitDemoPreset.BoulderModel : 0,
+        ObservedPropMaterial = OrbitDemoPreset.BoulderMaterial,
         TextureCopyQualification = TexturePressure?.Qualification,
     }, warp, reuseDirectQueue: true);
     internal D3D12Renderer? Current { get; private set; }
@@ -62,13 +64,12 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
             D3D12Renderer renderer;
             if (OrbitMaterials is { } materials)
             {
-                if (TexturePressure is not null)
-                    throw new InvalidOperationException("R09 independent texture pressure uses Far Horizon without an Orbit material stream.");
                 renderer = D3D12Renderer.CreateWithTexturedSessionVolumeTerrain(window, owner, terrain,
                     terrain.View.RendererEpoch, Device, _colorEvaluator, timing.Shutdown, timing.Shutdown);
-                var stream = materials.CreateStream();
+                var stream = materials.CreateStream(TexturePressure is not null);
                 renderer.AttachTextureHandoff(stream);
                 _materialStream = stream;
+                TexturePressure?.AttachOrbit(renderer, stream, materials);
             }
             else
             {
@@ -80,8 +81,9 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
             if (TexturePressure is { } pressure)
             {
                 if (R09UploadGate?.Twilight is null)
-                    throw new InvalidOperationException("Independent R09 texture pressure requires Far Horizon Direct Twilight.");
-                pressure.Attach(renderer);
+                    throw new InvalidOperationException("Independent R09 texture pressure requires Direct Twilight.");
+                if (OrbitMaterials is null)
+                    pressure.Attach(renderer);
             }
             if (ConstructionVisuals is { } buildings)
                 buildings.Attach(renderer, Props);
@@ -120,27 +122,33 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     internal Task FarAsync(ProceduralGlobe.Geometry globe, Guid world, VolumePublicationInfo near, CancellationToken token) =>
         StartAsync(owner =>
         {
-            if (TexturePressure is { } pressure)
+            if (TexturePressure is { } pressure && OrbitMaterials is null)
             {
-                if (globe.Textured || OrbitMaterials is not null)
-                    throw new InvalidOperationException("R09 fixed-scene copy pressure requires the original untextured Far Horizon geometry.");
+                if (globe.Textured)
+                    throw new InvalidOperationException("R09 Far Horizon copy pressure requires its original untextured geometry.");
                 var farView = new VolumeViewIdentity(checked(near.View.RendererEpoch + 1), 1, PlanetLocalFrame.Create(default));
                 return pressure.AttachFar(window, owner, globe.Meshes, Device,
                     new(world, farView, near.TerrainRevision, 1), timing.Shutdown);
             }
             if (!globe.Textured || OrbitMaterials is not { } materials)
+            {
+                if (TexturePressure is not null)
+                    throw new InvalidOperationException("R09 Orbit Combined requires the textured production globe.");
                 return D3D12Renderer.CreateWithSessionMeshes(window, owner, globe.Meshes, Device,
                     timing.Shutdown, timing.Shutdown);
+            }
 
             var view = new VolumeViewIdentity(checked(near.View.RendererEpoch + 1), 1, PlanetLocalFrame.Create(default));
             var cut = new D3D12TextureView(world, view, near.TerrainRevision, 1);
-            var stream = materials.CreateStream();
+            var stream = materials.CreateStream(TexturePressure is not null);
             _materialStream = stream;
             _orbitalMaterialCut = true;
             QueueMaterialCut(materials, stream, cut);
             var region = new RenderMeshRegion([globe.Meshes.First, globe.Meshes.Second]);
-            return D3D12Renderer.CreateWithSessionTexturedMeshes(window, owner, region, Device, stream, cut,
+            var renderer = D3D12Renderer.CreateWithSessionTexturedMeshes(window, owner, region, Device, stream, cut,
                 timing.Shutdown, timing.Shutdown);
+            TexturePressure?.AttachOrbit(renderer, stream, materials, cut);
+            return renderer;
         }, token);
 
     public void Dispose() => _device?.Dispose();

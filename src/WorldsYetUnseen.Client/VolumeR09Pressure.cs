@@ -187,7 +187,7 @@ internal sealed partial class VolumeExploration
                     (privateWork, prebuild) = R09EarlyPrebuild.Offer(earlyPrebuild, timing);
                 }
 
-                using var recoveryCopy = recoveryPressure is null ? null
+                await using var recoveryCopy = recoveryPressure is null ? null
                     : await recoveryPressure.BeginFarAsync(farRenderer ?? throw new InvalidOperationException("Far Horizon owner unavailable."),
                         token).ConfigureAwait(false);
                 var optionalCopy = recoveryCopy ?? independentCopy;

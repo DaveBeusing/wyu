@@ -49,6 +49,7 @@ internal static partial class GameHost
         var measure = measureSunlight || scripted && (BiomeMeasurements.Enabled || SkyMeasurements.Enabled);
         var measureR09 = scripted && flightSmoke && saveSmoke == "flight" &&
             Environment.GetEnvironmentVariable("WYU_R09_LATENCY") == "1";
+        var orbitPressure = measureR09 && R09IndependentTexturePressure.OrbitRequested;
         using var renderHost = new ProceduralRenderHost(window, useWarp, timing, RuntimeQuota, measure, measureR09)
         {
             ConstructionVisuals = scripted ? null : new ConstructionVisuals(),
@@ -67,7 +68,7 @@ internal static partial class GameHost
             diagnostics?.Enter("WorldSelection");
             await window.InitializeAsync(context, token).ConfigureAwait(false);
             await window.StartAsync(token).ConfigureAwait(false);
-            if ((measureSunlight || orbitSmoke && OrbitPbrMeasurements.Enabled || SkyMeasurements.Enabled && !SkyMeasurements.Smoke) &&
+            if ((orbitPressure || measureSunlight || orbitSmoke && OrbitPbrMeasurements.Enabled || SkyMeasurements.Enabled && !SkyMeasurements.Smoke) &&
                 !AlphaWindowSize.TryApply((1920, 1080)))
                 throw new InvalidOperationException("The renderer probe requires a 1920x1080 client area.");
             watchClose = WatchWindowCloseAsync(window, stage);
@@ -163,7 +164,11 @@ internal static partial class GameHost
             };
             var propsSmoke = scripted && (orbitDemo || Environment.GetEnvironmentVariable("WYU_WP16_SMOKE") == "1");
             if (planet is not null && (propsSmoke || !scripted && Environment.GetEnvironmentVariable("WYU_WP16") != "off"))
-                exploration.Props = renderHost.Props = new ReferenceProps(planet, orbitDemo && OrbitDemoPreset.BoulderEnabled);
+                exploration.Props = renderHost.Props = new ReferenceProps(planet,
+                    orbitDemo && OrbitDemoPreset.BoulderEnabled, observeBoulder: orbitPressure);
+            if (orbitPressure && (!orbitDemo || !renderHost.BuildsOrbitalMaterials || exploration.Props is null ||
+                !ReferenceSunlight.OrbitEnabled))
+                throw new InvalidOperationException("Orbit Combined pressure requires Orbit PBR maps, boulder props and shadows.");
             if (planet is not null && (!scripted || BiomeMeasurements.UseBiomes || propsSmoke))
                 renderHost.SetBiomes(new ReferenceBiomes(planet));
             if (measureR09)

@@ -86,6 +86,7 @@ internal sealed partial class VolumeExploration
         var recoveryAtHandoff = MeasureR09 && scripted &&
             Environment.GetEnvironmentVariable("WYU_R09_RECOVERY_AT_HANDOFF") == "1";
         var orbitSkyChecked = false;
+        var orbitPressurePrepared = false;
         var previousPhase = flight.Phase;
         using var returnCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
         FlightReturnTerrain? returnTerrain = null;
@@ -294,6 +295,15 @@ internal sealed partial class VolumeExploration
                     await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token,
                         pauseWhileMinimized: true).ConfigureAwait(false);
                 var orbitReceipt = orbitSubmit != 0 ? Stopwatch.GetTimestamp() : 0;
+                if (far && !orbitPressurePrepared && MeasureR09 && renderHost.TexturePressure is not null &&
+                    R09IndependentTexturePressure.OrbitRequested)
+                {
+                    if (!texturedOrbit)
+                        throw new InvalidOperationException("Orbit Combined pressure requires a textured orbit frame.");
+                    await PrepareOrbitPressureMaterialsAsync(renderer, null,
+                        next => renderer.TrySubmit(orbit with { Sequence = next }), token).ConfigureAwait(false);
+                    orbitPressurePrepared = true;
+                }
                 if (SkyMeasurements.Enabled && far && !orbitSkyChecked && flight.Phase == ProceduralFlightPhase.Orbit)
                 {
                     orbitSkyChecked = true;

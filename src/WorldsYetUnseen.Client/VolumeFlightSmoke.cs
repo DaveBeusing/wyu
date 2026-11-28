@@ -1,4 +1,6 @@
+using System.Numerics;
 using Groundwork.Core;
+using Groundwork.Rendering.D3D12;
 using Groundwork.Persistence;
 using Groundwork.Voxels;
 using WorldsYetUnseen.Gameplay;
@@ -22,6 +24,44 @@ internal sealed partial class VolumeExploration
         }
         if (ExhaustTerrainRetry is not null && !_retryExhausted)
             throw new InvalidOperationException("The selected path did not exhaust its host retries.");
+    }
+
+    private async Task ObserveStockBoulderAfterFlightAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer,
+        PlanetWalkState player, CancellationToken token)
+    {
+        var materialHost = OrbitMaterialHost ?? throw new InvalidOperationException("Orbit Boulder evidence requires the production material host.");
+        var props = Props ?? throw new InvalidOperationException("Orbit Boulder evidence requires the production prop stream.");
+        var camera = Camera(_published.View, player.Position, player.Heading);
+        using var lease = terrain.TryRead() ?? throw new InvalidOperationException("No landed terrain for the Orbit Boulder checkpoint.");
+        if (lease.Info != _published)
+            throw new InvalidOperationException("Orbit Boulder checkpoint must use the published landed terrain.");
+
+        // This extra presentation runs only after the measured flight and does not move the avatar
+        // or add any object. Look at an accepted, unoccluded placement in the stock scene.
+        for (var attempt = 0; attempt < OrbitTerrainMaterials.MaximumPreparationFrames; attempt++)
+        {
+            props.Pump();
+            var view = camera;
+            var stockTargetSelected = props.TryFindVisibleBoulder(lease, camera.Position, out var target);
+            if (stockTargetSelected)
+            {
+                var offset = Subtract(target, camera.Position);
+                var forward = Vector3.Normalize(new((float)offset.X, (float)offset.Y, (float)offset.Z));
+                view = ApplyNearEnvironment(camera with { Forward = forward }, _environmentTick, 0);
+            }
+            var sequence = ++_sequence;
+            materialHost.RetryMaterials(renderer, sequence);
+            var mapsResidentBefore = materialHost.MaterialsResident(renderer, _published.View);
+            RequireFrame(renderer.TrySubmitVolumeCamera(_published.Generation, sequence, view));
+            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+            await WaitAsync(renderer, () => renderer.TryReadResourceDiagnostics(out var retired) &&
+                retired.FrameSequence == sequence && retired.RetiredPresentSequence == sequence, token).ConfigureAwait(false);
+            if (stockTargetSelected && mapsResidentBefore && materialHost.MaterialsResident(renderer, _published.View) &&
+                renderer.TryReadResourceDiagnostics(out var gpu) &&
+                R09TwilightPressure.TryWriteBoulderDraw(gpu, _published.View.RendererEpoch, sequence))
+                return;
+        }
+        throw new InvalidOperationException("Orbit Combined did not draw a visible stock Boulder at the landed checkpoint.");
     }
 
     private async Task RunFlightRouteAsync(VolumeStreamingCoordinator terrain, ProceduralRenderHost renderHost,
@@ -101,6 +141,8 @@ internal sealed partial class VolumeExploration
             }
             player = flight.Player;
             RequireSmokeSave(await SaveAsync(terrain, token).ConfigureAwait(false), 2);
+            if (MeasureR09 && R09IndependentTexturePressure.OrbitRequested)
+                await ObserveStockBoulderAfterFlightAsync(terrain, renderHost.Active, player, token).ConfigureAwait(false);
         }
         if (phase == "preflight")
         {

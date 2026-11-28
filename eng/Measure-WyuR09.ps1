@@ -8,6 +8,7 @@ param(
     [ValidateSet('Normal','Retry')][string[]]$Cohort = @('Normal','Retry'),
     [ValidateSet('Overlap','AtHandoff')][string]$RecoveryMode = 'Overlap',
     [switch]$TwilightPressure,
+    [ValidateSet('far-horizon','orbit-combined')][string]$PressureComposition = 'far-horizon',
     [switch]$IndependentTextureCopy,
     [switch]$DiagnosticR09Installer,
     [switch]$RequireEarlyColdFallback,
@@ -16,7 +17,10 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-if ($IndependentTextureCopy -and !$TwilightPressure) { throw 'Independent texture copy pressure requires the Far Horizon Twilight fixture.' }
+if ($IndependentTextureCopy -and !$TwilightPressure) { throw 'Independent texture copy pressure requires Twilight pressure.' }
+if ($PressureComposition -ceq 'orbit-combined' -and (!$TwilightPressure -or !$IndependentTextureCopy)) {
+    throw 'Orbit Combined requires both Twilight pressure and an independent native copy.'
+}
 if ($DiagnosticR09Installer -and (!$TwilightPressure -or !$IndependentTextureCopy)) {
     throw 'The R09 diagnostic installer requires both Twilight and independent texture copy pressure.'
 }
@@ -59,7 +63,7 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
     foreach ($name in 'WYU_R09_RECOVERY_AT_HANDOFF','WYU_R09_TEST_FORCE_PREFETCH_MISS','WYU_R09_TEST_FORCE_RECOVERY_COLD',
         'WYU_R09_TEST_FORCE_RECOVERY_MESH_REBUILD',
         'WYU_R09_TWILIGHT_PRESSURE','WYU_R09_INDEPENDENT_TEXTURE_COPY','WYU_PACKAGE_G_MEASURE','WYU_SKY_MEASURE_SMOKE','WYU_SKY_MEASURE_PHASES',
-        'WYU_SKY_DIAGNOSTICS','WYU_ORBIT_DEMO_SMOKE','WYU_ORBIT_PBR_MEASURE','WYU_DAWN_SMOKE',
+        'WYU_SKY_DIAGNOSTICS','WYU_ORBIT_DEMO_SMOKE','WYU_ORBIT_PBR','WYU_ORBIT_BOULDER','WYU_ORBIT_PBR_MEASURE','WYU_DAWN_SMOKE',
         'WYU_HOST_RETRY_SMOKE','WYU_WP13_MEASURE','WYU_PACKAGE_G','WYU_PACKAGE_G_SMOKE',
         'WYU_WP16','WYU_WP16_SMOKE','WYU_WP15','WYU_WP15_PROBE','WYU_WP15_FLIP','WYU_PACKAGE_E',
         'WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_WALK','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
@@ -72,12 +76,20 @@ function Invoke-Measurement([string]$Executable, [string]$Slot, [string]$Mode, [
     }
     $start.Environment['WYU_R09_LATENCY'] = '1'
     if ($TwilightPressure) {
-        $start.Environment['WYU_R09_TWILIGHT_PRESSURE'] = 'far-horizon'
+        $start.Environment['WYU_R09_TWILIGHT_PRESSURE'] = $PressureComposition
         $start.Environment['GROUNDWORK_TWILIGHT_PREVIEW'] = '1'
         $start.Environment['WYU_PACKAGE_G'] = 'on'
         $start.Environment['WYU_PACKAGE_E'] = 'on'
-        $start.Environment['WYU_WP15'] = 'off'
-        $start.Environment['WYU_WP16_SMOKE'] = '0'
+        if ($PressureComposition -ceq 'orbit-combined') {
+            $start.Environment['WYU_ORBIT_DEMO_SMOKE'] = '1'
+            $start.Environment['WYU_ORBIT_PBR'] = 'on'
+            $start.Environment['WYU_ORBIT_BOULDER'] = 'on'
+            $start.Environment['WYU_WP15'] = 'on'
+            $start.Environment['WYU_WP16_SMOKE'] = '1'
+        } else {
+            $start.Environment['WYU_WP15'] = 'off'
+            $start.Environment['WYU_WP16_SMOKE'] = '0'
+        }
     }
     if ($IndependentTextureCopy) { $start.Environment['WYU_R09_INDEPENDENT_TEXTURE_COPY'] = '1' }
     if ($RecoveryMode -eq 'AtHandoff') { $start.Environment['WYU_R09_RECOVERY_AT_HANDOFF'] = '1' }
@@ -329,6 +341,7 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $twilightDraws = @{}
     $textureCopies = @{}
     $recoveryCopy = $null
+    $boulderDraw = $null
     $recoveryCpu = $null
     $pressure = @{}
     $resourceSamples = @{}
@@ -537,16 +550,46 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
                 RetiredObservationQpc=$retired; HeldCompletedFence=$heldFence; RetiredCompletedFence=$retiredFence
                 TextureRetainedBytes=$textureBytes; StagingRetainedBytes=$stagingBytes; OverlapMs=$null; ReleaseToRetiredMs=$null
             }
-        } elseif ($line -cmatch '^WYU R09 TWILIGHT (Movement|FirstEdit|Recovery) (far-horizon) (wyu\.far-horizon\.atmosphere\.v2) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) (2)$') {
+        } elseif ($line -cmatch '^WYU R09 TWILIGHT (Movement|FirstEdit|Recovery) (far-horizon|orbit-combined) (wyu\.far-horizon\.atmosphere\.v2) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) (2)$') {
             $path = $Matches[1]
             $epoch,$mask,$drawFence,$presentFence,$resourceUses = 4..8 | ForEach-Object { [uint64]$Matches[$_] }
-            if (!$TwilightPressure -or $twilightDraws.ContainsKey($path) -or !$epoch -or !$mask -or
+            if (!$TwilightPressure -or $Matches[2] -cne $PressureComposition -or
+                $twilightDraws.ContainsKey($path) -or !$epoch -or !$mask -or
                 !$drawFence -or $drawFence -ge $presentFence) {
                 throw "Invalid native Direct Twilight draw for $path."
             }
             $twilightDraws[$path] = [pscustomobject]@{
                 Composition=$Matches[2]; Profile=$Matches[3]; Epoch=$epoch; MaskSequence=$mask
                 DrawFence=$drawFence; PresentFence=$presentFence; SkyResourceUses=$resourceUses
+            }
+        } elseif ($line -cmatch '^WYU R09 ORBITMATERIALS (near|far) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-2]) ([01])$') {
+            if ($PressureComposition -cne 'orbit-combined' -or [uint64]$Matches[2] -eq 0 -or
+                [uint64]$Matches[3] -eq 0 -or [uint64]$Matches[3] -ge [uint64]$Matches[4] -or
+                [uint64]$Matches[5] -lt 10 -or ($Matches[1] -ceq 'far' -and $Matches[7] -ne '0')) {
+                throw 'Invalid retired Orbit production terrain/material frame evidence.'
+            }
+        } elseif ($line -cmatch '^WYU R09 BOULDER boulder_01 landed-stock-los ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) (2) (2) ([01]) ([0-9]+) ([0-9]+) ([0-9]+) ([A-F0-9]{64}) (1[0-2]) ([0-2]) maps-resident$') {
+            $epoch,$frame,$draw,$present,$completed,$model,$material,$lod,$indices,$draws,$instances =
+                1..11 | ForEach-Object { [uint64]$Matches[$_] }
+            $digest = $Matches[12]
+            $terrainUses = [uint64]$Matches[13]
+            $observedShadowMaps = [uint64]$Matches[14]
+            $expected = if ($lod -eq 0) {
+                @{ Indices=7488; Sha256='C44605FCE6FAD2F71C8096763AD6222FE40F82E31AEB23EDF88210D185B8F948' }
+            } else {
+                @{ Indices=1488; Sha256='AB9C68D6097C319B8BA103C6F20BDEA9766D06D6AD169CE6450F1528A4033192' }
+            }
+            if ($PressureComposition -cne 'orbit-combined' -or $null -ne $boulderDraw -or !$epoch -or !$frame -or
+                !$draw -or $draw -ge $present -or $present -gt $completed -or
+                $indices -ne $expected.Indices -or $digest -cne $expected.Sha256 -or !$draws -or $draws -gt $instances -or
+                $terrainUses -lt (10 + $observedShadowMaps)) {
+                throw 'Invalid retired Orbit Boulder indexed draw evidence.'
+            }
+            $boulderDraw = [pscustomobject]@{
+                Cohort=$Mode; Run=$Sample; Warmup=$Sample -eq 0; Asset='boulder_01'; Checkpoint='landed-stock-los'; Epoch=$epoch; Frame=$frame
+                DrawFence=$draw; PresentFence=$present; CompletedFence=$completed
+                Model=$model; Material=$material; Lod=$lod; IndicesPerInstance=$indices; Draws=$draws; Instances=$instances
+                MeshSha256=$digest; TerrainResourceUses=$terrainUses; ObservedShadowMaps=$observedShadowMaps; MapsResident=$true
             }
         } elseif ($line.StartsWith('WYU R09 ', [StringComparison]::Ordinal)) {
             throw "Malformed R09 record: $line"
@@ -557,6 +600,21 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
     $brickTimingRows = [Collections.Generic.List[object]]::new()
     $brickOverlap = [Collections.Generic.List[object]]::new()
     $meshOverlap = [Collections.Generic.List[object]]::new()
+    if ($PressureComposition -ceq 'orbit-combined') {
+        $materialLines = @($Lines -cmatch '^WYU R09 ORBITMATERIALS ')
+        $nearMaterials = @($materialLines -cmatch '^WYU R09 ORBITMATERIALS near ')
+        $farMaterials = @($materialLines -cmatch '^WYU R09 ORBITMATERIALS far ')
+        if ($nearMaterials.Count -ne 2 -or $farMaterials.Count -ne 1) {
+            throw 'Missing exact native Orbit terrain predecessors for Movement, FirstEdit or Recovery.'
+        }
+        $recoveryIdentity = $identities['Recovery']
+        $recoveryMask = $twilightDraws['Recovery']
+        if ($null -eq $boulderDraw -or $null -eq $recoveryIdentity -or $null -eq $recoveryMask -or
+            $boulderDraw.Epoch -ne $recoveryIdentity.Epoch -or $boulderDraw.Epoch -ne $recoveryMask.Epoch -or
+            $boulderDraw.Frame -le $recoveryIdentity.Frame -or $boulderDraw.PresentFence -le $recoveryMask.PresentFence) {
+            throw 'Missing a retired native draw of the installed Orbit Boulder after Recovery on the same near renderer.'
+        }
+    }
     $generations = [Collections.Generic.HashSet[uint64]]::new()
     foreach ($identity in $identities.Values) {
         if ($TwilightPressure -and $twilightDraws[$identity.Path]?.Epoch -ne $identity.Epoch) {
@@ -771,6 +829,23 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
             throw 'Missing or mismatched Recovery speculative pressure through the consuming BeginTick.'
         }
         $far = $recoveryCopy.Far
+        $orbitMaterial = $null
+        if ($PressureComposition -ceq 'orbit-combined') {
+            $orbitMaterial = $far.OrbitMaterial
+            if ($null -eq $orbitMaterial) { throw 'Missing held native Orbit Recovery material predecessor.' }
+            foreach ($field in 'Epoch','Frame','DrawFence','PresentFence','CopyFence','ResourceUses') {
+                if (($orbitMaterial.$field -isnot [int] -and $orbitMaterial.$field -isnot [long]) -or
+                    $orbitMaterial.$field -le 0) {
+                    throw "Invalid held Orbit Recovery material field $field."
+                }
+            }
+            if ($orbitMaterial.Epoch -ne $far.FarEpoch -or $orbitMaterial.Frame -ne $far.FarFrame -or
+                $orbitMaterial.DrawFence -ge $orbitMaterial.PresentFence -or
+                $orbitMaterial.PresentFence -ne $far.FarPresentFence -or $orbitMaterial.CopyFence -ne $far.CopyFence -or
+                $orbitMaterial.ResourceUses -lt 10) {
+                throw 'Held native Orbit material predecessor does not match the Recovery copy.'
+            }
+        }
         foreach ($field in 'FarEpoch','FarFrame','FarPresentFence','FarPresentQpc','Ticket','CopyFence','WaitQueuedQpc',
             'SubmittedQpc','WorkerStartQpc','WorkerEndQpc','ReleasedQpc','RetiredObservationQpc','HeldCompletedFence',
             'RetiredCompletedFence','TextureRetainedBytes','StagingRetainedBytes') {
@@ -804,6 +879,8 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
         $recoveryCopy = [pscustomobject]([ordered]@{
             Cohort=$Mode; Run=$Sample; Warmup=($Sample -eq 0); Schedule=$RecoveryMode
             FarEpoch=$far.FarEpoch; FarFrame=$far.FarFrame; FarPresentFence=$far.FarPresentFence; FarPresentQpc=$far.FarPresentQpc
+            OrbitFarTerrainDrawFence=if ($orbitMaterial) { $orbitMaterial.DrawFence }
+            OrbitFarTerrainResourceUses=if ($orbitMaterial) { $orbitMaterial.ResourceUses }
             Ticket=$far.Ticket; CopyFence=$far.CopyFence; WaitQueuedQpc=$far.WaitQueuedQpc; SubmittedQpc=$far.SubmittedQpc
             WorkerStartQpc=$far.WorkerStartQpc; WorkerEndQpc=$far.WorkerEndQpc; ReleasedQpc=$far.ReleasedQpc
             RetiredObservationQpc=$far.RetiredObservationQpc; HeldCompletedFence=$far.HeldCompletedFence
@@ -828,6 +905,7 @@ function Read-Measurements([string[]]$Lines, [string]$Mode, [int]$Sample) {
         ResourceSamples = $resourceSamples.Values; GpuOwners = $gpuOwners.Values; ResourcePeaks = $resourcePeaks
         TextureCopies = $textureCopies.Values
         RecoveryCopy = $recoveryCopy
+        BoulderDraw = $boulderDraw
     }
 }
 
@@ -858,6 +936,7 @@ $meshOverlap = [Collections.Generic.List[object]]::new()
 $reuseRows = [Collections.Generic.List[object]]::new()
 $textureCopyRows = [Collections.Generic.List[object]]::new()
 $recoveryCopyRows = [Collections.Generic.List[object]]::new()
+$boulderDrawRows = [Collections.Generic.List[object]]::new()
 $work = $null
 try {
     $manifestFile = (Get-Item -LiteralPath $ManifestPath).FullName
@@ -892,7 +971,8 @@ try {
         OS = [Environment]::OSVersion.VersionString; LogicalProcessors = [Environment]::ProcessorCount
         Adapter = $Adapter; Cohorts = $Cohort; SamplesPerCohort = $Samples; WarmupsPerCohort = 1
         TwilightPressure = [bool]$TwilightPressure
-        IndependentGpuCopyPressure = $false
+        PressureComposition = if ($TwilightPressure) { $PressureComposition }
+        IndependentGpuCopyPressure = [bool]$IndependentTextureCopy
         IndependentGpuCopyPaths = if ($IndependentTextureCopy) { @('Movement','FirstEdit','Recovery') } else { @() }
         RecoveryNativeCopySchedule = if ($IndependentTextureCopy) { 'Early or boundary trigger; protected execution and far copy retirement finish before further work on the far queue' }
         DiagnosticR09Installer = [bool]$DiagnosticR09Installer
@@ -965,6 +1045,7 @@ try {
             foreach ($record in $run.Reuse) { $reuseRows.Add($record) }
             foreach ($record in $run.TextureCopies) { $textureCopyRows.Add($record) }
             if ($run.RecoveryCopy) { $recoveryCopyRows.Add($run.RecoveryCopy) }
+            if ($run.BoulderDraw) { $boulderDrawRows.Add($run.BoulderDraw) }
             Write-Host "$label passed."
         }
     }
@@ -1011,6 +1092,9 @@ try {
         if ($IndependentTextureCopy) {
             $textureCopyRows | Sort-Object Cohort,Run,Path | Export-Csv -LiteralPath (Join-Path $out 'independent-texture-copy.csv') -NoTypeInformation
             $recoveryCopyRows | Sort-Object Cohort,Run | Export-Csv -LiteralPath (Join-Path $out 'recovery-independent-texture-copy.csv') -NoTypeInformation
+        }
+        if ($PressureComposition -ceq 'orbit-combined') {
+            $boulderDrawRows | Sort-Object Cohort,Run | Export-Csv -LiteralPath (Join-Path $out 'orbit-boulder-draws.csv') -NoTypeInformation
         }
         $evidence = Get-ChildItem -LiteralPath $out -File
         Compress-Archive -LiteralPath $evidence.FullName -DestinationPath "$out.zip"

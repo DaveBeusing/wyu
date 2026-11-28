@@ -583,6 +583,31 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
         }
     }
 
+    private async Task PrepareOrbitPressureMaterialsAsync(D3D12Renderer renderer, VolumeViewIdentity? nearView,
+        Func<ulong, RenderSubmissionResult> submit, CancellationToken token)
+    {
+        var host = OrbitMaterialHost ?? throw new InvalidOperationException("Orbit pressure material host is unavailable.");
+        for (var attempt = 0; attempt < OrbitTerrainMaterials.MaximumPreparationFrames; attempt++)
+        {
+            var ready = host.MaterialsResident(renderer, nearView) &&
+                renderer.ReadTextureDiagnostics() is { UploadedBytes: > 0, StagingBytes: 0 };
+            var sequence = ++_sequence;
+            host.RetryMaterials(renderer, sequence);
+            Props?.Pump();
+            RequireFrame(submit(sequence));
+            await WaitAsync(renderer, () => renderer.Read().LastPresentedSequence >= sequence, token).ConfigureAwait(false);
+            if (ready && host.MaterialsResident(renderer, nearView))
+            {
+                await WaitAsync(renderer, () => renderer.TryReadResourceDiagnostics(out var retired) &&
+                    retired.FrameSequence == sequence && retired.RetiredPresentSequence == sequence, token).ConfigureAwait(false);
+                if (R09TwilightPressure.TryWriteOrbitMaterialFrame(renderer, sequence, nearView.HasValue,
+                    nearView.HasValue && Props?.Read() is { Draws: > 0, Instances: > 0 }))
+                    return;
+            }
+        }
+        throw new InvalidOperationException("Orbit Combined pressure could not present with all production maps resident.");
+    }
+
     private async Task<TerrainPublicationOutcome> LoadAsync(VolumeStreamingCoordinator terrain, D3D12Renderer renderer, PlanetVector position,
         PlanetVector heading, PlanetLocalFrame frame, CancellationToken token, VolumeBrushIntent? edit = null,
         PlanetVector? coverageCenter = null, PlanetVector? flightCamera = null, int supportCells = 8,
@@ -596,7 +621,14 @@ internal sealed partial class VolumeExploration(WorldSafetyPorts world, Referenc
             recovery ? VolumeWorkClass.Recovery : VolumeWorkClass.Movement, started);
         using var retained = timing is null ? null : terrain.TryRead()
             ?? throw new InvalidOperationException("R09 requires the previous terrain generation.");
-        using var independentCopy = timing?.Path is VolumeWorkClass.Movement or VolumeWorkClass.FirstEdit &&
+        if (timing?.Path is VolumeWorkClass.Movement or VolumeWorkClass.FirstEdit && R09IndependentTexturePressure.OrbitRequested)
+        {
+            var prior = retained!.Info;
+            var heldCamera = Camera(prior.View, position, heading);
+            await PrepareOrbitPressureMaterialsAsync(renderer, prior.View,
+                next => renderer.TrySubmitVolumeCamera(prior.Generation, next, heldCamera), token).ConfigureAwait(false);
+        }
+        await using var independentCopy = timing?.Path is VolumeWorkClass.Movement or VolumeWorkClass.FirstEdit &&
             R09RenderHost?.TexturePressure is { } texturePressure
             ? await texturePressure.BeginAsync(renderer, terrain.WorldIdentity, retained!.Info, token).ConfigureAwait(false)
             : null;

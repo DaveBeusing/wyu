@@ -29,6 +29,8 @@ internal sealed class OrbitTerrainMaterials
     private readonly MaterialPalette _palette;
     private readonly D3D12TextureTarget[] _targets;
     private readonly CookedTexture[] _maps;
+    private MaterialPalette? _pressurePalette;
+    private D3D12TextureTarget[]? _pressureTargets;
 
     private OrbitTerrainMaterials(MaterialPalette palette, D3D12TextureTarget[] targets, CookedTexture[] maps)
     {
@@ -89,13 +91,46 @@ internal sealed class OrbitTerrainMaterials
         }
     }
 
-    internal D3D12TextureHandoff CreateStream()
+    internal D3D12TextureHandoff CreateStream(bool pressure = false)
     {
         // The render owner admits one copy at a time. Keep one extra slot for
         // a superseded cut's copy while its fence retires.
         var slots = _targets.Length + 1;
-        return new(new(_targets.Length, slots, slots * MaximumCookedBytes, 0, slots * MaximumCookedBytes,
-            slots * NativeBytesPerMap, slots * NativeBytesPerMap + MaterialConstantsHeadroom, slots));
+        _pressurePalette = null;
+        _pressureTargets = null;
+        if (!pressure)
+            return new(new(_targets.Length, slots, slots * MaximumCookedBytes, 0, slots * MaximumCookedBytes,
+                slots * NativeBytesPerMap, slots * NativeBytesPerMap + MaterialConstantsHeadroom, slots));
+
+        var extra = R09IndependentTexturePressure.Credit;
+        return new(new(_targets.Length + 1, slots + 1, slots * MaximumCookedBytes + extra.SourceBytes,
+            extra.ScratchBytes, slots * MaximumCookedBytes + extra.PayloadBytes,
+            slots * NativeBytesPerMap + extra.StagingBytes,
+            slots * NativeBytesPerMap + MaterialConstantsHeadroom + extra.NativeBytes, slots + 1));
+    }
+
+    internal bool PublishPressureTarget(D3D12TextureHandoff stream, D3D12TextureView view, D3D12TextureTarget? target)
+    {
+        // Preserve every production entry and its existing texture target sequence.
+        // The pressure ID does not occur in the Orbit terrain geometry.
+        var revision = checked((_pressurePalette?.VisualRevision ?? _palette.VisualRevision) + 1);
+        var entries = _palette.Entries.ToArray();
+        var targets = _targets;
+        if (target is { } extra)
+        {
+            if (extra.Slot.Material != ushort.MaxValue || entries.Any(entry => entry.MaterialId == extra.Slot.Material))
+                throw new InvalidOperationException("The Orbit pressure copy must use its reserved material ID.");
+            var descriptor = new PbrMaterialDescriptor(Vector3.Zero, 0, 1, 1, Vector3.Zero, 0,
+                new MaterialTextureSet(baseColor: extra.Reference));
+            entries = [..entries, new(extra.Slot.Material, descriptor)];
+            targets = [.._targets, extra];
+        }
+        var palette = new MaterialPalette(revision, entries);
+        if (!stream.PublishTerrainAppearance(view, palette, targets))
+            return false;
+        _pressurePalette = palette;
+        _pressureTargets = targets;
+        return true;
     }
 
     // The decoded maps and target sequences remain fixed for this session.
@@ -115,7 +150,7 @@ internal sealed class OrbitTerrainMaterials
 
     internal Scheduling Publish(D3D12TextureHandoff stream, D3D12TextureView view, bool orbital)
     {
-        if (!stream.PublishTerrainAppearance(view, _palette, _targets))
+        if (!stream.PublishTerrainAppearance(view, _pressurePalette ?? _palette, _pressureTargets ?? _targets))
             return Scheduling.Stopped;
         // Coarse backing comes first on both renderers. The fixed orbit proxy
         // stays coarse, while the walking renderer promotes each resident map.
