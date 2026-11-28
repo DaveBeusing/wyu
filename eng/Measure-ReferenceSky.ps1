@@ -19,7 +19,8 @@ param(
     [switch]$LookupPrototype,
     [switch]$FullLookupSeries,
     [switch]$ReuseLookupResources,
-    [switch]$GpuPassBreakdown
+    [switch]$GpuPassBreakdown,
+    [switch]$NativePresentTrace
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,6 +32,9 @@ if ($FullLookupSeries -and ($Smoke -or $DiagnosticProbe -or $GpuSchedulingTrace)
 if ($FullLookupSeries) { $LookupPrototype = $true }
 if ($GpuSchedulingTrace -and -not $DiagnosticProbe) { throw 'GpuSchedulingTrace requires DiagnosticProbe; it is diagnostic evidence only.' }
 if ($GpuPassBreakdown -and -not $DiagnosticProbe) { throw 'GpuPassBreakdown requires DiagnosticProbe.' }
+if ($NativePresentTrace -and (-not $DiagnosticProbe -or -not $InstalledAppHost)) {
+    throw 'NativePresentTrace requires DiagnosticProbe and the verified installed AppHost.'
+}
 if ($LookupPrototype -and -not ($DiagnosticProbe -or $Smoke -or $FullLookupSeries)) {
     throw 'LookupPrototype requires DiagnosticProbe or Smoke, or the explicit FullLookupSeries diagnostic mode.'
 }
@@ -125,7 +129,7 @@ $environmentNames = 'WYU_PACKAGE_G_MEASURE','WYU_SKY_MEASURE_SMOKE','WYU_SKY_MEA
     'WYU_WP15_PROBE','WYU_WP16','WYU_WP16_SMOKE','WYU_R09_LATENCY','WYU_HOST_RETRY_SMOKE',
     'WYU_R09_RECOVERY_AT_HANDOFF','WYU_PACKAGE_E_MEASURE','WYU_PACKAGE_E_TIMESTAMP_PAIRS',
     'WYU_SKY_MEASURE_COMPOSITION','WYU_ORBIT_DEMO_SMOKE','WYU_ORBIT_PBR','WYU_ORBIT_BOULDER',
-    'WYU_ORBIT_PBR_MEASURE','WYU_ORBIT_CAPTURE','WYU_WP15_FLIP','WYU_SKY_DIAGNOSTICS',
+    'WYU_ORBIT_PBR_MEASURE','WYU_ORBIT_CAPTURE','WYU_WP15_FLIP','WYU_SKY_DIAGNOSTICS','WYU_NATIVE_PRESENT_TRACE',
     'GROUNDWORK_TWILIGHT_PREVIEW','GROUNDWORK_SKY_LOOKUP_PROTOTYPE','GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES','WYU_SKY_GPU_PASS_BREAKDOWN',
     'GROUNDWORK_SKY_SCATTERING_ATLAS','GROUNDWORK_SKY_ATLAS_PREFILTER','GROUNDWORK_SKY_SPLIT_DRAW'
 $environmentNames += @($inheritedSkyOptions | ForEach-Object Name)
@@ -161,6 +165,7 @@ $hashes = Get-ChildItem -LiteralPath (Split-Path -Parent $client) -Filter '*.dll
     SourceCommit=$sourceCommit; WorkingTreeStatus=$workingTree; RendererSourceCommit=$RendererSourceCommit
     ExpectedClientSha256=$ExpectedClientSha256; ExpectedRendererSha256=$ExpectedRendererSha256
     ExpectedRenderingSha256=$ExpectedRenderingSha256
+    NativePresentTrace=[bool]$NativePresentTrace
     ExecutionHost=$executionHost; InstalledAppHost=$appHost; ExpectedAppHostSha256=$ExpectedAppHostSha256
     BundledCoreClr=$coreClr; ExpectedCoreClrSha256=$ExpectedCoreClrSha256
     Provenance='Independently identified assemblies. Hook binding and recorded hashes do not establish immutable archive approval.'
@@ -549,6 +554,26 @@ function Invoke-Replay([int]$Pair, [int]$Replay, [string]$Mode) {
         }
         $rows = @($lines | Where-Object { $_.StartsWith('PACKAGE G MEASURE ') } |
             ForEach-Object { $_.Substring('PACKAGE G MEASURE '.Length) | ConvertFrom-Json })
+        if ($NativePresentTrace) {
+            $inventory = @($rows | Where-Object kind -CEQ 'native-present-inventory')
+            $present = @($rows | Where-Object kind -CEQ 'native-present')
+            if ($inventory.Count -ne 1 -or $inventory[0].frequency -ne [Diagnostics.Stopwatch]::Frequency -or
+                $inventory[0].dropped -ne 0 -or $inventory[0].retained -ne $present.Count) {
+                throw 'Installed native Present trace has an invalid or incomplete inventory.'
+            }
+            $lifetimes = @($present | Group-Object { $_.present.SwapChainLifetime })
+            if ($lifetimes.Count -ne 3) { throw 'Expected three native swap-chain lifetimes.' }
+            foreach ($lifetime in $lifetimes) {
+                $ordinal = 0
+                foreach ($row in $lifetime.Group) {
+                    $call = $row.present
+                    $ordinal++
+                    if ($call.ProcessId -ne $process.Id -or $call.CallOrdinal -ne $ordinal) {
+                        throw 'Native Present process identity or call order is inconsistent.'
+                    }
+                }
+            }
+        }
         $owners = @($rows | Where-Object kind -CEQ owner)
         if ($owners.Count -ne 3 -or @($owners | Where-Object { $_.mode -cne $Mode -or $_.engineHash -cne $actualRendererHash -or
                 $_.composition -cne $Composition -or [bool]$_.wp15 -ne ($Composition -ceq 'orbit-combined') -or
@@ -703,6 +728,7 @@ try {
     $env:WYU_WP15, $env:WYU_WP16 = 'off','off'
     $env:WYU_SKY_MEASURE_COMPOSITION = $Composition
     $env:WYU_SKY_DIAGNOSTICS = if ($Diagnostics) { '1' } else { '0' }
+    $env:WYU_NATIVE_PRESENT_TRACE = if ($NativePresentTrace) { '1' } else { $null }
     $env:GROUNDWORK_TWILIGHT_PREVIEW = '1'
     $env:GROUNDWORK_SKY_LOOKUP_PROTOTYPE = if ($LookupPrototype) { '1' } else { $null }
     $env:GROUNDWORK_SKY_LOOKUP_REUSE_RESOURCES = if ($ReuseLookupResources) { '1' } else { $null }

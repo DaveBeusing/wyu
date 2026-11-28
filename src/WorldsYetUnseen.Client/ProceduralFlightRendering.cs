@@ -18,12 +18,17 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
     private readonly ProcessResourceBudget _budget = new(new ProcessResourceLimits(1, quota));
     private RuntimeSafetyAuthority? _runtime;
     private D3D12DeviceSession? _device;
+    private D3D12NativePresentTrace? _nativePresentTrace = SkyHandoffDiagnostics.Enabled &&
+        Environment.GetEnvironmentVariable("WYU_NATIVE_PRESENT_TRACE") == "1"
+        ? new D3D12NativePresentTrace()
+        : null;
     private D3D12DeviceSession Device => _device ??= new(new D3D12DiagnosticsOptions(!measure || TexturePressure is not null, true)
     {
         EnableResourceSnapshots = qualifyR09 || SkyMeasurements.Enabled,
         ObservedPropModel = qualifyR09 && R09IndependentTexturePressure.OrbitRequested ? OrbitDemoPreset.BoulderModel : 0,
         ObservedPropMaterial = OrbitDemoPreset.BoulderMaterial,
         TextureCopyQualification = TexturePressure?.Qualification,
+        NativePresentTrace = _nativePresentTrace,
     }, warp, reuseDirectQueue: true);
     internal D3D12Renderer? Current { get; private set; }
     internal Wp11WarpReadback? WarpReadback { get; init; }
@@ -151,7 +156,19 @@ internal sealed class ProceduralRenderHost(WindowsHostModule window, bool warp, 
             return renderer;
         }, token);
 
-    public void Dispose() => _device?.Dispose();
+    public void Dispose()
+    {
+        _device?.Dispose();
+        var trace = Interlocked.Exchange(ref _nativePresentTrace, null);
+        if (trace is null)
+            return;
+
+        var records = trace.Read(out var dropped);
+        SkyMeasurements.Write(new { kind = "native-present-inventory",
+            frequency = D3D12NativePresentTrace.QpcFrequency, retained = records.Length, dropped });
+        foreach (var record in records)
+            SkyMeasurements.Write(new { kind = "native-present", present = record });
+    }
 
     private async Task StartAsync(Func<IRuntimeOwnership, D3D12Renderer> create, CancellationToken token,
         Action? onStarted = null)
